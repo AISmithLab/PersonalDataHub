@@ -216,4 +216,4 @@ Actions are staged for owner review — not executed until approved via the GUI.
 
 ## License
 
-MIT
+Apache 2.0
