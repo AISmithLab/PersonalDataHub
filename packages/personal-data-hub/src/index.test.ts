@@ -186,6 +186,30 @@ describe('PersonalDataHub Plugin', () => {
       expect(registerTool).toHaveBeenCalledTimes(2);
     });
 
+    it('uses environment variables when pluginConfig is missing (ClawHub pattern)', async () => {
+      process.env.PEEKABOO_HUB_URL = 'http://localhost:9999';
+      process.env.PEEKABOO_API_KEY = 'pk_env_test_key';
+
+      const registerTool = vi.fn();
+      const on = vi.fn();
+      const api = {
+        pluginConfig: undefined,
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        registerTool,
+        on,
+      };
+
+      await plugin.register(api);
+
+      expect(registerTool).toHaveBeenCalledTimes(2);
+      expect(api.logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('Configured from environment variables'),
+      );
+
+      delete process.env.PEEKABOO_HUB_URL;
+      delete process.env.PEEKABOO_API_KEY;
+    });
+
     it('warns with missing config when no config is passed (legacy behavior)', async () => {
       // Stub fetch so discoverHub fails
       const mockFetch = vi.fn();

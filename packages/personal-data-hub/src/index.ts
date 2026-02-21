@@ -65,7 +65,17 @@ export default {
   }) {
     let config = api.pluginConfig as PersonalDataHubPluginConfig | undefined;
 
-    // Auto-setup: try to discover hub and create API key if config is incomplete
+    // Check environment variables (ClawHub injects these from skills.entries.peekaboo.env)
+    if (!config?.hubUrl || !config?.apiKey) {
+      const envHubUrl = process.env.PEEKABOO_HUB_URL;
+      const envApiKey = process.env.PEEKABOO_API_KEY;
+      if (envHubUrl && envApiKey) {
+        config = { hubUrl: envHubUrl, apiKey: envApiKey };
+        api.logger.info(`PersonalDataHub: Configured from environment variables (hub: ${envHubUrl})`);
+      }
+    }
+
+    // Auto-setup: try to discover hub and create API key if config is still incomplete
     if (!config?.hubUrl || !config?.apiKey) {
       api.logger.info('PersonalDataHub: Config incomplete, attempting auto-setup...');
 
