@@ -134,7 +134,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
             );
             deps.db.prepare("UPDATE staging SET status = 'committed' WHERE action_id = ?").run(actionId);
             auditLog.logActionCommitted(actionId, action.source as string, result.success ? 'success' : 'failure');
-          } catch (err) {
+          } catch (_err) {
             auditLog.logActionCommitted(actionId, action.source as string, 'failure');
           }
         }

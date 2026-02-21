@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { getDb } from '../db/db.js';
-import { decryptField } from '../db/encryption.js';
 import { parseManifest } from '../manifest/parser.js';
 import { executePipeline } from './engine.js';
 import { createPipelineContext } from './context.js';
