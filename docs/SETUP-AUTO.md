@@ -82,7 +82,9 @@ npx peekaboo init "My AI Agent"
 npx peekaboo start
 ```
 
-This starts the server in the background. Verify it's running:
+This starts the server in the background. The server does **not** auto-start on reboot — run `npx peekaboo start` again after restarting your machine.
+
+Verify it's running:
 
 ```bash
 npx peekaboo status

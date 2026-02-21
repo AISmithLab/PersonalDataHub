@@ -242,7 +242,9 @@ if (isDirectRun) {
       const result = startBackground();
       console.log(`\n  Peekaboo server started in background (PID ${result.pid})`);
       console.log(`  Hub directory: ${result.hubDir}`);
-      console.log(`  GUI: http://localhost:3000\n`);
+      console.log(`  GUI: http://localhost:3000`);
+      console.log('\n  Note: The server does not auto-start on reboot.');
+      console.log('  Run `npx peekaboo start` again after restarting your machine.\n');
     } catch (err) {
       console.error(`Error: ${(err as Error).message}`);
       process.exit(1);
