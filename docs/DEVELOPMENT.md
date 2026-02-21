@@ -47,7 +47,7 @@ peekaboo/
 │   └── gui/
 │       └── routes.ts            # Self-contained HTML GUI with inline JS
 ├── packages/
-│   └── personal-data-hub/       # OpenClaw extension
+│   └── personal-data-hub/       # OpenClaw skill
 │       └── src/
 │           ├── index.ts         # Plugin registration
 │           ├── hub-client.ts    # HTTP client for Peekaboo API
@@ -248,9 +248,9 @@ To run a specific test file:
 npx vitest run src/operators/operators.test.ts
 ```
 
-## OpenClaw Extension
+## OpenClaw Skill
 
-The extension in `packages/personal-data-hub/` is a standalone package with its own `tsconfig.json` and test suite. It wraps the two Peekaboo API endpoints as OpenClaw tools.
+The skill in `packages/personal-data-hub/` is a standalone package with its own `tsconfig.json` and test suite. It wraps the two Peekaboo API endpoints as OpenClaw tools.
 
 To work on it:
 
@@ -259,4 +259,4 @@ cd packages/personal-data-hub
 pnpm test
 ```
 
-The extension has no dependency on the main Peekaboo source — it only talks to the Hub over HTTP.
+The skill has no dependency on the main Peekaboo source — it only talks to the Hub over HTTP.

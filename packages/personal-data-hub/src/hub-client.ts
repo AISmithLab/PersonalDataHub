@@ -1,6 +1,6 @@
 /**
  * Thin HTTP client wrapping the Peekaboo App API endpoints.
- * The extension does not know about manifests or policies — it simply
+ * The skill does not know about manifests or policies — it simply
  * sends requests with a `purpose` string. The Hub resolves the policy internally.
  */
 

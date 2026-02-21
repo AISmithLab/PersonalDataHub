@@ -60,7 +60,7 @@ The install hook bootstraps Peekaboo automatically:
 
 After installation, open `http://localhost:3000` to connect Gmail/GitHub via OAuth.
 
-The extension reads credentials automatically from `~/.peekaboo/credentials.json` — no manual configuration needed.
+Agents read credentials automatically from `~/.peekaboo/credentials.json` — no manual configuration needed.
 
 ## Query Syntax (Gmail)
 

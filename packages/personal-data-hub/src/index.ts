@@ -1,5 +1,5 @@
 /**
- * PersonalDataHub — OpenClaw extension for interacting with Peekaboo.
+ * PersonalDataHub — OpenClaw skill for interacting with Peekaboo.
  *
  * Registers tools that let the agent pull personal data and propose
  * outbound actions through the Peekaboo access control gateway.
@@ -129,7 +129,7 @@ export default {
         '  To set up Peekaboo:\n' +
         '  1. Run: npx peekaboo init\n' +
         '  2. Run: npx peekaboo start\n' +
-        '  3. Restart this extension — it will auto-connect.\n' +
+        '  3. Restart the agent — it will auto-connect.\n' +
         '  Or configure manually: { "hubUrl": "http://localhost:3000", "apiKey": "pk_..." }',
       );
       return;

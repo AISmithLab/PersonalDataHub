@@ -124,7 +124,7 @@ export function init(targetDir?: string, options?: InitOptions): InitResult {
 
   db.close();
 
-  // Write credentials file for auto-discovery by the extension
+  // Write credentials file for auto-discovery by agents
   const hubUrl = `http://localhost:${port}`;
   writeCredentials({ hubUrl, apiKey: rawKey, hubDir: dir });
 
@@ -229,7 +229,7 @@ if (isDirectRun) {
       console.log(`  hub-config.yaml created  ${result.configPath}`);
       console.log(`  Database created         ${result.dbPath}`);
       console.log(`  Credentials saved        ${result.credentialsPath}`);
-      console.log(`\n  API Key (auto-configured for extensions):`);
+      console.log(`\n  API Key (used by agents to call the hub):`);
       console.log(`    ${result.apiKey}\n`);
       console.log('  Next steps:');
       console.log('    1. Start the server:  npx peekaboo start');

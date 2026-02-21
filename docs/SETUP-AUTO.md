@@ -1,10 +1,10 @@
 # Auto Setup (OpenClaw)
 
-How to set up Peekaboo automatically through ClawHub or the OpenClaw extension.
+How to set up Peekaboo automatically through ClawHub or the OpenClaw skill.
 
 ## Overview
 
-Peekaboo can be installed as an OpenClaw skill through [ClawHub](https://theoperatorvault.io/clawhub-guide), the community marketplace for OpenClaw skills. The install hook bootstraps the Peekaboo hub, and the extension auto-discovers it at runtime.
+Peekaboo can be installed as an OpenClaw skill through [ClawHub](https://theoperatorvault.io/clawhub-guide), the community marketplace for OpenClaw skills. The install hook bootstraps the Peekaboo hub, and the skill auto-discovers it at runtime.
 
 ## Option A: Install via ClawHub (Recommended)
 
@@ -25,10 +25,10 @@ This downloads the skill and runs the install hook, which:
 1. Installs dependencies (`pnpm install`)
 2. Builds the project (`pnpm build`)
 3. Runs `npx peekaboo init "OpenClaw Agent"` — generates a master secret, config, database, and API key
-4. Saves credentials to `~/.peekaboo/credentials.json` (auto-read by the extension)
+4. Saves credentials to `~/.peekaboo/credentials.json` (auto-read by agents)
 5. Starts the server in the background (`npx peekaboo start`)
 
-No manual configuration needed — the extension reads credentials automatically.
+No manual configuration needed — agents read credentials automatically.
 
 ### Step 2: Connect Data Sources
 
@@ -96,11 +96,11 @@ npx peekaboo stop     # Stop the background server
 npx peekaboo status   # Check if the server is running
 ```
 
-### Step 3: Install the Extension in OpenClaw
+### Step 3: Install the Skill in OpenClaw
 
-The extension is in `packages/personal-data-hub/`. It reads credentials automatically from `~/.peekaboo/credentials.json` — no manual configuration needed.
+The skill is in `packages/personal-data-hub/`. It reads credentials automatically from `~/.peekaboo/credentials.json` — no manual configuration needed.
 
-If the credentials file doesn't exist, the extension falls back to auto-discovery (probes `localhost:3000` and `localhost:7007`).
+If the credentials file doesn't exist, the skill falls back to auto-discovery (probes `localhost:3000` and `localhost:7007`).
 
 ### Step 4: Connect Data Sources
 
@@ -110,14 +110,14 @@ Open `http://localhost:3000` in your browser. Connect Gmail and GitHub via OAuth
 
 ## How Auto-Setup Works
 
-When the extension starts, it resolves config in this order:
+When the skill starts, it resolves config in this order:
 
 1. **Plugin config** — `hubUrl` + `apiKey` passed directly
 2. **Environment variables** — `PEEKABOO_HUB_URL` + `PEEKABOO_API_KEY`
 3. **Credentials file** — reads `~/.peekaboo/credentials.json` (written by `npx peekaboo init`)
 4. **Auto-discovery** — probes `localhost:3000`, `localhost:7007`, `127.0.0.1:3000`, `127.0.0.1:7007` for a running hub, then creates an API key
 
-If no config is found at any step, the extension logs setup instructions and gracefully degrades (no tools registered).
+If no config is found at any step, the skill logs setup instructions and gracefully degrades (no tools registered).
 
 ## What `npx peekaboo init` Does
 
@@ -128,7 +128,7 @@ The init command creates:
 | `.env` | Contains `PEEKABOO_SECRET=<random 32-byte base64>` — the master encryption key for cached data |
 | `hub-config.yaml` | Minimal config with `sources: {}` and `port: 3000` — sources are configured via the GUI |
 | `peekaboo.db` | SQLite database with all tables initialized (api_keys, manifests, cached_data, staging, audit_log) |
-| `~/.peekaboo/credentials.json` | Credentials for the extension (`hubUrl`, `apiKey`, `hubDir`) — auto-read at startup |
+| `~/.peekaboo/credentials.json` | Credentials (`hubUrl`, `apiKey`, `hubDir`) — auto-read by agents at startup |
 
 It also creates one API key and prints it to the console.
 

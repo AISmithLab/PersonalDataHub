@@ -148,9 +148,9 @@ Authorization: Bearer pk_xxx
 
 ## Step 7: Connect Your AI Agent
 
-### OpenClaw Extension
+### OpenClaw Skill
 
-If you're using OpenClaw, install the PersonalDataHub extension from `packages/personal-data-hub/`:
+If you're using OpenClaw, install the PersonalDataHub skill from `packages/personal-data-hub/`:
 
 ```json
 {

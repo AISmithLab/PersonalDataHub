@@ -1,7 +1,7 @@
 /**
  * Hub discovery and auto-setup utilities.
  *
- * Used by the extension to detect a running Peekaboo hub and create
+ * Used by the skill to detect a running Peekaboo hub and create
  * an API key for itself. All communication is over HTTP — no dependency
  * on the main Peekaboo source.
  */
