@@ -1,0 +1,21 @@
+{
+  "name": "@openclaw/personal-data-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenClaw extension for interacting with Peekaboo personal data hub",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vitest": "^4.0.18",
+    "@sinclair/typebox": "^0.34.33"
+  },
+  "openclaw": {
+    "extensions": ["./dist/index.js"]
+  }
+}
