@@ -16,7 +16,9 @@
     "node": ">=22"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.0",
+    "better-sqlite3": "^12.6.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.0",
     "vitest": "^4.0.18"
@@ -24,5 +26,8 @@
   "dependencies": {
     "yaml": "^2.8.2",
     "zod": "^4.3.6"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]
   }
 }
