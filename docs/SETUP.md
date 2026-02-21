@@ -1,12 +1,10 @@
-# Auto Setup (OpenClaw)
+# Setup
 
-How to set up Peekaboo automatically through ClawHub or the OpenClaw skill.
-
-## Overview
-
-Peekaboo can be installed as an OpenClaw skill through [ClawHub](https://theoperatorvault.io/clawhub-guide), the community marketplace for OpenClaw skills. The install hook bootstraps the Peekaboo hub, and the skill auto-discovers it at runtime.
+How to install and run Peekaboo.
 
 ## Option A: Install via ClawHub (Recommended)
+
+Install Peekaboo as an [OpenClaw](https://theoperatorvault.io) skill through [ClawHub](https://theoperatorvault.io/clawhub-guide), the community marketplace for OpenClaw skills.
 
 ### Prerequisites
 
@@ -57,7 +55,12 @@ clawhub update personaldatahub
 
 ## Option B: Install from Source
 
-If you prefer to install directly from the repository instead of ClawHub.
+Install directly from the repository. Works with or without OpenClaw.
+
+### Prerequisites
+
+- **Node.js >= 22** — check with `node --version`
+- **pnpm** — install with `npm install -g pnpm`
 
 ### Step 1: Clone and Bootstrap
 
@@ -70,11 +73,7 @@ npx peekaboo init
 
 This generates a master secret, config, database, API key, and saves credentials to `~/.peekaboo/credentials.json`.
 
-You can pass a custom app name:
 
-```bash
-npx peekaboo init "My AI Agent"
-```
 
 ### Step 2: Start the Server
 
@@ -100,13 +99,103 @@ npx peekaboo status   # Check if the server is running
 
 ### Step 3: Install the Skill in OpenClaw
 
-The skill is in `packages/personal-data-hub/`. It reads credentials automatically from `~/.peekaboo/credentials.json` — no manual configuration needed.
+The skill is in `packages/personal-data-hub/`. To make OpenClaw discover it, either:
 
-If the credentials file doesn't exist, the skill falls back to auto-discovery (probes `localhost:3000` and `localhost:7007`).
+**Option 1: Symlink into OpenClaw's skills directory**
+
+```bash
+ln -s /path/to/peekaboo/packages/personal-data-hub ~/.openclaw/skills/personal-data-hub
+```
+
+**Option 2: Add to OpenClaw config**
+
+Add the skill path to your OpenClaw configuration file (e.g., `~/.openclaw/config.yaml`):
+
+```yaml
+skills:
+  - path: /path/to/peekaboo/packages/personal-data-hub
+```
+
+The skill reads credentials automatically from `~/.peekaboo/credentials.json` — no manual configuration needed. If the credentials file doesn't exist, the skill falls back to auto-discovery (probes `localhost:3000` and `localhost:7007`).
+
+**Not using OpenClaw?** Skip this step — you can use the API directly. See [Direct API Usage](#direct-api-usage) below.
 
 ### Step 4: Connect Data Sources
 
-Open `http://localhost:3000` in your browser. Connect Gmail and GitHub via OAuth. See the [Manual Setup Guide](SETUP-MANUAL.md) for detailed source configuration.
+Open `http://localhost:3000` in your browser. Connect Gmail and GitHub via OAuth.
+
+#### Connecting Gmail
+
+1. Click the **Gmail** tab, then **Connect Gmail**
+2. Sign in with your Google account and grant Peekaboo access
+3. Configure your access boundary:
+   - **Time boundary** — e.g., "only emails after 2026-01-01"
+   - **Label filters** — which labels are accessible (inbox, starred, etc.)
+   - **Field access** — strip sender info, strip body, etc.
+   - **Redaction** — redact SSNs, credit card numbers, phone numbers
+   - **Outbound actions** — allow/disallow draft proposals
+
+**Note:** You need a Google Cloud project with the Gmail API enabled and OAuth credentials configured. See [Google's guide](https://developers.google.com/gmail/api/quickstart/nodejs) for creating OAuth credentials. Set the redirect URI to `http://localhost:3000/oauth/gmail/callback`.
+
+#### Connecting GitHub
+
+1. Click the **GitHub** tab, then **Connect GitHub**
+2. Authorize Peekaboo to access your GitHub account
+3. Select which repos the agent can access and set permission levels per repo
+
+To set up the agent's GitHub account:
+1. Create a separate GitHub account for your AI agent (e.g., `@alice-ai-agent`)
+2. In the Peekaboo GUI, enter the agent's GitHub username
+3. Peekaboo uses your (the owner's) OAuth token to add the agent as a collaborator on the repos you select
+4. The agent uses its own credentials (fine-grained PAT) to interact with GitHub directly
+
+### Step 5: Verify
+
+Same as Option A Step 3 — ask your agent to check recent emails and verify activity in the GUI.
+
+---
+
+## Direct API Usage
+
+Any HTTP client can use Peekaboo's two endpoints. Both require an API key (`Authorization: Bearer pk_xxx`). Find your API key in `~/.peekaboo/credentials.json` or generate one in the GUI under **Settings > Generate API Key**.
+
+### Pull Data
+
+```bash
+curl -X POST http://localhost:3000/app/v1/pull \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer pk_your_key_here" \
+  -d '{"source": "gmail", "purpose": "Find recent emails"}'
+```
+
+### Propose an Action
+
+```bash
+curl -X POST http://localhost:3000/app/v1/propose \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer pk_your_key_here" \
+  -d '{
+    "source": "gmail",
+    "action_type": "draft_email",
+    "action_data": {"to": "alice@co.com", "subject": "Hi", "body": "Hello"},
+    "purpose": "Draft greeting"
+  }'
+```
+
+Actions are staged for owner review — not executed until approved via the GUI.
+
+---
+
+## Access Policy Presets
+
+The GUI offers preset access policies for Gmail. Start with a preset and customize it:
+
+| Preset | What the agent sees |
+|---|---|
+| Read-only, recent emails | title, body, labels, timestamp — SSNs redacted |
+| Metadata only | title, labels, timestamp — no body or sender info |
+| Full access with redaction | All fields — sensitive patterns redacted, body truncated to 5000 chars |
+| Email drafting | Can propose draft emails for owner review |
 
 ---
 
@@ -148,7 +237,7 @@ clawhub publish packages/personal-data-hub \
 
 ## Troubleshooting
 
-**Extension says "Missing hubUrl or apiKey"**
+**Skill says "Missing hubUrl or apiKey"**
 - Make sure Peekaboo is running: `npx peekaboo status`
 - If not running, start it: `npx peekaboo start`
 - Check credentials exist: `cat ~/.peekaboo/credentials.json`
@@ -165,3 +254,6 @@ clawhub publish packages/personal-data-hub \
 **Port already in use**
 - Edit `hub-config.yaml` and change `port: 3000` to a different port
 - Update `~/.peekaboo/credentials.json` to match the new URL
+
+**OAuth redirect fails**
+- Make sure the redirect URI in your Google Cloud / GitHub OAuth app settings matches `http://localhost:3000/oauth/<source>/callback` (e.g., `http://localhost:3000/oauth/gmail/callback`)

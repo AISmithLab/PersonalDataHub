@@ -209,8 +209,7 @@ Actions are staged for owner review — not executed until approved via the GUI.
 
 ## Documentation
 
-- [Manual Setup](docs/SETUP-MANUAL.md) — install and configure Peekaboo step by step
-- [Auto Setup (OpenClaw)](docs/SETUP-AUTO.md) — set up Peekaboo automatically through the OpenClaw skill
+- [Setup Guide](docs/SETUP.md) — install and run Peekaboo (ClawHub or from source)
 - [Development Guide](docs/DEVELOPMENT.md) — codebase structure and how to modify the code
 - [Design Doc](docs/architecture-design/design.md) — full architecture and design rationale
 - [Implementation Plan](docs/architecture-design/implementationplan.md) — step-by-step build plan
