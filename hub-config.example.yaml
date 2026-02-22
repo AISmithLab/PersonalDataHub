@@ -1,6 +1,6 @@
 # Peekaboo configuration
-# OAuth credentials are optional — Peekaboo ships with default credentials
-# and uses PKCE for secure authorization. See docs/OAUTH-SETUP.md for details.
+# OAuth credentials are fetched automatically during 'npx peekaboo init'.
+# To use your own credentials instead, see docs/OAUTH-SETUP.md.
 sources:
   gmail:
     enabled: true

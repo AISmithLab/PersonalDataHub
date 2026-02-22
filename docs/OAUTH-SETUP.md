@@ -2,7 +2,7 @@
 
 ## Default Mode (No Setup Required)
 
-Peekaboo ships with default OAuth credentials and uses **PKCE (Proof Key for Code Exchange)** for secure authorization. No configuration needed — just click "Connect Gmail" or "Connect GitHub" in the Peekaboo GUI.
+`npx peekaboo init` fetches default OAuth credentials and writes them into `hub-config.yaml` automatically. Peekaboo uses **PKCE (Proof Key for Code Exchange)** for secure authorization. No additional configuration needed — just click "Connect Gmail" or "Connect GitHub" in the Peekaboo GUI.
 
 How it works:
 - Peekaboo generates a cryptographic code verifier and challenge (PKCE S256)

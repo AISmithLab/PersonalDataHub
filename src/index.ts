@@ -14,8 +14,7 @@ const configPath = process.argv[2] ?? resolve('hub-config.yaml');
 if (!existsSync(configPath)) {
   console.log('Peekaboo v0.1.0');
   console.log(`\nNo config file found at: ${configPath}`);
-  console.log('Copy hub-config.example.yaml to hub-config.yaml and add your OAuth credentials.');
-  console.log('See docs/oauth-setup.md for setup instructions.');
+  console.log("Run 'npx peekaboo init' to get started.");
   process.exit(1);
 }
 

@@ -132,7 +132,7 @@ The skill reads credentials automatically from `~/.peekaboo/credentials.json` â€
 
 ### Step 4: Connect Data Sources
 
-Open `http://localhost:3000` in your browser. No OAuth credentials needed â€” Peekaboo ships with default credentials and uses PKCE for secure authorization. Just click Connect.
+Open `http://localhost:3000` in your browser. Default OAuth credentials were configured during `npx peekaboo init`. Just click Connect.
 
 #### Connecting Gmail
 
