@@ -99,22 +99,32 @@ npx peekaboo status   # Check if the server is running
 
 ### Step 3: Install the Skill in OpenClaw
 
-The skill is in `packages/personal-data-hub/`. To make OpenClaw discover it, either:
+The skill is in `packages/personal-data-hub/`. OpenClaw discovers skills from directories containing a `SKILL.md` with YAML frontmatter. To register it, pick one option:
 
-**Option 1: Symlink into OpenClaw's skills directory**
+**Option 1: Symlink into the global skills directory (Recommended)**
 
 ```bash
-ln -s /path/to/peekaboo/packages/personal-data-hub ~/.openclaw/skills/personal-data-hub
+mkdir -p ~/.openclaw/skills
+ln -s /absolute/path/to/peekaboo/packages/personal-data-hub ~/.openclaw/skills/personal-data-hub
 ```
 
-**Option 2: Add to OpenClaw config**
+Replace `/absolute/path/to/peekaboo` with the actual path to your cloned repo. This makes the skill available in all OpenClaw sessions.
 
-Add the skill path to your OpenClaw configuration file (e.g., `~/.openclaw/config.yaml`):
+**Option 2: Add as an extra skills directory**
 
-```yaml
-skills:
-  - path: /path/to/peekaboo/packages/personal-data-hub
+Add the path to `skills.load.extraDirs` in `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "skills": {
+    "load": {
+      "extraDirs": ["/absolute/path/to/peekaboo/packages/personal-data-hub"]
+    }
+  }
+}
 ```
+
+Start a new OpenClaw session for it to discover the skill. Run `openclaw tui` to launch a new session, then type `list skills` to verify the skill is installed.
 
 The skill reads credentials automatically from `~/.peekaboo/credentials.json` — no manual configuration needed. If the credentials file doesn't exist, the skill falls back to auto-discovery (probes `localhost:3000` and `localhost:7007`).
 
