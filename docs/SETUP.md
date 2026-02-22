@@ -235,6 +235,10 @@ clawhub publish packages/personal-data-hub \
   --tags latest
 ```
 
+## Contributing
+
+Want to contribute to Peekaboo? See [DEVELOPMENT.md](./DEVELOPMENT.md) for the project structure, tech stack, how the pipeline works, how to add connectors and operators, and how to run the test suite.
+
 ## Troubleshooting
 
 **Skill says "Missing hubUrl or apiKey"**
