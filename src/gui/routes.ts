@@ -374,8 +374,8 @@ function getIndexHtml(): string {
     .sidebar-save-flash.show { opacity: 1; }
 
     /* ---- Main content area ---- */
-    .main-content { flex: 1; margin-left: var(--sidebar-width); overflow-y: auto; }
-    .content { max-width: 1400px; margin: 0 auto; padding: 32px 40px; }
+    .main-content { flex: 1; margin-left: var(--sidebar-width); overflow-y: auto; display: flex; justify-content: center; }
+    .content { width: 100%; max-width: 1600px; padding: 32px 48px; }
 
     /* ---- Cards ---- */
     .card { background: var(--card); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
@@ -496,10 +496,13 @@ function getIndexHtml(): string {
     .resolved-row:last-child { border-bottom: none; }
 
     /* ---- Gmail 2-col grid ---- */
-    .gmail-grid { display: grid; grid-template-columns: 1fr 380px; gap: 24px; }
+    .gmail-grid { display: grid; grid-template-columns: 1fr 400px; gap: 24px; }
     .gmail-grid-left { min-width: 0; }
     .gmail-grid-right { min-width: 0; }
-    @media (max-width: 1000px) { .gmail-grid { grid-template-columns: 1fr; } }
+    .gmail-top-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .gmail-top-row .card { margin-bottom: 0; }
+    @media (max-width: 1200px) { .gmail-grid { grid-template-columns: 1fr 360px; } }
+    @media (max-width: 1000px) { .gmail-grid { grid-template-columns: 1fr; } .gmail-top-row { grid-template-columns: 1fr; } }
 
     /* ---- Summary stats bar ---- */
     .summary-bar { display: flex; align-items: center; gap: 20px; padding: 10px 16px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; }
@@ -1045,23 +1048,22 @@ function getIndexHtml(): string {
           <button class="btn btn-outline btn-sm" style="color:var(--destructive);border-color:rgba(239,68,68,0.3)" onclick="if(confirm('Disconnect Gmail? This will revoke all access tokens and disable Gmail access for all agents.')){disconnectSource('gmail')}">Disconnect</button>
         </div>
 
+        <div class="gmail-top-row" style="margin-bottom:16px">
+          <div class="card" style="padding:20px;display:flex;flex-direction:column">
+            <label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:10px">Access Policy <span class="save-flash" id="gmail-flash">Saved</span></label>
+            <textarea id="access-policy" rows="3" style="flex:1;border:1px solid var(--input-border);border-radius:6px;padding:10px 12px;font-size:14px;font-family:inherit;resize:none;outline:none;transition:border-color 0.15s;margin-bottom:10px" placeholder="Agents can only access emails that are requesting meetings with me" oninput="state.gmail.accessPolicy=this.value">\${escapeHtml(s.accessPolicy)}</textarea>
+            <button class="btn btn-primary" onclick="submitPolicy()" style="align-self:flex-start">Submit Policy</button>
+          </div>
+          <div class="card" style="padding:20px;display:flex;flex-direction:column">
+            <label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:10px">Active Rules <span style="font-weight:400;opacity:0.7">(\${s.rules.length})</span></label>
+            <ul style="list-style:none;display:flex;flex-direction:column;gap:8px;flex:1;max-height:240px;overflow-y:auto;padding-right:4px">
+              \${rulesHtml || '<li style="font-size:14px;color:var(--muted);text-align:center;padding:16px 0">No rules yet. Write a policy and click Submit.</li>'}
+            </ul>
+          </div>
+        </div>
+
         <div class="gmail-grid">
           <div class="gmail-grid-left">
-            <div class="card" style="padding:16px">
-              <label style="font-size:14px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:8px">Write access policies in natural language <span class="save-flash" id="gmail-flash">Saved</span></label>
-              <div style="display:flex;gap:8px">
-                <textarea id="access-policy" rows="2" style="flex:1;border:1px solid var(--input-border);border-radius:6px;padding:8px 10px;font-size:14px;font-family:inherit;resize:none;outline:none;transition:border-color 0.15s" placeholder="Agents can only access emails that are requesting meetings with me" oninput="state.gmail.accessPolicy=this.value">\${escapeHtml(s.accessPolicy)}</textarea>
-                <button class="btn btn-primary" onclick="submitPolicy()" style="align-self:flex-end;white-space:nowrap">Submit</button>
-              </div>
-            </div>
-
-            <div class="card" style="padding:16px">
-              <label style="font-size:14px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:12px">Active Rules</label>
-              <ul style="list-style:none;display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;padding-right:4px">
-                \${rulesHtml || '<li style="font-size:14px;color:var(--muted);text-align:center;padding:12px 0">No rules yet. Write a policy above and click Submit.</li>'}
-              </ul>
-            </div>
-
             <div class="card" style="padding:0;overflow:hidden">
               <div class="email-list-header">
                 <span class="stat">Total: <strong>\${emails.length}</strong></span>
