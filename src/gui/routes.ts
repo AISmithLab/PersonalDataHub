@@ -319,135 +319,335 @@ function getIndexHtml(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PersonalDataHub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
+    :root {
+      --primary: #0fa081;
+      --primary-hover: #0d8a6f;
+      --bg: #f7f7ff;
+      --card: #ffffff;
+      --sidebar-bg: #fafbfd;
+      --sidebar-border: #e5e7eb;
+      --fg: #1a1a33;
+      --muted: #5a6b7a;
+      --destructive: #ef4444;
+      --destructive-hover: #dc2626;
+      --warning: #f59e0b;
+      --success: #0fa081;
+      --border: #e2e5e9;
+      --input-border: #e2e5e9;
+      --ring: #0fa081;
+      --radius: 8px;
+      --sidebar-width: 224px;
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
-    .header { background: #1a1a2e; color: white; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
-    .header h1 { font-size: 20px; font-weight: 600; }
-    .header .version { font-size: 12px; opacity: 0.6; }
-    .tabs { display: flex; background: #16213e; border-bottom: 2px solid #0f3460; }
-    .tab { padding: 12px 24px; color: #aaa; cursor: pointer; border: none; background: none; font-size: 14px; transition: all 0.2s; }
-    .tab:hover { color: white; background: rgba(255,255,255,0.05); }
-    .tab.active { color: white; background: #0f3460; border-bottom: 2px solid #e94560; }
-    .content { max-width: 960px; margin: 24px auto; padding: 0 24px; }
-    .card { background: white; border-radius: 8px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .card h2 { font-size: 16px; margin-bottom: 12px; color: #1a1a2e; }
-    .card h3 { font-size: 14px; margin-bottom: 8px; color: #555; }
-    .status { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
-    .status.connected { background: #d4edda; color: #155724; }
-    .status.disconnected { background: #f8d7da; color: #721c24; }
-    .status.pending { background: #fff3cd; color: #856404; }
-    .status.approved { background: #d4edda; color: #155724; }
-    .status.rejected { background: #f8d7da; color: #721c24; }
-    .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; }
-    .btn-primary { background: #0f3460; color: white; }
-    .btn-primary:hover { background: #1a4a8a; }
-    .btn-success { background: #28a745; color: white; }
-    .btn-danger { background: #dc3545; color: white; }
-    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); font-size: 15px; line-height: 1.6; }
+
+    /* ---- Layout: sidebar + main ---- */
+    #app { display: flex; min-height: 100vh; }
+    .sidebar { width: var(--sidebar-width); min-width: var(--sidebar-width); background: var(--sidebar-bg); border-right: 1px solid var(--sidebar-border); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 40; }
+    .sidebar-header { padding: 16px; border-bottom: 1px solid var(--sidebar-border); }
+    .sidebar-brand { display: flex; align-items: center; gap: 10px; }
+    .sidebar-brand svg { width: 22px; height: 22px; color: var(--primary); flex-shrink: 0; }
+    .sidebar-brand span { font-size: 16px; font-weight: 600; color: var(--fg); letter-spacing: -0.3px; }
+    .sidebar-subtitle { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .sidebar-nav { flex: 1; overflow-y: auto; padding: 12px 0; }
+    .nav-group-label { padding: 0 16px; font-size: 11px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px; margin-top: 16px; }
+    .nav-group-label:first-child { margin-top: 0; }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 16px; font-size: 14px; color: var(--muted); cursor: pointer; transition: all 0.15s; border-left: 3px solid transparent; text-decoration: none; }
+    .nav-item:hover { background: rgba(0,0,0,0.03); color: var(--fg); }
+    .nav-item.active { background: rgba(15,160,129,0.06); color: var(--fg); font-weight: 500; border-left-color: var(--primary); }
+    .nav-item.disabled { color: rgba(90,107,122,0.4); cursor: default; pointer-events: none; }
+    .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+    .nav-item .nav-label { flex: 1; }
+    .nav-badge { font-size: 11px; font-family: 'JetBrains Mono', monospace; background: var(--warning); color: #fff; padding: 2px 7px; border-radius: 9999px; min-width: 20px; text-align: center; font-weight: 500; }
+    .nav-badge-muted { font-size: 10px; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; color: rgba(90,107,122,0.5); }
+    .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .status-dot-connected { background: var(--success); box-shadow: 0 0 6px rgba(15,160,129,0.5); }
+    .status-dot-disconnected { background: #b0b8c4; }
+    .status-dot-pending { background: var(--warning); box-shadow: 0 0 6px rgba(245,158,11,0.5); }
+    .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--sidebar-border); }
+    .sidebar-save-flash { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--success); opacity: 0; transition: opacity 0.3s; }
+    .sidebar-save-flash.show { opacity: 1; }
+
+    /* ---- Main content area ---- */
+    .main-content { flex: 1; margin-left: var(--sidebar-width); overflow-y: auto; }
+    .content { max-width: 1100px; padding: 32px; }
+
+    /* ---- Cards ---- */
+    .card { background: var(--card); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .card h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--fg); }
+    .card h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; color: var(--muted); }
+
+    /* ---- Status badges ---- */
+    .status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+    .status.connected { background: rgba(15,160,129,0.1); color: var(--success); }
+    .status.disconnected { background: rgba(239,68,68,0.08); color: var(--destructive); }
+    .status.pending { background: rgba(245,158,11,0.1); color: #b45309; }
+    .status.approved { background: rgba(15,160,129,0.1); color: var(--success); }
+    .status.rejected { background: rgba(239,68,68,0.08); color: var(--destructive); }
+    .status.committed { background: rgba(15,160,129,0.1); color: var(--success); }
+
+    /* ---- Buttons ---- */
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; font-family: inherit; transition: all 0.15s; line-height: 1; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-success:hover { background: var(--primary-hover); }
+    .btn-danger { background: var(--destructive); color: #fff; }
+    .btn-danger:hover { background: var(--destructive-hover); }
+    .btn-outline { background: var(--card); color: var(--fg); border: 1px solid var(--border); }
+    .btn-outline:hover { background: #f5f6f8; }
+    .btn-sm { padding: 6px 12px; font-size: 13px; }
+    .btn-ghost { background: transparent; color: var(--muted); border: none; }
+    .btn-ghost:hover { background: rgba(0,0,0,0.04); color: var(--fg); }
+
+    /* ---- Tables ---- */
     table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #eee; font-size: 13px; }
-    th { font-weight: 600; color: #555; }
+    th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 14px; }
+    th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    /* ---- Forms ---- */
     .toggle { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
-    .toggle input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
-    .toggle label { font-size: 13px; cursor: pointer; }
-    input[type="text"], input[type="number"], select { padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; width: 100%; }
-    input[type="datetime-local"] { padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; width: 100%; }
-    .form-group { margin-bottom: 12px; }
-    .form-group label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: #555; }
-    .actions { display: flex; gap: 8px; margin-top: 12px; }
-    .empty { text-align: center; color: #999; padding: 24px; }
-    .key-display { background: #f8f9fa; padding: 8px 12px; border-radius: 4px; font-family: monospace; font-size: 13px; word-break: break-all; margin: 8px 0; }
-    #app { min-height: 100vh; }
+    .toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--primary); }
+    .toggle label { font-size: 14px; cursor: pointer; }
+    input[type="text"], input[type="number"], select { padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 6px; font-size: 14px; font-family: inherit; width: 100%; outline: none; transition: border-color 0.15s, box-shadow 0.15s; background: var(--card); }
+    input[type="text"]:focus, input[type="number"]:focus, select:focus { border-color: var(--ring); box-shadow: 0 0 0 3px rgba(15,160,129,0.1); }
+    input[type="datetime-local"] { padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 6px; font-size: 14px; font-family: inherit; width: 100%; outline: none; transition: border-color 0.15s; background: var(--card); }
+    input[type="datetime-local"]:focus { border-color: var(--ring); box-shadow: 0 0 0 3px rgba(15,160,129,0.1); }
+    input[type="date"] { padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 6px; font-size: 14px; font-family: inherit; outline: none; transition: border-color 0.15s; background: var(--card); }
+    input[type="date"]:focus { border-color: var(--ring); box-shadow: 0 0 0 3px rgba(15,160,129,0.1); }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; color: var(--muted); }
+    .actions { display: flex; gap: 8px; margin-top: 14px; }
+    .empty { text-align: center; color: var(--muted); padding: 24px; font-size: 14px; }
+    .key-display { background: #f0fdf9; padding: 12px 16px; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 13px; word-break: break-all; margin: 8px 0; border: 1px solid rgba(15,160,129,0.2); }
     .section { margin-bottom: 24px; }
 
+    /* ---- Access control rows ---- */
     .ac-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-    .ac-row label { font-size: 13px; white-space: nowrap; }
+    .ac-row label { font-size: 14px; white-space: nowrap; }
     .ac-row input[type="datetime-local"] { width: auto; flex: 1; max-width: 220px; }
     .ac-row input[type="text"] { flex: 1; }
     .checkbox-group { display: flex; flex-wrap: wrap; gap: 2px 14px; }
     .checkbox-group .toggle { margin: 2px 0; position: relative; }
     .checkbox-group .toggle label { border-bottom: 1px dotted #bbb; }
-    .checkbox-group .toggle label:hover::after { content: attr(data-tip); position: absolute; left: 0; top: 100%; margin-top: 4px; background: #333; color: #fff; font-size: 11px; padding: 4px 8px; border-radius: 4px; white-space: nowrap; z-index: 10; pointer-events: none; }
-    .filter-panel { margin-left: 26px; margin-bottom: 10px; border: 1px solid #e9ecef; border-radius: 6px; padding: 14px 16px; display: none; }
+    .checkbox-group .toggle label:hover::after { content: attr(data-tip); position: absolute; left: 0; top: 100%; margin-top: 4px; background: var(--fg); color: #fff; font-size: 11px; padding: 4px 8px; border-radius: 4px; white-space: nowrap; z-index: 10; pointer-events: none; }
+
+    /* ---- Filter panel ---- */
+    .filter-panel { margin-left: 26px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; display: none; }
     .filter-panel.show { display: block; }
     .filter-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
     .filter-row:last-child { margin-bottom: 0; }
-    .filter-label { font-size: 13px; color: #333; min-width: 110px; }
-    .filter-row input[type="text"] { flex: 1; border: 1px solid #ddd; border-radius: 4px; padding: 6px 10px; font-size: 13px; outline: none; }
-    .filter-row input[type="text"]:focus { border-color: #0f3460; }
-    .filter-row input[type="date"] { border: 1px solid #ddd; border-radius: 4px; padding: 6px 10px; font-size: 13px; outline: none; flex: 1; }
-    .filter-row select { border: 1px solid #ddd; border-radius: 4px; padding: 6px 10px; background: white; font-size: 13px; outline: none; }
-    .filter-row input[type="number"] { width: 100px; border: 1px solid #ddd; border-radius: 4px; padding: 6px 10px; font-size: 13px; outline: none; }
-    .expand-link { font-size: 12px; color: #0f3460; cursor: pointer; text-decoration: none; margin-left: 4px; }
+    .filter-label { font-size: 14px; color: var(--fg); min-width: 110px; }
+    .filter-row input[type="text"] { flex: 1; }
+    .filter-row input[type="text"]:focus { border-color: var(--ring); }
+    .filter-row input[type="date"] { flex: 1; }
+    .filter-row select { border: 1px solid var(--input-border); border-radius: 6px; padding: 9px 12px; background: var(--card); font-size: 14px; font-family: inherit; outline: none; }
+    .filter-row input[type="number"] { width: 100px; }
+    .expand-link { font-size: 13px; color: var(--primary); cursor: pointer; text-decoration: none; margin-left: 4px; }
     .expand-link:hover { text-decoration: underline; }
-    .sel-links { font-size: 11px; margin-left: 4px; }
-    .sel-links a { color: #0f3460; text-decoration: none; cursor: pointer; }
+    .sel-links { font-size: 12px; margin-left: 4px; }
+    .sel-links a { color: var(--primary); text-decoration: none; cursor: pointer; }
     .sel-links a:hover { text-decoration: underline; }
 
-    .repo-item { border: 1px solid #e9ecef; border-radius: 6px; margin-bottom: 8px; }
-    .repo-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; background: #fafafa; transition: background 0.15s; }
-    .repo-header:hover { background: #f0f0f0; }
-    .repo-name { font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; font-size: 13px; flex: 1; }
-    .repo-chevron { font-size: 12px; color: #888; transition: transform 0.2s; }
+    /* ---- GitHub repos ---- */
+    .repo-item { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px; }
+    .repo-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; background: var(--sidebar-bg); transition: background 0.15s; }
+    .repo-header:hover { background: #f0f1f4; }
+    .repo-name { font-family: 'JetBrains Mono', monospace; font-size: 14px; flex: 1; }
+    .repo-chevron { font-size: 13px; color: var(--muted); transition: transform 0.2s; }
     .repo-chevron.open { transform: rotate(90deg); }
-    .repo-perms { padding: 12px 14px 4px; border-top: 1px solid #e9ecef; display: none; }
+    .repo-perms { padding: 12px 14px 4px; border-top: 1px solid var(--border); display: none; }
     .repo-perms.show { display: block; }
     .perm-grid { display: flex; gap: 24px; }
-    .perm-col h4 { font-size: 12px; font-weight: 700; color: #1a1a2e; margin-bottom: 6px; letter-spacing: 0.3px; }
+    .perm-col h4 { font-size: 13px; font-weight: 700; color: var(--fg); margin-bottom: 6px; letter-spacing: 0.3px; }
 
-    .save-flash { display: inline-block; margin-left: 10px; font-size: 12px; font-weight: 600; color: #155724; opacity: 0; transition: opacity 0.3s; }
+    /* ---- Save flash ---- */
+    .save-flash { display: inline-block; margin-left: 10px; font-size: 13px; font-weight: 600; color: var(--success); opacity: 0; transition: opacity 0.3s; }
     .save-flash.show { opacity: 1; }
-    .email-card { border: 1px solid #e2e5e9; border-radius: 10px; margin-bottom: 14px; overflow: hidden; background: #fff; transition: box-shadow 0.2s; }
-    .email-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.07); }
-    .email-card-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #eef0f2; }
-    .email-card-title { font-size: 14px; font-weight: 600; color: #1a1a2e; }
+
+    /* ---- Email action cards ---- */
+    .email-card { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 14px; overflow: hidden; background: var(--card); transition: box-shadow 0.2s; }
+    .email-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+    .email-card-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+    .email-card-title { font-size: 15px; font-weight: 600; color: var(--fg); }
     .email-card-meta { padding: 12px 18px 0; }
-    .email-field { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 13px; }
-    .email-field-label { font-weight: 600; color: #8a8f98; min-width: 55px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .email-field { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; font-size: 14px; }
+    .email-field-label { font-weight: 600; color: var(--muted); min-width: 55px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
     .email-card-body { padding: 10px 18px 14px; }
-    .email-body-display { white-space: pre-wrap; word-wrap: break-word; font-family: inherit; font-size: 13px; line-height: 1.55; margin: 0; background: #f8f9fb; border: none; border-radius: 6px; padding: 12px 14px; color: #333; }
+    .email-body-display { white-space: pre-wrap; word-wrap: break-word; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.7; margin: 0; background: #f8f9fb; border: none; border-radius: 6px; padding: 14px 16px; color: var(--fg); }
     .email-card-actions { display: flex; gap: 8px; padding: 0 18px 14px; justify-content: flex-end; }
-    .email-card-actions .btn { border-radius: 6px; font-weight: 500; font-size: 13px; padding: 7px 16px; transition: all 0.15s; }
-    .email-card-actions .btn-approve { background: #22c55e; color: white; border: none; }
-    .email-card-actions .btn-approve:hover { background: #16a34a; }
-    .email-card-actions .btn-deny { background: #fff; color: #dc2626; border: 1px solid #fca5a5; }
-    .email-card-actions .btn-deny:hover { background: #fef2f2; border-color: #dc2626; }
-    .email-card-actions .btn-edit { background: #fff; color: #555; border: 1px solid #ddd; }
-    .email-card-actions .btn-edit:hover { background: #f5f5f5; border-color: #bbb; }
-    .email-edit-input { padding: 5px 10px; border: 1px solid #d0d5dd; border-radius: 6px; font-size: 13px; flex: 1; outline: none; transition: border 0.15s; }
-    .email-edit-input:focus { border-color: #0f3460; }
-    .email-body-edit { width: 100%; min-height: 120px; padding: 10px 12px; border: 1px solid #d0d5dd; border-radius: 6px; font-size: 13px; font-family: inherit; resize: vertical; outline: none; transition: border 0.15s; line-height: 1.55; }
-    .email-body-edit:focus { border-color: #0f3460; }
-    .resolved-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
+    .email-card-actions .btn { border-radius: 6px; font-weight: 500; font-size: 14px; padding: 8px 18px; }
+    .email-card-actions .btn-approve { background: var(--success); color: white; border: none; }
+    .email-card-actions .btn-approve:hover { background: var(--primary-hover); }
+    .email-card-actions .btn-deny { background: var(--card); color: var(--destructive); border: 1px solid rgba(239,68,68,0.3); }
+    .email-card-actions .btn-deny:hover { background: rgba(239,68,68,0.04); border-color: var(--destructive); }
+    .email-card-actions .btn-edit { background: var(--card); color: var(--muted); border: 1px solid var(--border); }
+    .email-card-actions .btn-edit:hover { background: #f5f6f8; border-color: #ccc; }
+    .email-edit-input { padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 6px; font-size: 14px; font-family: inherit; flex: 1; outline: none; transition: border 0.15s; }
+    .email-edit-input:focus { border-color: var(--ring); box-shadow: 0 0 0 3px rgba(15,160,129,0.1); }
+    .email-body-edit { width: 100%; min-height: 120px; padding: 12px 14px; border: 1px solid var(--input-border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical; outline: none; transition: border 0.15s; line-height: 1.6; }
+    .email-body-edit:focus { border-color: var(--ring); box-shadow: 0 0 0 3px rgba(15,160,129,0.1); }
+    .resolved-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; font-size: 14px; border-bottom: 1px solid var(--border); }
     .resolved-row:last-child { border-bottom: none; }
-    .tab-badge { background: #e94560; color: white; font-size: 11px; border-radius: 10px; padding: 1px 6px; margin-left: 4px; }
-    .btn-outline { background: white; color: #333; border: 1px solid #ddd; }
-    .btn-outline:hover { background: #f0f0f0; }
-    .status.committed { background: #d4edda; color: #155724; }
-    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #ddd; border-top-color: #0f3460; border-radius: 50%; animation: spin 0.6s linear infinite; }
+
+    /* ---- Gmail 2-col grid ---- */
+    .gmail-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
+    .gmail-grid-left { min-width: 0; }
+    .gmail-grid-right { min-width: 0; }
+    @media (max-width: 900px) { .gmail-grid { grid-template-columns: 1fr; } }
+
+    /* ---- Summary stats bar ---- */
+    .summary-bar { display: flex; align-items: center; gap: 20px; padding: 10px 16px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; }
+    .summary-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+    .summary-stat-value { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--fg); }
+    .summary-stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .summary-divider { width: 1px; height: 28px; background: var(--border); }
+
+    /* ---- Right column action review header ---- */
+    .action-review-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .action-review-header h2 { margin: 0; font-size: 16px; }
+
+    /* ---- Field pills ---- */
+    .field-pill { display: inline-block; font-size: 13px; padding: 4px 12px; border-radius: 9999px; border: 1px solid; cursor: pointer; transition: all 0.15s; font-family: inherit; background: none; }
+    .field-pill-on { border-color: rgba(15,160,129,0.4); background: rgba(15,160,129,0.08); color: var(--primary); }
+    .field-pill-off { border-color: var(--border); color: var(--muted); text-decoration: line-through; opacity: 0.5; }
+    .field-pill-off:hover { opacity: 0.75; }
+
+    /* ---- Email list ---- */
+    .email-list-header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--sidebar-bg); border-bottom: 1px solid var(--border); }
+    .email-list-header .stat { font-size: 13px; color: var(--muted); }
+    .email-list-header .stat strong { color: var(--fg); font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+    .email-list-header .stat-accent strong { color: var(--primary); }
+    .email-row { border-bottom: 1px solid var(--border); position: relative; }
+    .email-row:last-child { border-bottom: none; }
+    .email-row-hidden .email-row-btn { opacity: 0.35; }
+    .email-row-hidden .email-row-btn:hover { opacity: 0.55; }
+    .email-row-btn { display: block; width: 100%; text-align: left; padding: 14px 20px; background: none; border: none; cursor: pointer; transition: all 0.15s; font-family: inherit; }
+    .email-row-btn:hover { background: rgba(15,160,129,0.03); }
+    .email-row-sender { font-size: 14px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .email-row-sender.hidden-field { color: var(--muted); text-decoration: line-through; font-weight: 400; }
+    .email-row-subject { font-size: 13px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+    .email-row-subject.hidden-field { color: var(--muted); text-decoration: line-through; opacity: 0.5; }
+    .email-row-snippet { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; line-height: 1.4; }
+    .email-row-snippet.hidden-field { text-decoration: line-through; opacity: 0.4; }
+    .email-row-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .email-row-date { font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+    .email-row-labels { display: flex; gap: 4px; margin-top: 2px; }
+    .email-label { font-size: 11px; font-family: 'JetBrains Mono', monospace; padding: 2px 8px; border-radius: 4px; background: rgba(15,160,129,0.07); color: var(--primary); font-weight: 500; }
+    .email-row-attach { color: var(--muted); flex-shrink: 0; }
+    .email-row-vis { width: 3px; align-self: stretch; border-radius: 2px; flex-shrink: 0; }
+    .email-row-vis-on { background: var(--primary); }
+    .email-row-vis-off { background: var(--border); }
+    .email-expand { padding: 16px 20px 20px; border-top: 1px solid var(--border); background: #f9fafb; }
+    .email-expand-field { display: flex; gap: 10px; font-size: 14px; padding: 4px 0; }
+    .email-expand-field .field-label { color: var(--muted); width: 64px; flex-shrink: 0; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; padding-top: 2px; }
+    .email-expand-field .field-value { color: var(--fg); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+    .email-expand-field .field-value.hidden-field { text-decoration: line-through; color: var(--muted); opacity: 0.45; }
+    .email-expand-body { margin-top: 12px; }
+    .email-expand-body pre { white-space: pre-wrap; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-size: 13px; line-height: 1.7; color: var(--fg); font-family: 'JetBrains Mono', monospace; }
+    .email-expand-body pre.hidden-field { text-decoration: line-through; color: var(--muted); opacity: 0.4; }
+    .email-expand-alert { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(239,68,68,0.05); border: 1px solid rgba(239,68,68,0.15); border-radius: 6px; margin-bottom: 12px; font-size: 13px; color: var(--destructive); }
+
+    /* ---- Misc ---- */
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.6s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes flash-save { 0% { opacity: 1; } 100% { opacity: 0; } }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
   </style>
 </head>
 <body>
   <div id="app">
-    <div class="header">
-      <h1>PersonalDataHub</h1>
-      <span class="version">v0.1.0</span>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-brand">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span>PersonalDataHub</span>
+        </div>
+        <div class="sidebar-subtitle">Access control for AI agents</div>
+      </div>
+      <nav class="sidebar-nav" id="sidebar-nav">
+        <div class="nav-group-label">Overview</div>
+        <a class="nav-item active" data-tab="overview" onclick="switchTab('overview')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span class="nav-label">Overview</span>
+        </a>
+        <div class="nav-group-label">Data Sources</div>
+        <a class="nav-item" data-tab="gmail" onclick="switchTab('gmail')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          <span class="nav-label">Gmail</span>
+          <span class="status-dot status-dot-disconnected" id="gmail-dot"></span>
+          <span class="nav-badge" id="gmail-badge" style="display:none">0</span>
+        </a>
+        <a class="nav-item" data-tab="github" onclick="switchTab('github')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+          <span class="nav-label">GitHub</span>
+          <span class="status-dot status-dot-disconnected" id="github-dot"></span>
+        </a>
+        <a class="nav-item disabled">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span class="nav-label">Calendar</span>
+          <span class="nav-badge-muted">soon</span>
+        </a>
+        <a class="nav-item disabled">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span class="nav-label">Slack</span>
+          <span class="nav-badge-muted">soon</span>
+        </a>
+        <div class="nav-group-label">System</div>
+        <a class="nav-item" data-tab="settings" onclick="switchTab('settings')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span class="nav-label">Settings</span>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="sidebar-save-flash" id="sidebar-flash">Saved</span>
+      </div>
+    </aside>
+    <div class="main-content">
+      <div class="content" id="content"></div>
     </div>
-    <div class="tabs" id="tabs">
-      <button class="tab active" data-tab="gmail">Gmail</button>
-      <button class="tab" data-tab="github">GitHub</button>
-      <button class="tab" data-tab="settings">Settings</button>
-    </div>
-    <div class="content" id="content"></div>
   </div>
 
   <script>
-    let currentTab = 'gmail';
+    let currentTab = 'overview';
+    var ALL_FIELDS = ['Subject', 'Body', 'Sender', 'Recipients', 'Labels', 'Attachments', 'Snippet'];
+    var DEMO_EMAILS = [
+      { id:'e1', from:'alice@company.com', to:'owner@gmail.com', subject:'Q1 Planning Meeting', snippet:'Can we reschedule Thursday\\'s meeting to 2pm?', body:'Hi,\\n\\nCan we reschedule Thursday\\'s meeting to 2pm? I have a conflict with the original time.\\n\\nThanks,\\nAlice', date:'2025-02-22T09:15:00Z', labels:['Inbox'], hasAttachment:false },
+      { id:'e2', from:'bob@company.com', to:'owner@gmail.com', subject:'Code Review: PR #142', snippet:'Please review the latest changes to the auth module', body:'Hey,\\n\\nI\\'ve pushed the latest changes to the auth module. Could you take a look at PR #142?\\n\\nThe main changes are:\\n- Added JWT refresh logic\\n- Fixed session expiry bug\\n- Updated tests\\n\\nThanks!', date:'2025-02-22T08:30:00Z', labels:['Inbox'], hasAttachment:false },
+      { id:'e3', from:'notifications@github.com', to:'owner@gmail.com', subject:'[PersonalDataHub] Issue #23: Add rate limiting', snippet:'New issue opened by contributor', body:'A new issue has been opened in owner/PersonalDataHub:\\n\\nTitle: Add rate limiting to API endpoints\\nOpened by: @contributor\\n\\nWe should add rate limiting to prevent abuse of the API endpoints.', date:'2025-02-22T07:45:00Z', labels:['Inbox','GitHub'], hasAttachment:false },
+      { id:'e4', from:'team@company.com', to:'owner@gmail.com', subject:'Weekly Standup Notes - Feb 21', snippet:'Here are this week\\'s standup notes', body:'Team standup notes:\\n\\n- Alice: Finishing Q1 roadmap\\n- Bob: Auth module refactor\\n- Carol: Performance testing\\n- Owner: Access control gateway MVP\\n\\nAction items:\\n1. Schedule Q1 review\\n2. Deploy staging build', date:'2025-02-21T17:00:00Z', labels:['Inbox','Starred'], hasAttachment:false },
+      { id:'e5', from:'carol@company.com', to:'owner@gmail.com', subject:'Performance Report Q4', snippet:'Attached is the Q4 performance report with benchmarks', body:'Hi,\\n\\nPlease find attached the Q4 performance report. Key highlights:\\n- API latency reduced by 34%\\n- Uptime: 99.97%\\n- Error rate: 0.02%\\n\\nLet me know if you have questions.', date:'2025-02-21T14:20:00Z', labels:['Inbox'], hasAttachment:true },
+      { id:'e6', from:'noreply@stripe.com', to:'owner@gmail.com', subject:'Your January invoice is ready', snippet:'Your invoice for January 2025 is now available', body:'Your invoice for January 2025 is now available.\\n\\nAmount: $49.00\\nPlan: Pro\\nPeriod: Jan 1 - Jan 31, 2025\\n\\nView your invoice at dashboard.stripe.com', date:'2025-02-01T10:00:00Z', labels:['Inbox'], hasAttachment:true },
+      { id:'e7', from:'owner@gmail.com', to:'team@company.com', subject:'Project Update - PersonalDataHub', snippet:'Quick update on the access control project', body:'Team,\\n\\nQuick update on PersonalDataHub:\\n- OAuth flow completed\\n- Gmail integration working\\n- GitHub permissions UI done\\n- Next: Action staging & audit log\\n\\nETA for MVP: end of February.', date:'2025-02-20T09:00:00Z', labels:['Sent'], hasAttachment:false },
+      { id:'e8', from:'security@google.com', to:'owner@gmail.com', subject:'Security alert: New sign-in', snippet:'We noticed a new sign-in to your Google Account', body:'We noticed a new sign-in to your Google Account.\\n\\nDevice: MacBook Pro\\nLocation: San Francisco, CA\\nTime: Feb 19, 2025 3:45 PM\\n\\nIf this was you, you can disregard this email.', date:'2025-02-19T15:45:00Z', labels:['Inbox'], hasAttachment:false },
+      { id:'e9', from:'dave@external.io', to:'owner@gmail.com', subject:'Partnership Proposal', snippet:'Would love to discuss a potential integration', body:'Hi,\\n\\nI\\'m Dave from External.io. We\\'d love to discuss a potential integration between our platform and PersonalDataHub.\\n\\nWould you be available for a 30-min call next week?\\n\\nBest,\\nDave', date:'2025-02-18T11:30:00Z', labels:['Inbox'], hasAttachment:false },
+      { id:'e10', from:'hr@company.com', to:'owner@gmail.com', subject:'Benefits Enrollment Reminder', snippet:'Open enrollment closes Feb 28', body:'Reminder: Open enrollment for 2025 benefits closes on February 28.\\n\\nPlease review and update your selections at benefits.company.com.\\n\\nQuestions? Contact HR.', date:'2025-02-15T08:00:00Z', labels:['Inbox'], hasAttachment:true },
+      { id:'e11', from:'alice@company.com', to:'owner@gmail.com', subject:'Re: API Design Review', snippet:'Looks good, just a few minor suggestions', body:'Looks good overall! A few suggestions:\\n\\n1. Consider pagination for the list endpoint\\n2. Add rate limiting headers\\n3. Document the error codes\\n\\nOtherwise LGTM.', date:'2025-02-14T16:00:00Z', labels:['Inbox'], hasAttachment:false },
+      { id:'e12', from:'newsletter@techweekly.com', to:'owner@gmail.com', subject:'This Week in Tech: AI Privacy Concerns', snippet:'The latest on AI regulation and data privacy', body:'This Week in Tech Newsletter\\n\\n1. EU proposes new AI transparency rules\\n2. Major breach at social media company\\n3. Open source privacy tools gaining traction\\n4. Interview: Building privacy-first AI agents\\n\\nRead more at techweekly.com', date:'2025-02-13T06:00:00Z', labels:['Inbox','Newsletter'], hasAttachment:false },
+    ];
+    var DEMO_STAGED = [
+      { action_id:'demo-sa-1', source:'gmail', action_type:'reply_email', status:'pending', purpose:'Respond to meeting reschedule request', proposed_at:'2025-02-22T09:30:00Z', action_data: JSON.stringify({ to:'alice@company.com', subject:'Re: Q1 Planning Meeting', body:'Hi Alice,\\n\\nThursday at 2pm works perfectly for me. I\\'ll update my calendar.\\n\\nBest regards' }) },
+      { action_id:'demo-sa-2', source:'gmail', action_type:'draft_email', status:'pending', purpose:'Weekly status update to team', proposed_at:'2025-02-22T10:15:00Z', action_data: JSON.stringify({ to:'team@company.com', subject:'Weekly Status Update - Feb 22', body:'Team,\\n\\nHere\\'s this week\\'s progress:\\n- Completed API integration\\n- Fixed 3 critical bugs\\n- Started performance optimization\\n\\nNext week focus: deployment prep.' }) },
+    ];
+
     let state = {
       sources: [], manifests: [], keys: [], staging: [], audit: [],
       gmail: {
+        accessPolicy: '',
+        cachingEnabled: false,
+        rules: [
+          { type: 'time', enabled: true, value: '2024-01-01' },
+          { type: 'hideField', enabled: true, value: 'Body' },
+          { type: 'hideField', enabled: true, value: 'Recipients' },
+          { type: 'hideField', enabled: true, value: 'Attachments' },
+          { type: 'hideField', enabled: false, value: 'Labels' },
+        ],
+        // legacy compat
         timeEnabled: false, after: '',
         fieldsEnabled: false, fields: { subject: true, body: true, sender: true, participants: true, labels: true, attachments: false, snippet: false },
         filterEnabled: false, filterOpen: false,
@@ -455,18 +655,20 @@ function getIndexHtml(): string {
       },
       github: { repos: {}, repoList: [], reposLoading: false, reposLoaded: false, filterOwner: '', search: '' },
       expandedRepos: {},
+      expandedEmail: null,
+      editingAction: null,
     };
     let _saveTimer = null;
 
-    // Tab switching
-    document.getElementById('tabs').addEventListener('click', (e) => {
-      if (e.target.classList.contains('tab')) {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        e.target.classList.add('active');
-        currentTab = e.target.dataset.tab;
-        render();
-      }
-    });
+    // Sidebar nav switching
+    function switchTab(tab) {
+      currentTab = tab;
+      document.querySelectorAll('.nav-item[data-tab]').forEach(function(el) {
+        el.classList.toggle('active', el.dataset.tab === tab);
+      });
+      render();
+    }
+    window.switchTab = switchTab;
 
     async function fetchData() {
       const [sources, manifests, keys, staging, audit] = await Promise.all([
@@ -498,13 +700,30 @@ function getIndexHtml(): string {
 
       const content = document.getElementById('content');
       switch (currentTab) {
+        case 'overview': content.innerHTML = renderOverviewTab(); break;
         case 'gmail': content.innerHTML = renderGmailTab(); break;
         case 'github': content.innerHTML = renderGitHubTab(); break;
         case 'settings': content.innerHTML = renderSettingsTab(); break;
       }
+      // Update sidebar badges and status dots
       var gmailPendingCount = state.staging.filter(function(a) { return a.source === 'gmail' && a.status === 'pending'; }).length;
-      var gmailTabEl = document.querySelector('.tab[data-tab="gmail"]');
-      if (gmailTabEl) gmailTabEl.innerHTML = gmailPendingCount ? 'Gmail <span class="tab-badge">' + gmailPendingCount + '</span>' : 'Gmail';
+      var gmailBadge = document.getElementById('gmail-badge');
+      if (gmailBadge) {
+        if (gmailPendingCount) { gmailBadge.textContent = gmailPendingCount; gmailBadge.style.display = ''; }
+        else { gmailBadge.style.display = 'none'; }
+      }
+      // Gmail status dot
+      var gmailSource = state.sources.find(function(s) { return s.name === 'gmail'; });
+      var gmailDot = document.getElementById('gmail-dot');
+      if (gmailDot) {
+        gmailDot.className = 'status-dot ' + (gmailSource && gmailSource.connected ? 'status-dot-connected' : 'status-dot-disconnected');
+      }
+      // GitHub status dot
+      var ghSource = state.sources.find(function(s) { return s.name === 'github'; });
+      var ghDot = document.getElementById('github-dot');
+      if (ghDot) {
+        ghDot.className = 'status-dot ' + (ghSource && ghSource.connected ? 'status-dot-connected' : 'status-dot-disconnected');
+      }
 
       if (focusId) {
         var el = document.getElementById(focusId);
@@ -514,86 +733,356 @@ function getIndexHtml(): string {
 
     function chk(v) { return v ? 'checked' : ''; }
 
-    function renderGmailTab() {
-      const gmail = state.sources.find(s => s.name === 'gmail');
-      const s = state.gmail;
-      const gmailStaging = state.staging.filter(a => a.source === 'gmail');
-      const pendingCount = gmailStaging.filter(a => a.status === 'pending').length;
-      const gmailAudit = state.audit.filter(e => {
-        const d = typeof e.details === 'string' ? JSON.parse(e.details) : e.details;
-        return e.source === 'gmail' || d.source === 'gmail';
-      });
-
+    function renderOverviewTab() {
+      var gmail = state.sources.find(function(s) { return s.name === 'gmail'; });
+      var github = state.sources.find(function(s) { return s.name === 'github'; });
       var gmailConnected = gmail && gmail.connected;
+      var ghConnected = github && github.connected;
       var gmailAccount = gmail && gmail.accountInfo;
+      var ghAccount = github && github.accountInfo;
+      var activeFields = Object.values(state.gmail.fields).filter(Boolean).length;
+      var enabledRepos = (state.github.repoList || []).filter(function(r) { return r.enabled; }).length;
+      var totalRepos = (state.github.repoList || []).length;
+      var activeKeys = state.keys.filter(function(k) { return k.enabled; }).length;
+      var pendingCount = state.staging.filter(function(a) { return a.status === 'pending'; }).length;
+
+      var recentHtml = '';
+      if (state.audit.length) {
+        recentHtml = state.audit.slice(0, 5).map(function(e) {
+          var d = typeof e.details === 'string' ? JSON.parse(e.details) : e.details;
+          var evClass = '';
+          if (e.event.indexOf('approved') !== -1 || e.event.indexOf('committed') !== -1) evClass = 'connected';
+          else if (e.event.indexOf('rejected') !== -1) evClass = 'rejected';
+          else if (e.event.indexOf('proposed') !== -1) evClass = 'pending';
+          var time = new Date(e.timestamp);
+          var timeStr = time.getHours().toString().padStart(2,'0') + ':' + time.getMinutes().toString().padStart(2,'0');
+          return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);font-size:14px">' +
+            '<span class="font-mono" style="font-size:14px;color:var(--muted);min-width:40px">' + timeStr + '</span>' +
+            '<span class="status ' + evClass + '" style="font-size:14px">' + e.event + '</span>' +
+            '<span style="flex:1;color:var(--muted);font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (d.purpose || d.result || (e.source || '')) + '</span>' +
+            '</div>';
+        }).join('');
+      } else {
+        recentHtml = '<p class="empty">No recent activity.</p>';
+      }
 
       return \`
-        <div class="card">
-          <h2>Connection Status</h2>
-          \${gmailConnected
-            ? '<p>Status: <span class="status connected">Connected</span></p>' +
-              (gmailAccount && gmailAccount.email ? '<p style="margin-top:8px">Signed in as <strong>' + gmailAccount.email + '</strong></p>' : '') +
-              '<div class="actions"><button class="btn btn-danger" onclick="disconnectSource(\\'gmail\\')">Disconnect Gmail</button></div>'
-            : '<p>Status: <span class="status disconnected">' + (gmail?.enabled ? 'Not connected' : 'Not configured') + '</span></p>' +
-              '<div class="actions"><button class="btn btn-primary" onclick="startOAuth(\\'gmail\\')">Connect Gmail</button></div>'
-          }
+        <div style="margin-bottom:24px">
+          <h1 style="font-size:24px;font-weight:700;letter-spacing:-0.5px;color:var(--fg)">Access Control Gateway</h1>
+          <p style="font-size:14px;color:var(--muted);margin-top:4px">Zero access by default. Control exactly what AI agents can see.</p>
         </div>
 
-        <div class="card">
-          <h2>Access Control <span class="save-flash" id="gmail-flash">Saved</span></h2>
-
-          <div class="ac-row">
-            <input type="checkbox" id="ac-time" \${chk(s.timeEnabled)} onchange="state.gmail.timeEnabled = this.checked; saveGmail()">
-            <label for="ac-time">Only access emails after</label>
-            <input type="datetime-local" value="\${s.after || ''}" onchange="state.gmail.after = this.value; if(!state.gmail.timeEnabled){state.gmail.timeEnabled=true;} saveGmail()">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px">
+          <div class="card" style="cursor:pointer" onclick="switchTab('gmail')">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                <span style="font-weight:600;font-size:14px">Gmail</span>
+              </div>
+              <span class="status-dot \${gmailConnected ? 'status-dot-connected' : 'status-dot-disconnected'}"></span>
+            </div>
+            \${gmailConnected && gmailAccount && gmailAccount.email ? '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">' + gmailAccount.email + '</p>' : '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">Not connected</p>'}
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span style="font-size:14px;color:var(--muted)">Fields: <strong class="font-mono" style="color:var(--fg)">\${activeFields}/7</strong></span>
+              \${pendingCount ? '<span class="nav-badge">' + pendingCount + ' pending</span>' : ''}
+            </div>
+            <div style="margin-top:12px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
           </div>
 
-          <div class="ac-row">
-            <input type="checkbox" id="ac-fields" \${chk(s.fieldsEnabled)} onchange="state.gmail.fieldsEnabled = this.checked; saveGmail()">
-            <label for="ac-fields">Agents can only see</label>
-            <span class="sel-links">(<a onclick="setAllFields(true)">all</a> / <a onclick="setAllFields(false)">none</a>)</span>
-          </div>
-          <div class="checkbox-group" style="margin-left:26px;margin-bottom:10px">
-            <div class="toggle"><input type="checkbox" id="f-subject" \${chk(s.fields.subject)} onchange="state.gmail.fields.subject = this.checked; saveGmail()"><label for="f-subject" data-tip="Email subject line">Subject</label></div>
-            <div class="toggle"><input type="checkbox" id="f-body" \${chk(s.fields.body)} onchange="state.gmail.fields.body = this.checked; saveGmail()"><label for="f-body" data-tip="Full email body content">Body</label></div>
-            <div class="toggle"><input type="checkbox" id="f-sender" \${chk(s.fields.sender)} onchange="state.gmail.fields.sender = this.checked; saveGmail()"><label for="f-sender" data-tip="Sender name and email address">Sender</label></div>
-            <div class="toggle"><input type="checkbox" id="f-participants" \${chk(s.fields.participants)} onchange="state.gmail.fields.participants = this.checked; saveGmail()"><label for="f-participants" data-tip="To, CC, and BCC recipients">Recipients</label></div>
-            <div class="toggle"><input type="checkbox" id="f-labels" \${chk(s.fields.labels)} onchange="state.gmail.fields.labels = this.checked; saveGmail()"><label for="f-labels" data-tip="Gmail labels and categories">Labels</label></div>
-            <div class="toggle"><input type="checkbox" id="f-attachments" \${chk(s.fields.attachments)} onchange="state.gmail.fields.attachments = this.checked; saveGmail()"><label for="f-attachments" data-tip="Attachment file names and metadata">Attachments</label></div>
-            <div class="toggle"><input type="checkbox" id="f-snippet" \${chk(s.fields.snippet)} onchange="state.gmail.fields.snippet = this.checked; saveGmail()"><label for="f-snippet" data-tip="Short preview text from Gmail">Snippet</label></div>
+          <div class="card" style="cursor:pointer" onclick="switchTab('github')">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+                <span style="font-weight:600;font-size:14px">GitHub</span>
+              </div>
+              <span class="status-dot \${ghConnected ? 'status-dot-connected' : 'status-dot-disconnected'}"></span>
+            </div>
+            \${ghConnected && ghAccount && ghAccount.login ? '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">@' + ghAccount.login + '</p>' : '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">Not connected</p>'}
+            <span style="font-size:14px;color:var(--muted)">Repos: <strong class="font-mono" style="color:var(--fg)">\${enabledRepos}/\${totalRepos || '—'}</strong> enabled</span>
+            <div style="margin-top:12px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
           </div>
 
-          <div class="ac-row">
-            <input type="checkbox" id="ac-filter" \${chk(s.filterEnabled)} onchange="state.gmail.filterEnabled = this.checked; state.gmail.filterOpen = this.checked; render(); saveGmail()">
-            <label for="ac-filter">Advanced email filter</label>
+          <div class="card" style="cursor:pointer" onclick="switchTab('settings')">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+              <span style="font-weight:600;font-size:14px">API Keys</span>
+            </div>
+            <span style="font-size:14px;color:var(--muted)"><strong class="font-mono" style="color:var(--fg)">\${activeKeys}</strong> active key\${activeKeys !== 1 ? 's' : ''}</span>
+            <div style="margin-top:12px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Manage <span style="font-size:14px">&rarr;</span></div>
           </div>
-          <div class="filter-panel \${s.filterOpen ? 'show' : ''}">
-            <div class="filter-row"><span class="filter-label">From</span><input type="text" value="\${s.filter.from}" oninput="state.gmail.filter.from=this.value; saveGmail()"></div>
-            <div class="filter-row"><span class="filter-label">To</span><input type="text" value="\${s.filter.to}" oninput="state.gmail.filter.to=this.value; saveGmail()"></div>
-            <div class="filter-row"><span class="filter-label">Subject</span><input type="text" value="\${s.filter.subject}" oninput="state.gmail.filter.subject=this.value; saveGmail()"></div>
-            <div class="filter-row"><span class="filter-label">Has the words</span><input type="text" value="\${s.filter.hasWords}" oninput="state.gmail.filter.hasWords=this.value; saveGmail()"></div>
-            <div class="filter-row"><span class="filter-label">Doesn't have</span><input type="text" value="\${s.filter.notWords}" oninput="state.gmail.filter.notWords=this.value; saveGmail()"></div>
-            <div class="filter-row"><span class="filter-label">Size</span><select onchange="state.gmail.filter.sizeOp=this.value; saveGmail()"><option value="greater" \${s.filter.sizeOp==='greater'?'selected':''}>greater than</option><option value="less" \${s.filter.sizeOp==='less'?'selected':''}>less than</option></select><input type="number" value="\${s.filter.sizeVal}" min="0" oninput="state.gmail.filter.sizeVal=this.value; saveGmail()"><select onchange="state.gmail.filter.sizeUnit=this.value; saveGmail()"><option value="MB" \${s.filter.sizeUnit==='MB'?'selected':''}>MB</option><option value="KB" \${s.filter.sizeUnit==='KB'?'selected':''}>KB</option><option value="Bytes" \${s.filter.sizeUnit==='Bytes'?'selected':''}>Bytes</option></select></div>
-            <div class="filter-row"><span class="filter-label">Date within</span><select onchange="state.gmail.filter.dateRange=this.value; saveGmail()"><option value="1 day" \${s.filter.dateRange==='1 day'?'selected':''}>1 day</option><option value="3 days" \${s.filter.dateRange==='3 days'?'selected':''}>3 days</option><option value="1 week" \${s.filter.dateRange==='1 week'?'selected':''}>1 week</option><option value="2 weeks" \${s.filter.dateRange==='2 weeks'?'selected':''}>2 weeks</option><option value="1 month" \${s.filter.dateRange==='1 month'?'selected':''}>1 month</option><option value="2 months" \${s.filter.dateRange==='2 months'?'selected':''}>2 months</option><option value="6 months" \${s.filter.dateRange==='6 months'?'selected':''}>6 months</option><option value="1 year" \${s.filter.dateRange==='1 year'?'selected':''}>1 year</option></select><input type="date" value="\${s.filter.dateVal || (s.after ? s.after.split('T')[0] : '')}" onchange="state.gmail.filter.dateVal=this.value; saveGmail()"></div>
-            <div class="filter-row"><span class="filter-label">Search</span><select onchange="state.gmail.filter.searchIn=this.value; saveGmail()"><option \${s.filter.searchIn==='All Mail'?'selected':''}>All Mail</option><option \${s.filter.searchIn==='Inbox'?'selected':''}>Inbox</option><option \${s.filter.searchIn==='Starred'?'selected':''}>Starred</option><option \${s.filter.searchIn==='Sent Mail'?'selected':''}>Sent Mail</option><option \${s.filter.searchIn==='Drafts'?'selected':''}>Drafts</option><option \${s.filter.searchIn==='Chats'?'selected':''}>Chats</option><option \${s.filter.searchIn==='Spam'?'selected':''}>Spam</option><option \${s.filter.searchIn==='Trash'?'selected':''}>Trash</option><option \${s.filter.searchIn==='Read Mail'?'selected':''}>Read Mail</option><option \${s.filter.searchIn==='Unread Mail'?'selected':''}>Unread Mail</option></select></div>
-            <div class="filter-row"><span class="filter-label"></span><div class="toggle"><input type="checkbox" id="f-hasatt" \${chk(s.filter.hasAttachment)} onchange="state.gmail.filter.hasAttachment=this.checked; saveGmail()"><label for="f-hasatt">Has attachment</label></div></div>
-            <div style="margin-top:12px; text-align:right;"><button class="btn btn-primary" onclick="saveGmail()">Create filter</button></div>
-          </div>
-        </div>
 
-        <div class="card">
-          <h2>Pending Actions \${pendingCount ? '<span style="font-size:13px;color:#888;font-weight:400">(' + pendingCount + ')</span>' : ''}</h2>
-          \${renderPendingCards(gmailStaging)}
+          <div class="card" style="cursor:pointer" onclick="switchTab('settings')">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              <span style="font-weight:600;font-size:14px">Audit Log</span>
+            </div>
+            <span style="font-size:14px;color:var(--muted)"><strong class="font-mono" style="color:var(--fg)">\${state.audit.length}</strong> events recorded</span>
+            <div style="margin-top:12px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">View log <span style="font-size:14px">&rarr;</span></div>
+          </div>
         </div>
 
         <div class="card">
           <h2>Recent Activity</h2>
-          \${gmailAudit.length ? '<table><tr><th>Time</th><th>Event</th><th>Details</th></tr>' +
-            gmailAudit.slice(0, 10).map(e => {
-              const d = typeof e.details === 'string' ? JSON.parse(e.details) : e.details;
-              return '<tr><td style="font-size:11px">' + new Date(e.timestamp).toLocaleString() + '</td><td>' + e.event + '</td><td style="font-size:12px">' + (d.purpose || d.result || JSON.stringify(d).slice(0,80)) + '</td></tr>';
-            }).join('') +
-            '</table>' : '<p class="empty">No recent activity.</p>'}
+          \${recentHtml}
+        </div>
+      \`;
+    }
+
+    function renderGmailTab() {
+      var gmail = state.sources.find(function(s) { return s.name === 'gmail'; });
+      var s = state.gmail;
+      var realStaging = state.staging.filter(function(a) { return a.source === 'gmail'; });
+      var gmailStaging = realStaging.length ? realStaging : DEMO_STAGED;
+      var pendingCount = gmailStaging.filter(function(a) { return a.status === 'pending'; }).length;
+
+      var gmailConnected = gmail && gmail.connected;
+      var gmailAccount = gmail && gmail.accountInfo;
+      var accountEmail = gmailAccount && gmailAccount.email ? gmailAccount.email : '';
+
+      // Email visibility logic
+      var emails = DEMO_EMAILS;
+      var visibleEmails = emails.filter(function(em) {
+        for (var i = 0; i < s.rules.length; i++) {
+          var r = s.rules[i];
+          if (!r.enabled) continue;
+          if (r.type === 'time' && r.value) { if (new Date(em.date) < new Date(r.value)) return false; }
+          if (r.type === 'from' && r.value) { if (em.from.indexOf(r.value) === -1) return false; }
+          if (r.type === 'subject' && r.value) { if (em.subject.toLowerCase().indexOf(r.value.toLowerCase()) === -1) return false; }
+          if (r.type === 'exclude' && r.value) {
+            var words = r.value.split(',').map(function(w) { return w.trim().toLowerCase(); });
+            var combined = (em.subject + ' ' + em.body).toLowerCase();
+            for (var j = 0; j < words.length; j++) { if (words[j] && combined.indexOf(words[j]) !== -1) return false; }
+          }
+          if (r.type === 'attachment') { if (!em.hasAttachment) return false; }
+        }
+        return true;
+      });
+      var filteredOut = emails.length - visibleEmails.length;
+
+      // Get hidden fields from rules
+      var hiddenFields = [];
+      for (var ri = 0; ri < s.rules.length; ri++) {
+        if (s.rules[ri].type === 'hideField' && s.rules[ri].enabled) hiddenFields.push(s.rules[ri].value);
+      }
+      var showSender = hiddenFields.indexOf('Sender') === -1;
+      var showBody = hiddenFields.indexOf('Body') === -1;
+      var showSubject = hiddenFields.indexOf('Subject') === -1;
+      var showRecipients = hiddenFields.indexOf('Recipients') === -1;
+      var showLabels = hiddenFields.indexOf('Labels') === -1;
+      var showAttachments = hiddenFields.indexOf('Attachments') === -1;
+      var showSnippet = hiddenFields.indexOf('Snippet') === -1;
+      var visibleFieldCount = ALL_FIELDS.length - hiddenFields.length;
+
+      // Disconnected state
+      if (!gmailConnected) {
+        return '<div style="max-width:480px;margin:60px auto;text-align:center">' +
+          '<h1 style="font-size:24px;font-weight:700;margin-bottom:8px">Gmail</h1>' +
+          '<p style="font-size:14px;color:var(--muted);margin-bottom:4px">Connect your Gmail account to browse and control agent access to your emails.</p>' +
+          '<p style="font-size:14px;color:var(--muted);margin-bottom:24px;opacity:0.7">Powered by OAuth &mdash; we never store your password.</p>' +
+          '<button class="btn btn-primary" onclick="startOAuth(\\'gmail\\')" style="gap:8px">' +
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>' +
+            'Connect Gmail</button></div>';
+      }
+
+      // Build rules list
+      var rulesHtml = '';
+      s.rules.forEach(function(r, idx) {
+        var safe = idx;
+        rulesHtml += '<li style="display:flex;align-items:center;gap:8px;font-size:14px">';
+        rulesHtml += '<input type="checkbox" ' + (r.enabled ? 'checked' : '') + ' onchange="state.gmail.rules[' + idx + '].enabled=this.checked; saveGmail(); render()" style="accent-color:var(--primary);width:14px;height:14px;cursor:pointer;flex-shrink:0">';
+
+        if (r.type === 'time') {
+          rulesHtml += '<span>Only emails after</span>';
+          rulesHtml += '<input type="date" value="' + escapeAttr(r.value || '') + '" onchange="state.gmail.rules[' + idx + '].value=this.value; saveGmail(); render()" class="font-mono" style="font-size:14px;padding:4px 8px;border:1px solid var(--input-border);border-radius:6px;outline:none;width:auto;background:var(--card)' + (!r.enabled ? ';opacity:0.5' : '') + '"' + (!r.enabled ? ' disabled' : '') + '>';
+        } else if (r.type === 'from') {
+          rulesHtml += '<span>Only from</span>';
+          rulesHtml += '<input type="text" value="' + escapeAttr(r.value || '') + '" placeholder="@company.com" oninput="state.gmail.rules[' + idx + '].value=this.value; saveGmail(); render()" class="font-mono" style="font-size:14px;padding:4px 8px;border:1px solid var(--input-border);border-radius:6px;outline:none;width:140px;background:var(--card)">';
+        } else if (r.type === 'subject') {
+          rulesHtml += '<span>Subject contains</span>';
+          rulesHtml += '<input type="text" value="' + escapeAttr(r.value || '') + '" placeholder="keyword" oninput="state.gmail.rules[' + idx + '].value=this.value; saveGmail(); render()" class="font-mono" style="font-size:14px;padding:4px 8px;border:1px solid var(--input-border);border-radius:6px;outline:none;width:130px;background:var(--card)">';
+        } else if (r.type === 'exclude') {
+          rulesHtml += '<span>Exclude emails with</span>';
+          rulesHtml += '<input type="text" value="' + escapeAttr(r.value || '') + '" placeholder="unsubscribe, newsletter" oninput="state.gmail.rules[' + idx + '].value=this.value; saveGmail(); render()" class="font-mono" style="font-size:14px;padding:4px 8px;border:1px solid var(--input-border);border-radius:6px;outline:none;width:160px;background:var(--card)">';
+        } else if (r.type === 'attachment') {
+          rulesHtml += '<span>Only emails with attachments</span>';
+        } else if (r.type === 'hideField') {
+          rulesHtml += '<span>Hide <strong>' + escapeHtml(r.value) + '</strong> field from agents</span>';
+        } else {
+          rulesHtml += '<span>' + escapeHtml(r.label || r.type) + '</span>';
+        }
+
+        rulesHtml += '<button onclick="removeRule(' + idx + ')" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px;padding:0 4px;line-height:1;flex-shrink:0" title="Remove rule">&times;</button>';
+        rulesHtml += '</li>';
+      });
+
+      // Build email list
+      var emailListHtml = '';
+      emails.forEach(function(em) {
+        var isVisible = visibleEmails.indexOf(em) !== -1;
+        var isExpanded = state.expandedEmail === em.id;
+        var safe = em.id.replace(/'/g, "\\\\'");
+        var dt = new Date(em.date);
+        var timeStr = dt.toLocaleDateString(undefined, { month:'short', day:'numeric' });
+
+        emailListHtml += '<div class="email-row ' + (!isVisible ? 'email-row-hidden' : '') + '">';
+        emailListHtml += '<button class="email-row-btn" onclick="toggleEmailExpand(\\'' + safe + '\\')">';
+        emailListHtml += '<div style="display:flex;gap:12px;width:100%">';
+        // Left visibility bar
+        emailListHtml += '<div class="email-row-vis ' + (isVisible ? 'email-row-vis-on' : 'email-row-vis-off') + '"></div>';
+        // Main content
+        emailListHtml += '<div style="flex:1;min-width:0">';
+        // Row 1: sender + attachment icon + date
+        emailListHtml += '<div style="display:flex;align-items:center;gap:8px">';
+        emailListHtml += '<span class="email-row-sender' + (!showSender ? ' hidden-field' : '') + '">' + escapeHtml(em.from) + '</span>';
+        if (em.hasAttachment) emailListHtml += '<svg class="email-row-attach" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+        emailListHtml += '<span class="email-row-date" style="margin-left:auto">' + timeStr + '</span>';
+        emailListHtml += '</div>';
+        // Row 2: subject
+        emailListHtml += '<div class="email-row-subject' + (!showSubject ? ' hidden-field' : '') + '">' + escapeHtml(em.subject) + '</div>';
+        // Row 3: snippet
+        if (em.snippet) emailListHtml += '<div class="email-row-snippet' + (!showSnippet ? ' hidden-field' : '') + '">' + escapeHtml(em.snippet) + '</div>';
+        // Row 4: labels
+        if (showLabels && em.labels && em.labels.length) {
+          emailListHtml += '<div class="email-row-labels">';
+          em.labels.forEach(function(l) { emailListHtml += '<span class="email-label">' + escapeHtml(l) + '</span>'; });
+          emailListHtml += '</div>';
+        }
+        emailListHtml += '</div>';
+        emailListHtml += '</div></button>';
+
+        if (isExpanded) {
+          emailListHtml += '<div class="email-expand">';
+          if (!isVisible) emailListHtml += '<div class="email-expand-alert"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><line x1="1" y1="1" x2="23" y2="23"/></svg> Filtered out &mdash; agents cannot see this email</div>';
+          emailListHtml += '<div class="email-expand-field"><span class="field-label">From</span>' + (showSender ? '<span class="field-value">' + escapeHtml(em.from) + '</span>' : '<span class="field-value hidden-field">' + escapeHtml(em.from) + '</span>') + '</div>';
+          emailListHtml += '<div class="email-expand-field"><span class="field-label">To</span>' + (showRecipients ? '<span class="field-value">' + escapeHtml(em.to) + '</span>' : '<span class="field-value hidden-field">' + escapeHtml(em.to) + '</span>') + '</div>';
+          emailListHtml += '<div class="email-expand-field"><span class="field-label">Subject</span>' + (showSubject ? '<span class="field-value">' + escapeHtml(em.subject) + '</span>' : '<span class="field-value hidden-field">' + escapeHtml(em.subject) + '</span>') + '</div>';
+          emailListHtml += '<div class="email-expand-body">';
+          if (showBody) {
+            emailListHtml += '<pre>' + escapeHtml(em.body) + '</pre>';
+          } else {
+            emailListHtml += '<pre class="hidden-field">' + escapeHtml(em.body) + '</pre>';
+          }
+          emailListHtml += '</div>';
+          emailListHtml += '</div>';
+        }
+        emailListHtml += '</div>';
+      });
+
+      // Build action cards
+      var actionHtml = '';
+      gmailStaging.forEach(function(a) {
+        var data = typeof a.action_data === 'string' ? JSON.parse(a.action_data) : a.action_data;
+        var isPending = a.status === 'pending';
+        var isReviewing = state.editingAction === a.action_id;
+        var safe = a.action_id.replace(/'/g, "\\\\'");
+        var borderClass = isPending ? 'border-left:3px solid var(--warning)' : a.status === 'approved' ? 'border-left:3px solid var(--success);opacity:0.6' : 'border-left:3px solid var(--destructive);opacity:0.6';
+        var statusClass = isPending ? 'pending' : a.status === 'approved' ? 'connected' : 'rejected';
+        var typeLabel = a.action_type === 'reply_email' ? 'reply' : a.action_type === 'draft_email' ? 'draft' : a.action_type;
+        var time = new Date(a.proposed_at || a.createdAt);
+        var timeStr = time.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+
+        actionHtml += '<div class="card" style="padding:16px;' + borderClass + '">';
+        actionHtml += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
+        actionHtml += '<div style="display:flex;align-items:center;gap:6px">';
+        actionHtml += '<span class="status ' + statusClass + '" style="font-size:14px;font-family:JetBrains Mono,monospace;text-transform:uppercase;padding:2px 8px">' + a.status + '</span>';
+        actionHtml += '<span style="font-size:14px;font-family:JetBrains Mono,monospace;color:var(--muted);text-transform:uppercase">' + typeLabel + '</span>';
+        actionHtml += '</div>';
+        actionHtml += '<span style="font-size:14px;font-family:JetBrains Mono,monospace;color:var(--muted)">' + timeStr + '</span>';
+        actionHtml += '</div>';
+        if (a.purpose) actionHtml += '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">' + escapeHtml(a.purpose) + '</p>';
+
+        // Collapsed: show To, Subj, truncated body
+        if (!isReviewing) {
+          actionHtml += '<div style="font-size:14px;display:flex;flex-direction:column;gap:4px">';
+          actionHtml += '<div style="display:flex;gap:8px"><span style="color:var(--muted);width:36px;flex-shrink:0">To:</span><span class="font-mono" style="color:var(--fg)">' + escapeHtml(data.to || '') + '</span></div>';
+          actionHtml += '<div style="display:flex;gap:8px"><span style="color:var(--muted);width:36px;flex-shrink:0">Subj:</span><span class="font-mono" style="color:var(--fg)">' + escapeHtml(data.subject || '') + '</span></div>';
+          actionHtml += '<pre class="font-mono" style="white-space:pre-wrap;background:rgba(0,0,0,0.03);border-radius:6px;padding:8px;font-size:14px;color:var(--fg);max-height:80px;overflow:hidden;margin-top:4px;cursor:pointer;position:relative" onclick="toggleEditAction(\\'' + safe + '\\')">' + escapeHtml(data.body || '') + '<span style="position:absolute;bottom:0;left:0;right:0;height:28px;background:linear-gradient(transparent,#f5f5f5);pointer-events:none"></span></pre>';
+          actionHtml += '</div>';
+        }
+
+        // Expanded: full editable view
+        if (isReviewing) {
+          actionHtml += '<div style="font-size:14px;display:flex;flex-direction:column;gap:6px">';
+          actionHtml += '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--muted);width:36px;flex-shrink:0">To:</span><input type="text" class="email-edit-input" id="edit-to-' + a.action_id + '" value="' + escapeAttr(data.to || '') + '" style="font-family:JetBrains Mono,monospace;font-size:14px;padding:4px 8px"></div>';
+          actionHtml += '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--muted);width:36px;flex-shrink:0">Subj:</span><input type="text" class="email-edit-input" id="edit-subj-' + a.action_id + '" value="' + escapeAttr(data.subject || '') + '" style="font-family:JetBrains Mono,monospace;font-size:14px;padding:4px 8px"></div>';
+          actionHtml += '<div><span style="color:var(--muted);display:block;margin-bottom:4px">Body:</span><textarea class="email-body-edit" id="edit-body-' + a.action_id + '" style="font-family:JetBrains Mono,monospace;font-size:14px;min-height:160px">' + escapeHtml(data.body || '') + '</textarea></div>';
+          actionHtml += '</div>';
+        }
+
+        // Buttons
+        if (isPending) {
+          actionHtml += '<div style="display:flex;align-items:center;gap:6px;margin-top:12px">';
+          if (!isReviewing) {
+            actionHtml += '<button class="btn btn-sm btn-outline" style="gap:4px" onclick="toggleEditAction(\\'' + safe + '\\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Review</button>';
+          } else {
+            actionHtml += '<button class="btn btn-sm btn-outline" style="color:var(--destructive);border-color:rgba(239,68,68,0.3);gap:4px" onclick="resolveAction(\\'' + safe + '\\', \\'reject\\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Deny</button>';
+            actionHtml += '<button class="btn btn-sm" style="background:var(--primary);color:#fff;gap:4px" onclick="approveAction(\\'' + safe + '\\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg> Save to Draft</button>';
+            actionHtml += '<button class="btn btn-sm" style="background:var(--success);color:#fff;gap:4px" onclick="sendAction(\\'' + safe + '\\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send</button>';
+          }
+          actionHtml += '</div>';
+        }
+        actionHtml += '</div>';
+      });
+      if (!actionHtml) actionHtml = '<div class="card" style="padding:24px;text-align:center;color:var(--muted);font-size:14px">No pending actions from agents.</div>';
+
+      return \`
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px">
+          <div style="display:flex;align-items:center;gap:16px">
+            <div>
+              <h1 style="font-size:24px;font-weight:700;letter-spacing:-0.5px;color:var(--fg)">Gmail</h1>
+              \${accountEmail ? '<p class="font-mono" style="font-size:14px;color:var(--muted);margin-top:2px">' + escapeHtml(accountEmail) + '</p>' : ''}
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:6px;padding:6px 12px;background:var(--card)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+              <span style="font-size:14px;color:var(--fg)">Cache locally</span>
+              <label style="position:relative;display:inline-block;width:36px;height:20px;margin:0;cursor:pointer">
+                <input type="checkbox" \${chk(s.cachingEnabled)} onchange="state.gmail.cachingEnabled=this.checked; saveGmail()" style="opacity:0;width:0;height:0">
+                <span style="position:absolute;inset:0;background:\${s.cachingEnabled ? 'var(--primary)' : '#ccc'};border-radius:10px;transition:background 0.2s"></span>
+                <span style="position:absolute;left:\${s.cachingEnabled ? '18px' : '2px'};top:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.2)"></span>
+              </label>
+            </div>
+          </div>
+          <button class="btn btn-outline btn-sm" style="color:var(--destructive);border-color:rgba(239,68,68,0.3)" onclick="if(confirm('Disconnect Gmail? This will revoke all access tokens and disable Gmail access for all agents.')){disconnectSource('gmail')}">Disconnect</button>
+        </div>
+
+        <div class="gmail-grid">
+          <div class="gmail-grid-left">
+            <div class="card" style="padding:16px">
+              <label style="font-size:14px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:8px">Write access policies in natural language <span class="save-flash" id="gmail-flash">Saved</span></label>
+              <div style="display:flex;gap:8px">
+                <textarea id="access-policy" rows="2" style="flex:1;border:1px solid var(--input-border);border-radius:6px;padding:8px 10px;font-size:14px;font-family:inherit;resize:none;outline:none;transition:border-color 0.15s" placeholder="Agents can only access emails that are requesting meetings with me" oninput="state.gmail.accessPolicy=this.value">\${escapeHtml(s.accessPolicy)}</textarea>
+                <button class="btn btn-primary" onclick="submitPolicy()" style="align-self:flex-end;white-space:nowrap">Submit</button>
+              </div>
+            </div>
+
+            <div class="card" style="padding:16px">
+              <label style="font-size:14px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:12px">Active Rules</label>
+              <ul style="list-style:none;display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;padding-right:4px">
+                \${rulesHtml || '<li style="font-size:14px;color:var(--muted);text-align:center;padding:12px 0">No rules yet. Write a policy above and click Submit.</li>'}
+              </ul>
+            </div>
+
+            <div class="card" style="padding:0;overflow:hidden">
+              <div class="email-list-header">
+                <span class="stat">Total: <strong>\${emails.length}</strong></span>
+                <span style="color:var(--border)">|</span>
+                <span class="stat \${filteredOut ? 'stat-accent' : ''}">Agent sees: <strong>\${visibleEmails.length}</strong></span>
+                <span style="color:var(--border)">|</span>
+                <span class="stat">Fields: <strong>\${visibleFieldCount}/\${ALL_FIELDS.length}</strong></span>
+                \${filteredOut ? '<span class="stat stat-accent" style="margin-left:auto">' + filteredOut + ' filtered out</span>' : ''}
+              </div>
+              \${emailListHtml || '<p class="empty" style="padding:40px">No emails found.</p>'}
+            </div>
+          </div>
+
+          <div class="gmail-grid-right">
+            <div class="action-review-header">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted)"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              <h2 style="margin:0">Agent Action Review</h2>
+              \${pendingCount ? '<span class="nav-badge">' + pendingCount + '</span>' : ''}
+            </div>
+            \${actionHtml}
+          </div>
         </div>
       \`;
     }
@@ -662,7 +1151,7 @@ function getIndexHtml(): string {
           repoHtml += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
           repoHtml += '<h3 style="font-size:14px;margin:0">' + escapeHtml(owner) + '</h3>';
           repoHtml += '<span class="status ' + (isOrg ? 'pending' : 'connected') + '">' + (isOrg ? 'org' : 'personal') + '</span>';
-          repoHtml += '<span style="font-size:12px;color:#888">' + enabledCount + '/' + ownerRepos.length + ' selected</span>';
+          repoHtml += '<span style="font-size:14px;color:#888">' + enabledCount + '/' + ownerRepos.length + ' selected</span>';
           repoHtml += '<span class="sel-links">(<a onclick="selectAllOwner(\\'' + escapeAttr(owner) + '\\', true)">all</a> / <a onclick="selectAllOwner(\\'' + escapeAttr(owner) + '\\', false)">none</a>)</span>';
           repoHtml += '</div>';
 
@@ -680,21 +1169,21 @@ function getIndexHtml(): string {
             repoHtml += '<div class="repo-header" onclick="toggleRepo(\\'' + safe + '\\')">';
             repoHtml += '<input type="checkbox" ' + chk(repo.enabled) + ' onclick="event.stopPropagation(); toggleRepoEnabled(\\'' + safe + '\\', this.checked)" title="Enable access">';
             repoHtml += '<span class="repo-name">' + escapeHtml(repo.name) + '</span>';
-            if (repo.private) repoHtml += '<span class="status disconnected" style="font-size:10px;padding:2px 6px">private</span>';
-            if (repo.description) repoHtml += '<span style="font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">' + escapeHtml(repo.description) + '</span>';
+            if (repo.private) repoHtml += '<span class="status disconnected" style="font-size:14px;padding:2px 6px">private</span>';
+            if (repo.description) repoHtml += '<span style="font-size:14px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">' + escapeHtml(repo.description) + '</span>';
             repoHtml += '<span class="repo-chevron ' + (exp ? 'open' : '') + '">&#9654;</span>';
             repoHtml += '</div>';
             repoHtml += '<div class="repo-perms ' + (exp ? 'show' : '') + '">';
             repoHtml += '<div style="display:flex;align-items:center;gap:6px;padding:8px 0">';
-            repoHtml += '<span style="font-size:12px;font-weight:700;color:#1a1a2e">Contents</span>';
+            repoHtml += '<span style="font-size:14px;font-weight:700;color:var(--fg)">Contents</span>';
             repoHtml += '<div class="toggle" style="margin:0"><input type="checkbox" ' + chk(hasCodeRead) + ' onchange="toggleRepoPerm(\\'' + safe + '\\', \\'contents:read\\', this.checked)"><label>read</label></div>';
             repoHtml += '<div class="toggle" style="margin:0"><input type="checkbox" ' + chk(hasCodeWrite) + ' onchange="toggleRepoPerm(\\'' + safe + '\\', \\'contents:write\\', this.checked)"><label>write</label></div>';
             repoHtml += '<span style="color:#ddd;margin:0 4px">|</span>';
-            repoHtml += '<span style="font-size:12px;font-weight:700;color:#1a1a2e">Issues</span>';
+            repoHtml += '<span style="font-size:14px;font-weight:700;color:var(--fg)">Issues</span>';
             repoHtml += '<div class="toggle" style="margin:0"><input type="checkbox" ' + chk(hasIssuesRead) + ' onchange="toggleRepoPerm(\\'' + safe + '\\', \\'issues:read\\', this.checked)"><label>read</label></div>';
             repoHtml += '<div class="toggle" style="margin:0"><input type="checkbox" ' + chk(hasIssuesWrite) + ' onchange="toggleRepoPerm(\\'' + safe + '\\', \\'issues:write\\', this.checked)"><label>write</label></div>';
             repoHtml += '<span style="color:#ddd;margin:0 4px">|</span>';
-            repoHtml += '<span style="font-size:12px;font-weight:700;color:#1a1a2e">Pull Requests</span>';
+            repoHtml += '<span style="font-size:14px;font-weight:700;color:var(--fg)">Pull Requests</span>';
             repoHtml += '<div class="toggle" style="margin:0"><input type="checkbox" ' + chk(hasPrsRead) + ' onchange="toggleRepoPerm(\\'' + safe + '\\', \\'pull_requests:read\\', this.checked)"><label>read</label></div>';
             repoHtml += '<div class="toggle" style="margin:0"><input type="checkbox" ' + chk(hasPrsWrite) + ' onchange="toggleRepoPerm(\\'' + safe + '\\', \\'pull_requests:write\\', this.checked)"><label>write</label></div>';
             repoHtml += '</div></div></div>';
@@ -713,27 +1202,27 @@ function getIndexHtml(): string {
         <div class="card">
           <h2>Connection Status</h2>
           \${ghConnected
-            ? '<p>Status: <span class="status connected">Connected</span></p>' +
-              (ghAccount && ghAccount.login ? '<p style="margin-top:8px">Signed in as <strong>@' + ghAccount.login + '</strong></p>' : '') +
-              '<div class="actions"><button class="btn btn-danger" onclick="disconnectSource(\\'github\\')">Disconnect GitHub</button></div>'
-            : '<p>Status: <span class="status disconnected">' + (github?.enabled ? 'Not connected' : 'Not configured') + '</span></p>' +
+            ? '<div style="display:flex;align-items:center;gap:10px"><span class="status-dot status-dot-connected"></span><span class="status connected">Connected</span></div>' +
+              (ghAccount && ghAccount.login ? '<p style="margin-top:8px;font-size:14px">Signed in as <strong class="font-mono">@' + ghAccount.login + '</strong></p>' : '') +
+              '<div class="actions"><button class="btn btn-danger btn-sm" onclick="disconnectSource(\\'github\\')">Disconnect</button></div>'
+            : '<div style="display:flex;align-items:center;gap:10px"><span class="status-dot status-dot-disconnected"></span><span class="status disconnected">' + (github?.enabled ? 'Not connected' : 'Not configured') + '</span></div>' +
               '<div class="actions"><button class="btn btn-primary" onclick="startOAuth(\\'github\\')">Connect GitHub</button></div>'
           }
         </div>
 
-        \${ghConnected ? '<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">Repositories <span class="save-flash" id="github-flash">Saved</span></h2><button class="btn btn-outline" onclick="fetchGithubRepos()">Refresh repos</button></div>' +
-          '<div style="display:flex;align-items:center;gap:6px;padding:10px 14px;background:#f8f9fa;border-radius:6px;margin-bottom:12px">' +
-            '<span style="font-size:12px;font-weight:700;color:#1a1a2e;white-space:nowrap">Contents</span>' +
-            '<div class="toggle" style="margin:0"><input type="checkbox" id="bulk-code-read" checked><label for="bulk-code-read" style="font-size:12px">read</label></div>' +
-            '<div class="toggle" style="margin:0"><input type="checkbox" id="bulk-code-write"><label for="bulk-code-write" style="font-size:12px">write</label></div>' +
+        \${ghConnected ? '<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">Repositories <span class="save-flash" id="github-flash">Saved</span></h2><button class="btn btn-outline btn-sm" onclick="fetchGithubRepos()">Refresh repos</button></div>' +
+          '<div style="display:flex;align-items:center;gap:6px;padding:10px 14px;background:var(--sidebar-bg);border-radius:6px;margin-bottom:12px">' +
+            '<span style="font-size:14px;font-weight:700;color:var(--fg);white-space:nowrap">Contents</span>' +
+            '<div class="toggle" style="margin:0"><input type="checkbox" id="bulk-code-read" checked><label for="bulk-code-read" style="font-size:14px">read</label></div>' +
+            '<div class="toggle" style="margin:0"><input type="checkbox" id="bulk-code-write"><label for="bulk-code-write" style="font-size:14px">write</label></div>' +
             '<span style="color:#ddd;margin:0 4px">|</span>' +
-            '<span style="font-size:12px;font-weight:700;color:#1a1a2e;white-space:nowrap">Issues</span>' +
-            '<div class="toggle" style="margin:0"><input type="checkbox" id="bulk-issues-read" checked><label for="bulk-issues-read" style="font-size:12px">read</label></div>' +
-            '<div class="toggle" style="margin:0"><input type="checkbox" id="bulk-issues-write"><label for="bulk-issues-write" style="font-size:12px">write</label></div>' +
+            '<span style="font-size:14px;font-weight:700;color:var(--fg);white-space:nowrap">Issues</span>' +
+            '<div class="toggle" style="margin:0"><input type="checkbox" id="bulk-issues-read" checked><label for="bulk-issues-read" style="font-size:14px">read</label></div>' +
+            '<div class="toggle" style="margin:0"><input type="checkbox" id="bulk-issues-write"><label for="bulk-issues-write" style="font-size:14px">write</label></div>' +
             '<span style="color:#ddd;margin:0 4px">|</span>' +
-            '<span style="font-size:12px;font-weight:700;color:#1a1a2e;white-space:nowrap">Pull Requests</span>' +
-            '<div class="toggle" style="margin:0"><input type="checkbox" id="bulk-prs-read" checked><label for="bulk-prs-read" style="font-size:12px">read</label></div>' +
-            '<div class="toggle" style="margin:0"><input type="checkbox" id="bulk-prs-write"><label for="bulk-prs-write" style="font-size:12px">write</label></div>' +
+            '<span style="font-size:14px;font-weight:700;color:var(--fg);white-space:nowrap">Pull Requests</span>' +
+            '<div class="toggle" style="margin:0"><input type="checkbox" id="bulk-prs-read" checked><label for="bulk-prs-read" style="font-size:14px">read</label></div>' +
+            '<div class="toggle" style="margin:0"><input type="checkbox" id="bulk-prs-write"><label for="bulk-prs-write" style="font-size:14px">write</label></div>' +
             '<span style="flex:1"></span>' +
             '<button class="btn btn-primary btn-sm" onclick="applyBulkPerms()">Apply to selected</button>' +
           '</div>' +
@@ -750,7 +1239,7 @@ function getIndexHtml(): string {
         <div class="card">
           <h2>API Keys</h2>
           \${state.keys.length ? '<table><tr><th>ID</th><th>Name</th><th>Manifests</th><th>Status</th><th>Actions</th></tr>' +
-            state.keys.map(k => '<tr><td>' + k.id + '</td><td>' + k.name + '</td><td style="font-size:11px">' + k.allowed_manifests + '</td><td><span class="status ' + (k.enabled ? 'connected' : 'disconnected') + '">' + (k.enabled ? 'Active' : 'Revoked') + '</span></td><td>' +
+            state.keys.map(k => '<tr><td>' + k.id + '</td><td>' + k.name + '</td><td style="font-size:14px">' + k.allowed_manifests + '</td><td><span class="status ' + (k.enabled ? 'connected' : 'disconnected') + '">' + (k.enabled ? 'Active' : 'Revoked') + '</span></td><td>' +
               (k.enabled ? '<button class="btn btn-danger btn-sm" onclick="revokeKey(\\'' + k.id + '\\')">Revoke</button>' : '') +
               '</td></tr>').join('') +
             '</table>' : '<p class="empty">No API keys.</p>'}
@@ -770,11 +1259,146 @@ function getIndexHtml(): string {
           \${state.audit.length ? '<table><tr><th>Time</th><th>Event</th><th>Source</th><th>Details</th></tr>' +
             state.audit.map(e => {
               const d = typeof e.details === 'string' ? JSON.parse(e.details) : e.details;
-              return '<tr><td style="font-size:11px">' + new Date(e.timestamp).toLocaleString() + '</td><td>' + e.event + '</td><td>' + (e.source || '-') + '</td><td style="font-size:11px">' + JSON.stringify(d).slice(0,100) + '</td></tr>';
+              return '<tr><td style="font-size:14px">' + new Date(e.timestamp).toLocaleString() + '</td><td>' + e.event + '</td><td>' + (e.source || '-') + '</td><td style="font-size:14px">' + JSON.stringify(d).slice(0,100) + '</td></tr>';
             }).join('') +
             '</table>' : '<p class="empty">No audit entries.</p>'}
         </div>
       \`;
+    }
+
+    function toggleField(field) {
+      var idx = state.gmail.selectedFields.indexOf(field);
+      if (idx !== -1) state.gmail.selectedFields.splice(idx, 1);
+      else state.gmail.selectedFields.push(field);
+      saveGmail();
+      render();
+    }
+
+    function toggleEmailExpand(emailId) {
+      state.expandedEmail = state.expandedEmail === emailId ? null : emailId;
+      render();
+    }
+
+    function toggleEditAction(actionId) {
+      state.editingAction = state.editingAction === actionId ? null : actionId;
+      render();
+    }
+
+    function submitPolicy() {
+      var text = (state.gmail.accessPolicy || '').trim();
+      if (!text) return;
+      var lower = text.toLowerCase();
+      var newRules = [];
+
+      // Parse time-based rules
+      var dateMatch = lower.match(/after\\s+(\\d{4}[-\\/]\\d{1,2}[-\\/]\\d{1,2})/);
+      if (dateMatch) newRules.push({ type: 'time', enabled: true, value: dateMatch[1].replace(/\\//g,'-') });
+      if (/recent|last\\s*(week|month|year)|past\\s*(week|month|year)/.test(lower)) {
+        var d = new Date();
+        if (/year/.test(lower)) d.setFullYear(d.getFullYear() - 1);
+        else if (/month/.test(lower)) d.setMonth(d.getMonth() - 1);
+        else d.setDate(d.getDate() - 7);
+        newRules.push({ type: 'time', enabled: true, value: d.toISOString().split('T')[0] });
+      }
+
+      // Parse sender-based rules
+      var fromMatch = lower.match(/(?:from|sender)\\s+([^\\s,]+@[^\\s,]+)/);
+      if (fromMatch) newRules.push({ type: 'from', enabled: true, value: fromMatch[1] });
+      var domainMatch = lower.match(/(?:from|sender)\\s+@([^\\s,]+)/);
+      if (domainMatch && !fromMatch) newRules.push({ type: 'from', enabled: true, value: '@' + domainMatch[1] });
+
+      // Parse subject keyword rules
+      var subjMatch = lower.match(/subject\\s+(?:contains?|includes?|about|with)\\s+["']?([^"']+?)["']?$/);
+      if (subjMatch) newRules.push({ type: 'subject', enabled: true, value: subjMatch[1].trim() });
+      if (/meeting|calendar invite|schedule/.test(lower) && !subjMatch) {
+        newRules.push({ type: 'subject', enabled: true, value: 'meeting' });
+      }
+
+      // Parse exclusion rules
+      var exclMatch = lower.match(/(?:exclude|ignore|skip|filter out|no)\\s+(.+?)(?:\\s+emails?)?$/);
+      if (exclMatch && !/meeting|calendar/.test(exclMatch[1])) {
+        newRules.push({ type: 'exclude', enabled: true, value: exclMatch[1].replace(/\\s+and\\s+/g, ', ') });
+      }
+      if (/newsletter|spam|marketing|promotion/.test(lower)) {
+        var excl = [];
+        if (/newsletter/.test(lower)) excl.push('newsletter');
+        if (/spam/.test(lower)) excl.push('spam');
+        if (/marketing/.test(lower)) excl.push('marketing');
+        if (/promotion/.test(lower)) excl.push('promotion');
+        if (excl.length) newRules.push({ type: 'exclude', enabled: true, value: excl.join(', ') });
+      }
+
+      // Parse attachment-only rules
+      if (/attachment|attached/.test(lower)) {
+        newRules.push({ type: 'attachment', enabled: true });
+      }
+
+      // Parse field hiding rules
+      if (/hide\\s+(body|content)/.test(lower) || /no\\s+body/.test(lower) || /without\\s+body/.test(lower)) {
+        newRules.push({ type: 'hideField', enabled: true, value: 'Body' });
+      }
+      if (/hide\\s+sender/.test(lower) || /no\\s+sender/.test(lower)) {
+        newRules.push({ type: 'hideField', enabled: true, value: 'Sender' });
+      }
+      if (/hide\\s+recipient/.test(lower) || /no\\s+recipient/.test(lower)) {
+        newRules.push({ type: 'hideField', enabled: true, value: 'Recipients' });
+      }
+      if (/hide\\s+attachment/.test(lower) || /no\\s+attachment\\s+info/.test(lower)) {
+        newRules.push({ type: 'hideField', enabled: true, value: 'Attachments' });
+      }
+      if (/hide\\s+label/.test(lower) || /no\\s+label/.test(lower)) {
+        newRules.push({ type: 'hideField', enabled: true, value: 'Labels' });
+      }
+      if (/hide\\s+snippet/.test(lower) || /no\\s+snippet/.test(lower)) {
+        newRules.push({ type: 'hideField', enabled: true, value: 'Snippet' });
+      }
+
+      // If nothing specific parsed, add a generic subject filter from the text
+      if (newRules.length === 0) {
+        var keywords = text.replace(/[^a-zA-Z0-9\\s]/g, '').split(/\\s+/).filter(function(w) {
+          return w.length > 3 && ['only','that','with','from','emails','email','access','agents','about','those','this','they','them','have','been','into','just','also','very','much','than','more','some'].indexOf(w.toLowerCase()) === -1;
+        });
+        if (keywords.length > 0) {
+          newRules.push({ type: 'subject', enabled: true, value: keywords.slice(0, 3).join(' ') });
+        }
+      }
+
+      // Merge new rules: avoid adding duplicate rules
+      newRules.forEach(function(nr) {
+        var exists = state.gmail.rules.some(function(er) {
+          return er.type === nr.type && er.value === nr.value;
+        });
+        if (!exists) state.gmail.rules.push(nr);
+      });
+
+      state.gmail.accessPolicy = '';
+      saveGmail();
+      render();
+    }
+
+    function removeRule(idx) {
+      if (idx >= 0 && idx < state.gmail.rules.length) {
+        state.gmail.rules.splice(idx, 1);
+        saveGmail();
+        render();
+      }
+    }
+
+    async function sendAction(actionId) {
+      var editTo = document.getElementById('edit-to-' + actionId);
+      if (editTo) {
+        await fetch('/api/staging/' + actionId + '/edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action_data: {
+            to: document.getElementById('edit-to-' + actionId).value,
+            subject: document.getElementById('edit-subj-' + actionId).value,
+            body: document.getElementById('edit-body-' + actionId).value,
+            send: true
+          }})
+        });
+      }
+      await resolveAction(actionId, 'approve');
     }
 
     function setAllFields(val) {
@@ -949,9 +1573,10 @@ function getIndexHtml(): string {
 
     function flash(id) {
       var el = document.getElementById(id);
-      if (!el) return;
-      el.classList.add('show');
-      setTimeout(function() { el.classList.remove('show'); }, 1500);
+      if (el) { el.classList.add('show'); setTimeout(function() { el.classList.remove('show'); }, 1500); }
+      // Also flash sidebar footer
+      var sf = document.getElementById('sidebar-flash');
+      if (sf) { sf.classList.add('show'); setTimeout(function() { sf.classList.remove('show'); }, 1500); }
     }
 
     // --- OAuth actions ---
@@ -1116,6 +1741,12 @@ function getIndexHtml(): string {
     window.toggleRepoPerm = toggleRepoPerm;
     window.selectAllOwner = selectAllOwner;
     window.applyBulkPerms = applyBulkPerms;
+    window.toggleField = toggleField;
+    window.toggleEmailExpand = toggleEmailExpand;
+    window.toggleEditAction = toggleEditAction;
+    window.submitPolicy = submitPolicy;
+    window.removeRule = removeRule;
+    window.sendAction = sendAction;
 
     // Handle OAuth redirect results
     (function handleOAuthResult() {
@@ -1123,12 +1754,7 @@ function getIndexHtml(): string {
       var success = params.get('oauth_success');
       var error = params.get('oauth_error');
       if (success) {
-        // Switch to the tab of the connected source
-        currentTab = success;
-        document.querySelectorAll('.tab').forEach(function(t) {
-          t.classList.toggle('active', t.dataset.tab === success);
-        });
-        // Clean URL
+        switchTab(success);
         window.history.replaceState({}, '', '/');
       }
       if (error) {
