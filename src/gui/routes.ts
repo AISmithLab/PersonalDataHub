@@ -716,10 +716,6 @@ function getIndexHtml(): string {
       { id:'e11', from:'alice@company.com', to:'owner@gmail.com', subject:'Re: API Design Review', snippet:'Looks good, just a few minor suggestions', body:'Looks good overall! A few suggestions:\\n\\n1. Consider pagination for the list endpoint\\n2. Add rate limiting headers\\n3. Document the error codes\\n\\nOtherwise LGTM.', date:'2025-02-14T16:00:00Z', labels:['Inbox'], hasAttachment:false },
       { id:'e12', from:'newsletter@techweekly.com', to:'owner@gmail.com', subject:'This Week in Tech: AI Privacy Concerns', snippet:'The latest on AI regulation and data privacy', body:'This Week in Tech Newsletter\\n\\n1. EU proposes new AI transparency rules\\n2. Major breach at social media company\\n3. Open source privacy tools gaining traction\\n4. Interview: Building privacy-first AI agents\\n\\nRead more at techweekly.com', date:'2025-02-13T06:00:00Z', labels:['Inbox','Newsletter'], hasAttachment:false },
     ];
-    var DEMO_STAGED = [
-      { action_id:'demo-sa-1', source:'gmail', action_type:'reply_email', status:'pending', purpose:'Respond to meeting reschedule request', proposed_at:'2025-02-22T09:30:00Z', action_data: JSON.stringify({ to:'alice@company.com', subject:'Re: Q1 Planning Meeting', body:'Hi Alice,\\n\\nThursday at 2pm works perfectly for me. I\\'ll update my calendar.\\n\\nBest regards' }) },
-      { action_id:'demo-sa-2', source:'gmail', action_type:'draft_email', status:'pending', purpose:'Weekly status update to team', proposed_at:'2025-02-22T10:15:00Z', action_data: JSON.stringify({ to:'team@company.com', subject:'Weekly Status Update - Feb 22', body:'Team,\\n\\nHere\\'s this week\\'s progress:\\n- Completed API integration\\n- Fixed 3 critical bugs\\n- Started performance optimization\\n\\nNext week focus: deployment prep.' }) },
-    ];
 
     let state = {
       sources: [], manifests: [], keys: [], staging: [], audit: [],
@@ -948,7 +944,7 @@ function getIndexHtml(): string {
       var gmail = state.sources.find(function(s) { return s.name === 'gmail'; });
       var s = state.gmail;
       var realStaging = state.staging.filter(function(a) { return a.source === 'gmail'; });
-      var gmailStaging = realStaging.length ? realStaging : DEMO_STAGED;
+      var gmailStaging = realStaging;
       var pendingCount = gmailStaging.filter(function(a) { return a.status === 'pending'; }).length;
 
       var gmailConnected = gmail && gmail.connected;
