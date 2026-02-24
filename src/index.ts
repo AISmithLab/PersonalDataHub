@@ -23,7 +23,7 @@ const dbPath = resolve('pdh.db');
 const db = getDb(dbPath);
 const encryptionKey = config.encryption_key ?? process.env.PDH_ENCRYPTION_KEY ?? 'pdh-default-key';
 
-// Expose AI provider API key from config as env var
+// Expose AI provider config as env vars
 if (config.ai?.api_key) {
   const envVarMap: Record<string, string> = {
     anthropic: 'ANTHROPIC_API_KEY',
@@ -33,6 +33,9 @@ if (config.ai?.api_key) {
   const envVar = envVarMap[config.ai.provider];
   if (envVar && !process.env[envVar]) {
     process.env[envVar] = config.ai.api_key;
+  }
+  if (config.ai.model && !process.env.AI_MODEL) {
+    process.env.AI_MODEL = config.ai.model;
   }
 }
 

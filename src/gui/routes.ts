@@ -12,6 +12,7 @@ import { GitHubConnector } from '../connectors/github/connector.js';
 import { Octokit } from 'octokit';
 import { translatePolicy } from '../ai/translate.js';
 import { manifestToRules } from '../ai/manifest-to-rules.js';
+import { parseManifest } from '../manifest/parser.js';
 
 interface GuiDeps {
   db: Database.Database;
@@ -332,7 +333,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   // Fetch real emails from connected Gmail account
   app.get('/api/gmail/emails', async (c) => {
     const connector = deps.connectorRegistry.get('gmail');
-    if (!connector) {
+    if (!connector || !(connector instanceof GmailConnector)) {
       return c.json({ ok: false, error: 'Gmail not connected' }, 401);
     }
 
@@ -389,6 +390,23 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unknown_error';
       return c.json({ ok: false, error: 'SERVER_ERROR', message }, 500);
+    }
+  });
+
+  // Parse raw manifest DSL and return rules
+  app.post('/api/policy/parse-manifest', async (c) => {
+    try {
+      const { manifest: rawManifest } = await c.req.json<{ manifest: string }>();
+      if (!rawManifest) {
+        return c.json({ ok: false, error: 'MISSING_PARAMS', message: 'manifest is required' }, 400);
+      }
+
+      const manifest = parseManifest(rawManifest, 'policy-manual');
+      const rules = manifestToRules(manifest);
+      return c.json({ ok: true, rules });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to parse manifest';
+      return c.json({ ok: false, error: 'PARSE_ERROR', message });
     }
   });
 
@@ -625,7 +643,10 @@ function getIndexHtml(): string {
     .email-row-date { font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
     .email-row-labels { display: flex; gap: 4px; margin-top: 2px; }
     .email-label { font-size: 11px; font-family: 'JetBrains Mono', monospace; padding: 2px 8px; border-radius: 4px; background: rgba(15,160,129,0.07); color: var(--primary); font-weight: 500; }
+    .email-label.hidden-field { text-decoration: line-through; opacity: 0.45; }
+    .email-row-labels.hidden-field { opacity: 0.5; }
     .email-row-attach { color: var(--muted); flex-shrink: 0; }
+    .email-row-attach.hidden-field { opacity: 0.3; }
     .email-row-vis { width: 3px; align-self: stretch; border-radius: 2px; flex-shrink: 0; }
     .email-row-vis-on { background: var(--primary); }
     .email-row-vis-off { background: var(--border); }
@@ -1046,7 +1067,7 @@ function getIndexHtml(): string {
         // Row 1: sender + attachment icon + date
         emailListHtml += '<div style="display:flex;align-items:center;gap:8px">';
         emailListHtml += '<span class="email-row-sender' + (!showSender ? ' hidden-field' : '') + '">' + escapeHtml(em.from) + '</span>';
-        if (em.hasAttachment) emailListHtml += '<svg class="email-row-attach" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+        if (em.hasAttachment) emailListHtml += '<svg class="email-row-attach' + (!showAttachments ? ' hidden-field' : '') + '" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
         emailListHtml += '<span class="email-row-date" style="margin-left:auto">' + timeStr + '</span>';
         emailListHtml += '</div>';
         // Row 2: subject
@@ -1054,9 +1075,9 @@ function getIndexHtml(): string {
         // Row 3: snippet
         if (em.snippet) emailListHtml += '<div class="email-row-snippet' + (!showSnippet ? ' hidden-field' : '') + '">' + escapeHtml(em.snippet) + '</div>';
         // Row 4: labels
-        if (showLabels && em.labels && em.labels.length) {
-          emailListHtml += '<div class="email-row-labels">';
-          em.labels.forEach(function(l) { emailListHtml += '<span class="email-label">' + escapeHtml(l) + '</span>'; });
+        if (em.labels && em.labels.length) {
+          emailListHtml += '<div class="email-row-labels' + (!showLabels ? ' hidden-field' : '') + '">';
+          em.labels.forEach(function(l) { emailListHtml += '<span class="email-label' + (!showLabels ? ' hidden-field' : '') + '">' + escapeHtml(l) + '</span>'; });
           emailListHtml += '</div>';
         }
         emailListHtml += '</div>';
@@ -1068,6 +1089,14 @@ function getIndexHtml(): string {
           emailListHtml += '<div class="email-expand-field"><span class="field-label">From</span>' + (showSender ? '<span class="field-value">' + escapeHtml(em.from) + '</span>' : '<span class="field-value hidden-field">' + escapeHtml(em.from) + '</span>') + '</div>';
           emailListHtml += '<div class="email-expand-field"><span class="field-label">To</span>' + (showRecipients ? '<span class="field-value">' + escapeHtml(em.to) + '</span>' : '<span class="field-value hidden-field">' + escapeHtml(em.to) + '</span>') + '</div>';
           emailListHtml += '<div class="email-expand-field"><span class="field-label">Subject</span>' + (showSubject ? '<span class="field-value">' + escapeHtml(em.subject) + '</span>' : '<span class="field-value hidden-field">' + escapeHtml(em.subject) + '</span>') + '</div>';
+          // Labels
+          if (em.labels && em.labels.length) {
+            emailListHtml += '<div class="email-expand-field"><span class="field-label">Labels</span><span class="field-value' + (!showLabels ? ' hidden-field' : '') + '">' + em.labels.map(function(l) { return escapeHtml(l); }).join(', ') + '</span></div>';
+          }
+          // Attachments
+          if (em.hasAttachment) {
+            emailListHtml += '<div class="email-expand-field"><span class="field-label">Attach.</span><span class="field-value' + (!showAttachments ? ' hidden-field' : '') + '">' + (em.attachments ? em.attachments.map(function(a) { return escapeHtml(a); }).join(', ') : 'Yes') + '</span></div>';
+          }
           emailListHtml += '<div class="email-expand-body">';
           if (showBody) {
             emailListHtml += '<pre>' + escapeHtml(em.body) + '</pre>';
@@ -1161,7 +1190,7 @@ function getIndexHtml(): string {
           <div class="card" style="padding:20px;display:flex;flex-direction:column">
             <label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:10px">Access Policy <span class="save-flash" id="gmail-flash">Saved</span></label>
             <textarea id="access-policy" rows="3" style="flex:1;border:1px solid var(--input-border);border-radius:6px;padding:10px 12px;font-size:14px;font-family:inherit;resize:none;outline:none;transition:border-color 0.15s;margin-bottom:10px" placeholder="Agents can only access emails that are requesting meetings with me" oninput="state.gmail.accessPolicy=this.value">\${escapeHtml(s.accessPolicy)}</textarea>
-            <button class="btn btn-primary" onclick="submitPolicy()" style="align-self:flex-start">Submit Policy</button>
+            <button id="submit-policy-btn" class="btn btn-primary" onclick="submitPolicy()" style="align-self:flex-start">Submit Policy</button>
           </div>
           <div class="card" style="padding:20px;display:flex;flex-direction:column">
             <label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:10px">Active Rules <span style="font-weight:400;opacity:0.7">(\${s.rules.length})</span></label>
@@ -1180,8 +1209,11 @@ function getIndexHtml(): string {
           (state.showDebugPanel ? '<div class="card" style="padding:16px">' +
             (state.lastManifest ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">' +
               '<div>' +
-                '<label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:8px">Generated Manifest</label>' +
-                '<pre class="font-mono" style="white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;color:var(--fg);max-height:240px;overflow-y:auto;margin:0">' + escapeHtml(state.lastManifest) + '</pre>' +
+                '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
+                  '<label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px">Generated Manifest</label>' +
+                  '<button onclick="applyManifest()" class="btn btn-sm" style="font-size:11px;padding:3px 10px;background:var(--primary);color:#fff;border:none;border-radius:4px;cursor:pointer">Apply Changes</button>' +
+                '</div>' +
+                '<textarea id="manifest-editor" class="font-mono" style="width:100%;box-sizing:border-box;white-space:pre;word-break:break-word;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;color:var(--fg);height:240px;overflow-y:auto;margin:0;resize:vertical;outline:none">' + escapeHtml(state.lastManifest) + '</textarea>' +
               '</div>' +
               '<div>' +
                 '<label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:8px">Translated Rules (' + state.lastTranslatedRules.length + ')</label>' +
@@ -1232,9 +1264,9 @@ function getIndexHtml(): string {
             </div>
             <div class="card" style="padding:0;overflow:hidden">
               <div class="email-list-header">
-                <span class="stat">Total: <strong>\${emails.length}</strong></span>
+                <span class="stat">Loaded: <strong>\${emails.length}</strong> emails</span>
                 <span style="color:var(--border)">|</span>
-                <span class="stat \${filteredOut ? 'stat-accent' : ''}">Agent sees: <strong>\${visibleEmails.length}</strong></span>
+                <span class="stat \${filteredOut ? 'stat-accent' : ''}">Example emails agents can see: <strong>\${visibleEmails.length}</strong></span>
                 <span style="color:var(--border)">|</span>
                 <span class="stat">Fields: <strong>\${visibleFieldCount}/\${ALL_FIELDS.length}</strong></span>
                 \${filteredOut ? '<span class="stat stat-accent" style="margin-left:auto">' + filteredOut + ' filtered out</span>' : ''}
@@ -1563,11 +1595,10 @@ function getIndexHtml(): string {
       if (!text) return;
 
       // Show loading state on the submit button
-      var btn = document.querySelector('.policy-actions button');
-      var originalText = btn ? btn.textContent : 'Submit Policy';
+      var btn = document.getElementById('submit-policy-btn');
       if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:6px;"></span>Translating...';
+        btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:6px;"></span>AI is analyzing your policy...';
       }
 
       try {
@@ -1609,8 +1640,44 @@ function getIndexHtml(): string {
       } finally {
         if (btn) {
           btn.disabled = false;
-          btn.textContent = originalText;
+          btn.textContent = 'Submit Policy';
         }
+      }
+    }
+
+    async function applyManifest() {
+      var el = document.getElementById('manifest-editor');
+      if (!el) return;
+      var rawManifest = el.value.trim();
+      if (!rawManifest) return;
+
+      try {
+        var resp = await fetch('/api/policy/parse-manifest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ manifest: rawManifest })
+        });
+        var data = await resp.json();
+
+        if (data.ok) {
+          // Insert new manifest rules at top, skip duplicates
+          var newRules = data.rules || [];
+          newRules.slice().reverse().forEach(function(nr) {
+            var exists = state.gmail.rules.some(function(er) {
+              return er.type === nr.type && er.value === nr.value;
+            });
+            if (!exists) state.gmail.rules.unshift(Object.assign({}, nr, { enabled: true }));
+          });
+          state.lastManifest = rawManifest;
+          state.lastTranslatedRules = data.rules || [];
+          state.lastPolicySource = 'ai';
+          saveGmail();
+          render();
+        } else {
+          alert('Manifest parse error: ' + (data.message || 'Invalid manifest'));
+        }
+      } catch (err) {
+        alert('Failed to parse manifest: ' + (err.message || 'Unknown error'));
       }
     }
 

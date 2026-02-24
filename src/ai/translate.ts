@@ -53,14 +53,15 @@ interface ProviderConfig {
 }
 
 function detectProvider(): ProviderConfig | null {
+  const model = process.env.AI_MODEL;
   if (process.env.ANTHROPIC_API_KEY) {
-    return { provider: 'anthropic', apiKey: process.env.ANTHROPIC_API_KEY, model: 'claude-sonnet-4-20250514' };
+    return { provider: 'anthropic', apiKey: process.env.ANTHROPIC_API_KEY, model: model || 'claude-sonnet-4-20250514' };
   }
   if (process.env.GOOGLE_AI_API_KEY) {
-    return { provider: 'google', apiKey: process.env.GOOGLE_AI_API_KEY, model: 'gemini-2.0-flash' };
+    return { provider: 'google', apiKey: process.env.GOOGLE_AI_API_KEY, model: model || 'gemini-2.0-flash' };
   }
   if (process.env.OPENAI_API_KEY) {
-    return { provider: 'openai', apiKey: process.env.OPENAI_API_KEY, model: 'gpt-4o' };
+    return { provider: 'openai', apiKey: process.env.OPENAI_API_KEY, model: model || 'gpt-4o' };
   }
   return null;
 }
