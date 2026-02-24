@@ -747,6 +747,9 @@ function getIndexHtml(): string {
       emailsLoading: false,
       emailsError: null,
       lastManifest: null,
+      lastTranslatedRules: null,
+      lastPolicySource: null,
+      showDebugPanel: false,
     };
     let _saveTimer = null;
 
@@ -1172,7 +1175,58 @@ function getIndexHtml(): string {
           </div>
         </div>
 
-        \${state.lastManifest ? '<div class="card" style="padding:16px;margin-bottom:16px"><label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:8px">Generated Manifest</label><pre class="font-mono" style="white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;color:var(--fg);max-height:200px;overflow-y:auto;margin:0">' + escapeHtml(state.lastManifest) + '</pre></div>' : ''}
+        \${state.lastTranslatedRules ? '<div style="margin-bottom:16px">' +
+          '<button onclick="state.showDebugPanel=!state.showDebugPanel;render()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 12px;font-size:12px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:6px;margin-bottom:' + (state.showDebugPanel ? '8px' : '0') + '">' +
+            '<svg width="10" height="10" viewBox="0 0 10 10" fill="var(--muted)" style="transition:transform 0.15s;transform:rotate(' + (state.showDebugPanel ? '90' : '0') + 'deg)"><polygon points="0,0 10,5 0,10"/></svg>' +
+            'Debug: Translation Details' +
+            '<span style="font-size:11px;opacity:0.7;margin-left:4px">(' + (state.lastPolicySource === 'ai' ? 'AI' : 'Local') + ')</span>' +
+          '</button>' +
+          (state.showDebugPanel ? '<div class="card" style="padding:16px">' +
+            (state.lastManifest ? '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">' +
+              '<div>' +
+                '<label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:8px">Generated Manifest</label>' +
+                '<pre class="font-mono" style="white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;color:var(--fg);max-height:240px;overflow-y:auto;margin:0">' + escapeHtml(state.lastManifest) + '</pre>' +
+              '</div>' +
+              '<div>' +
+                '<label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:8px">Translated Rules (' + state.lastTranslatedRules.length + ')</label>' +
+                (function() { var rHtml = ''; state.lastTranslatedRules.forEach(function(r) {
+                  var desc = '';
+                  if (r.type === 'time') desc = 'Only emails after <strong>' + escapeHtml(r.value || '') + '</strong>';
+                  else if (r.type === 'from') desc = 'Only from <strong>' + escapeHtml(r.value || '') + '</strong>';
+                  else if (r.type === 'subject') desc = 'Subject contains <strong>' + escapeHtml(r.value || '') + '</strong>';
+                  else if (r.type === 'exclude') desc = 'Exclude emails with <strong>' + escapeHtml(r.value || '') + '</strong>';
+                  else if (r.type === 'attachment') desc = 'Only emails with attachments';
+                  else if (r.type === 'hideField') desc = 'Hide <strong>' + escapeHtml(r.value || '') + '</strong> field from agents';
+                  else desc = escapeHtml(r.type + (r.value ? ': ' + r.value : ''));
+                  rHtml += '<li style="display:flex;align-items:center;gap:8px;font-size:13px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px">' +
+                    '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--primary);flex-shrink:0"></span>' +
+                    '<span style="color:var(--fg)">' + desc + '</span>' +
+                    '<code class="font-mono" style="margin-left:auto;font-size:11px;color:var(--muted);background:rgba(0,0,0,0.04);padding:1px 6px;border-radius:3px;flex-shrink:0">' + escapeHtml(r.type) + '</code>' +
+                  '</li>';
+                }); return '<ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto">' + rHtml + '</ul>'; })() +
+              '</div>' +
+            '</div>'
+            : '<div>' +
+                '<label style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:8px">Translated Rules <span style="font-weight:400;opacity:0.7">(Local regex parsing &mdash; no API key)</span></label>' +
+                (function() { var rHtml = ''; state.lastTranslatedRules.forEach(function(r) {
+                  var desc = '';
+                  if (r.type === 'time') desc = 'Only emails after <strong>' + escapeHtml(r.value || '') + '</strong>';
+                  else if (r.type === 'from') desc = 'Only from <strong>' + escapeHtml(r.value || '') + '</strong>';
+                  else if (r.type === 'subject') desc = 'Subject contains <strong>' + escapeHtml(r.value || '') + '</strong>';
+                  else if (r.type === 'exclude') desc = 'Exclude emails with <strong>' + escapeHtml(r.value || '') + '</strong>';
+                  else if (r.type === 'attachment') desc = 'Only emails with attachments';
+                  else if (r.type === 'hideField') desc = 'Hide <strong>' + escapeHtml(r.value || '') + '</strong> field from agents';
+                  else desc = escapeHtml(r.type + (r.value ? ': ' + r.value : ''));
+                  rHtml += '<li style="display:flex;align-items:center;gap:8px;font-size:13px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px">' +
+                    '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--primary);flex-shrink:0"></span>' +
+                    '<span style="color:var(--fg)">' + desc + '</span>' +
+                    '<code class="font-mono" style="margin-left:auto;font-size:11px;color:var(--muted);background:rgba(0,0,0,0.04);padding:1px 6px;border-radius:3px;flex-shrink:0">' + escapeHtml(r.type) + '</code>' +
+                  '</li>';
+                }); return '<ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto">' + rHtml + '</ul>'; })() +
+              '</div>'
+          ) +
+          '</div>' : '') +
+        '</div>' : ''}
 
         <div class="gmail-grid">
           <div class="gmail-grid-left">
@@ -1201,7 +1255,7 @@ function getIndexHtml(): string {
 
           <div class="gmail-grid-right">
             <div class="action-review-header">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted)"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted)"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               <h2 style="margin:0">Agent Action Review</h2>
               \${pendingCount ? '<span class="nav-badge">' + pendingCount + '</span>' : ''}
             </div>
@@ -1488,6 +1542,12 @@ function getIndexHtml(): string {
         }
       }
 
+      // Store rules for debug panel (local fallback)
+      state.lastManifest = null;
+      state.lastTranslatedRules = newRules.length ? newRules : null;
+      state.lastPolicySource = 'local';
+      state.showDebugPanel = true;
+
       // Merge new rules: avoid adding duplicate rules
       newRules.forEach(function(nr) {
         var exists = state.gmail.rules.some(function(er) {
@@ -1523,8 +1583,11 @@ function getIndexHtml(): string {
         var data = await resp.json();
 
         if (data.ok) {
-          // Store raw manifest for debug panel
+          // Store raw manifest and rules for debug panel
           state.lastManifest = data.rawManifest || null;
+          state.lastTranslatedRules = data.rules || null;
+          state.lastPolicySource = 'ai';
+          state.showDebugPanel = true;
           // Insert new rules at TOP, dedup
           var newRules = data.rules || [];
           newRules.reverse().forEach(function(nr) {
