@@ -15,7 +15,7 @@ PersonalDataHub is an open-source, self-hosted data hub between the services tha
 3. **Agents call** a simple REST API (`POST /pull`, `POST /propose`) with a scoped API key
 4. **You review** every outbound action (drafts, replies) before it's sent — nothing goes out without your approval
 
-The agent never gets your OAuth tokens. It never talks to Gmail or GitHub directly. It sees nothing by default — you explicitly whitelist access.
+You do not need to give agents direct access to your accounts. Agents see nothing by default — you explicitly whitelist access.
 
 ## Quick Start
 
@@ -139,7 +139,7 @@ Actions are staged for owner review — not executed until approved via the GUI.
 
 ### Core Principles
 
-- **Whitelist, not blacklist** — zero access by default; every piece of data, every repo, every action must be explicitly allowed
+- **Zero access by default** — every piece of data, every repo, every action must be explicitly allowed
 - **On-the-fly by default** — fetches from source APIs on demand; nothing written to disk unless you enable caching
 - **Outbound control** — actions like sending email are staged for owner review; for sources like GitHub where the agent has its own credentials, PersonalDataHub layers additional boundary controls on top
 - **Auditable** — every data movement is logged with a purpose string
