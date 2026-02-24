@@ -1,3 +1,5 @@
+> **Note:** This document describes the original architecture design. The manifest/operator pipeline system has been replaced with simple quick filters. See the [README](../../README.md) and [DEVELOPMENT.md](../DEVELOPMENT.md) for the current implementation.
+
 # PersonalDataHub: Whitelist Access to Personal Data through a Local Data Hub
 
 ## Overview

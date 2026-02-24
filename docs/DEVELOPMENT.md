@@ -14,7 +14,7 @@ PersonalDataHub/
 │   │   └── loader.ts            # YAML loading with ${ENV_VAR} resolution
 │   ├── db/                      # Database layer
 │   │   ├── db.ts                # SQLite connection (WAL mode, foreign keys)
-│   │   ├── schema.ts            # CREATE TABLE statements (5 tables)
+│   │   ├── schema.ts            # CREATE TABLE statements (6 tables)
 │   │   └── encryption.ts        # AES-256-GCM encrypt/decrypt for cached data
 │   ├── connectors/              # Source service integrations
 │   │   ├── types.ts             # DataRow interface, SourceConnector interface
@@ -26,22 +26,9 @@ PersonalDataHub/
 │   ├── fixtures/
 │   │   └── emails.ts            # Synthetic demo email dataset (15 emails)
 │   ├── demo.ts                  # Load/unload demo data into DB
-│   ├── manifest/                # Manifest DSL
-│   │   ├── types.ts             # Manifest, OperatorDecl interfaces
-│   │   ├── parser.ts            # Line-oriented parser
-│   │   └── validator.ts         # Graph validation, operator type checks
-│   ├── operators/               # Pipeline operators
-│   │   ├── types.ts             # PipelineContext, Operator interfaces
-│   │   ├── registry.ts          # Maps operator type names to implementations
-│   │   ├── pull.ts              # Fetch from source (cache-first)
-│   │   ├── select.ts            # Keep only specified fields
-│   │   ├── filter.ts            # Drop rows by condition (eq, neq, contains, gt, lt, matches)
-│   │   ├── transform.ts         # Redact (regex) and truncate (max_length)
-│   │   ├── stage.ts             # Insert into staging table
-│   │   └── store.ts             # Upsert to encrypted cache
-│   ├── pipeline/                # Pipeline engine
-│   │   ├── engine.ts            # Walks @graph, executes operators in sequence
-│   │   └── context.ts           # Factory for PipelineContext
+│   ├── filters.ts               # Quick filter types, catalog, and apply logic
+│   ├── sync/
+│   │   └── scheduler.ts         # Background cache sync (fetch + store)
 │   ├── audit/
 │   │   └── log.ts               # AuditLog class — typed write methods + filtered queries
 │   ├── server/                  # HTTP layer
@@ -108,15 +95,16 @@ pnpm lint
 
 ## Database Schema
 
-Five tables in SQLite:
+Six tables in SQLite:
 
 | Table | Purpose |
 |---|---|
 | `api_keys` | Hashed API keys for agent authentication |
-| `manifests` | Stored operator pipeline definitions |
+| `filters` | Quick filter definitions per source (type, value, enabled) |
 | `cached_data` | Encrypted local cache of source data (optional) |
 | `staging` | Outbound actions pending owner review |
 | `audit_log` | Every data movement with timestamps and purpose |
+| `manifests` | Legacy — retained for backward compatibility |
 
 ## Key Data Types
 
@@ -134,32 +122,21 @@ type DataRow = {
 }
 ```
 
-### Manifest
+### QuickFilter
 
-Parsed from the DSL into:
+Stored in the `filters` table:
 
 ```typescript
-type Manifest = {
-  purpose: string;
-  graph: string[];           // ordered operator names
-  operators: OperatorDecl[]; // name, type, properties
+type QuickFilter = {
+  id: string;
+  source: string;     // "gmail", "github"
+  type: string;       // "time_after", "from_include", "subject_include", etc.
+  value: string;      // filter value (e.g., date, sender name, field name)
+  enabled: number;    // 1 = active, 0 = disabled
 }
 ```
 
-### PipelineContext
-
-Shared context passed to all operators during execution:
-
-```typescript
-type PipelineContext = {
-  db: Database;
-  connectorRegistry: ConnectorRegistry;
-  config: HubConfig;
-  appId: string;
-  manifestId: string;
-  encryptionKey: string;
-}
-```
+Available filter types: `time_after`, `from_include`, `subject_include`, `exclude_sender`, `exclude_keyword`, `has_attachment`, `hide_field`.
 
 ## How to Add a New Source Connector
 
@@ -180,74 +157,43 @@ interface SourceConnector {
 
 4. The connector maps source API responses into `DataRow[]` — all content goes in `data`, the four fixed fields (`source`, `source_item_id`, `type`, `timestamp`) are set at the top level.
 
-## How to Add a New Operator
+## How Data Flows
 
-1. Create `src/operators/<name>.ts` implementing the `Operator` interface:
+### Pull request (`POST /app/v1/pull`)
 
-```typescript
-interface Operator {
-  type: string;
-  execute(
-    rows: DataRow[],
-    properties: Record<string, unknown>,
-    context: PipelineContext,
-  ): Promise<OperatorResult>;
-}
-```
-
-2. Register it in `src/operators/registry.ts`.
-
-3. Add tests in `src/operators/operators.test.ts`.
-
-4. Update the manifest validator in `src/manifest/validator.ts` to recognize the new operator type.
-
-## Manifest DSL
-
-Access control policies are internally expressed as manifests — a line-oriented DSL that declares an operator pipeline. The GUI generates manifests from the owner's settings; developers can also write them directly.
+1. The server verifies the API key
+2. If cache is enabled for the source, reads from the `cached_data` table; otherwise fetches live from the connector
+3. Loads enabled quick filters from the `filters` table for that source
+4. Applies filters: row predicates first (time_after, from_include, etc.), then field removal (hide_field)
+5. Returns the filtered data
 
 ```
-@purpose: "Read-only, recent emails with SSN redaction"
-@graph: pull_emails -> select_fields -> redact_sensitive
-pull_emails: pull { source: "gmail", type: "email" }
-select_fields: select { fields: ["title", "body", "labels", "timestamp"] }
-redact_sensitive: transform { kind: "redact", field: "body", pattern: "\\d{3}-\\d{2}-\\d{4}", replacement: "[REDACTED]" }
+Request → API key check → fetch data (cache or live) → apply filters → response
 ```
 
-### V1 Operators
+### Background sync (cache enabled)
 
-| Operator | Purpose |
-|---|---|
-| `pull` | Fetch data from a source (live API or cache) |
-| `select` | Keep only specified fields |
-| `filter` | Drop rows that don't match a condition |
-| `transform` | Redact patterns or truncate fields |
-| `stage` | Propose an outbound action for owner review |
-| `store` | Write to encrypted local cache |
+1. A timer fires at the configured `sync_interval`
+2. Fetches all data from the connector within the configured boundary
+3. Upserts rows into `cached_data` with optional AES-256-GCM encryption
+4. No filters applied during sync — everything is cached, filters are applied at read time
 
-## How the Pipeline Works
+### Propose action (`POST /app/v1/propose`)
 
-1. An API request hits `POST /app/v1/pull` or `/propose`
-2. The server verifies the API key and resolves the matching manifest
-3. The manifest is parsed into an ordered list of operators (`@graph`)
-4. The pipeline engine walks the graph, passing `DataRow[]` through each operator
-5. Each operator transforms the rows according to its properties
-6. The final result is returned to the caller
-
-```
-Request → API key check → resolve manifest → parse graph
-  → pull (fetch from source) → select (keep fields) → transform (redact/truncate)
-  → response
-```
+1. The server verifies the API key
+2. Inserts the action into the `staging` table with status `pending`
+3. Owner reviews in the GUI and approves/rejects
+4. On approval, the connector's `executeAction` is called
 
 ## Demo Data
 
-You can load synthetic email data to try the full pull pipeline without connecting a real Gmail account. Demo data is inserted directly into `cached_data`, so the pull operator serves it without needing OAuth or a live connector.
+You can load synthetic email data to try the full pull flow without connecting a real Gmail account. Demo data is inserted directly into `cached_data`, so pull requests serve it without needing OAuth or a live connector.
 
 ```bash
-# Load 15 synthetic emails and 3 demo manifests
+# Load 15 synthetic emails
 npx pdh demo-load
 
-# Start the server, then pull using a demo manifest
+# Start the server, then pull
 npx pdh start
 curl -X POST http://localhost:3000/app/v1/pull \
   -H "Authorization: Bearer <your-api-key>" \
@@ -258,17 +204,7 @@ curl -X POST http://localhost:3000/app/v1/pull \
 npx pdh demo-unload
 ```
 
-The three demo manifests:
-
-| Manifest ID | Pipeline |
-|---|---|
-| `demo-gmail-readonly` | pull + select (title, body, labels, author_name) |
-| `demo-gmail-metadata` | pull + select (title, labels, author_name only) |
-| `demo-gmail-redacted` | pull + select + redact SSNs |
-
-The `demo-gmail-redacted` manifest demonstrates redaction — two of the synthetic emails contain SSN-formatted strings that get replaced with `[SSN REDACTED]`.
-
-Demo data is identified by prefix: emails have `source_item_id` starting with `demo_`, manifests have `id` starting with `demo-`. Loading is idempotent (safe to run multiple times).
+You can then configure quick filters in the GUI to see how they affect the returned data. Demo data is identified by prefix: emails have `source_item_id` starting with `demo_`. Loading is idempotent (safe to run multiple times).
 
 ## Testing
 
@@ -279,7 +215,7 @@ The e2e tests use an in-memory SQLite database and a mock Gmail connector (defin
 To run a specific test file:
 
 ```bash
-npx vitest run src/operators/operators.test.ts
+npx vitest run tests/e2e/gmail-recent-readonly.test.ts
 ```
 
 ## OpenClaw Skill

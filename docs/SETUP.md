@@ -32,7 +32,7 @@ No manual configuration needed — agents read credentials automatically.
 
 Open `http://localhost:3000` in your browser:
 
-1. **Gmail** — Click "Connect Gmail" to start OAuth. Configure access boundaries (date range, labels, field access, redaction rules).
+1. **Gmail** — Click "Connect Gmail" to start OAuth. Configure quick filters (date range, senders, subjects, hidden fields).
 2. **GitHub** — Click "Connect GitHub" to start OAuth. Select which repos the agent can access and at what permission level.
 
 ### Step 3: Verify
@@ -140,12 +140,12 @@ Open `http://localhost:3000` in your browser. Default OAuth credentials were con
 
 1. Click the **Gmail** tab, then **Connect Gmail**
 2. Sign in with your Google account and grant PersonalDataHub access
-3. Configure your access boundary:
-   - **Time boundary** — e.g., "only emails after 2026-01-01"
-   - **Label filters** — which labels are accessible (inbox, starred, etc.)
-   - **Field access** — strip sender info, strip body, etc.
-   - **Redaction** — redact SSNs, credit card numbers, phone numbers
-   - **Outbound actions** — allow/disallow draft proposals
+3. Configure quick filters to control what agents can see:
+   - **Only emails after** — restrict to recent emails
+   - **Only from sender** / **Exclude sender** — filter by sender
+   - **Subject contains** / **Exclude subject containing** — filter by subject
+   - **Only with attachments** — keep only emails with attachments
+   - **Hide field from agents** — remove specific fields (e.g., body, sender info)
 
 #### Connecting GitHub
 
@@ -198,16 +198,21 @@ Actions are staged for owner review — not executed until approved via the GUI.
 
 ---
 
-## Access Policy Presets
+## Quick Filters
 
-The GUI offers preset access policies for Gmail. Start with a preset and customize it:
+The GUI provides toggle-based quick filters for Gmail. Each filter can be enabled/disabled independently:
 
-| Preset | What the agent sees |
+| Filter | What it does |
 |---|---|
-| Read-only, recent emails | title, body, labels, timestamp — SSNs redacted |
-| Metadata only | title, labels, timestamp — no body or sender info |
-| Full access with redaction | All fields — sensitive patterns redacted, body truncated to 5000 chars |
-| Email drafting | Can propose draft emails for owner review |
+| Only emails after | Drop emails before a given date |
+| Only from sender | Keep emails where sender contains a value |
+| Subject contains | Keep emails where subject contains a value |
+| Exclude sender | Drop emails where sender matches |
+| Exclude subject containing | Drop emails where subject matches |
+| Only with attachments | Keep only emails that have attachments |
+| Hide field from agents | Remove a field (e.g., body) before delivery |
+
+Filters are applied at read time — cached data is stored unfiltered, so you can adjust filters without re-syncing.
 
 ---
 
@@ -230,7 +235,7 @@ The init command creates:
 |------|---------|
 | `.env` | Contains `PDH_SECRET=<random 32-byte base64>` — the master encryption key for cached data |
 | `hub-config.yaml` | Minimal config with `sources: {}` and `port: 3000` — sources are configured via the GUI |
-| `pdh.db` | SQLite database with all tables initialized (api_keys, manifests, cached_data, staging, audit_log) |
+| `pdh.db` | SQLite database with all tables initialized (api_keys, filters, cached_data, staging, audit_log) |
 | `~/.pdh/credentials.json` | Credentials (`hubUrl`, `apiKey`, `hubDir`) — auto-read by agents at startup |
 
 It also creates an API key and saves it to the credentials file. You can manage API keys in the GUI.
@@ -249,7 +254,7 @@ clawhub publish packages/personaldatahub \
 
 ## Contributing
 
-Want to contribute to PersonalDataHub? See [DEVELOPMENT.md](./DEVELOPMENT.md) for the project structure, tech stack, how the pipeline works, how to add connectors and operators, and how to run the test suite.
+Want to contribute to PersonalDataHub? See [DEVELOPMENT.md](./DEVELOPMENT.md) for the project structure, tech stack, how to add connectors, and how to run the test suite.
 
 ## Troubleshooting
 

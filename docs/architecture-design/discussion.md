@@ -1,3 +1,5 @@
+> **Note:** This document captures historical design discussions. The manifest/operator pipeline system has been replaced with simple quick filters. See the [README](../../README.md) and [DEVELOPMENT.md](../DEVELOPMENT.md) for the current implementation.
+
 # PersonalDataHub Design Discussions
 
 ## Session 1: Initial Design & Implementation Plan Review

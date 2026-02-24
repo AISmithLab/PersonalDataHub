@@ -1,3 +1,5 @@
+> **Note:** This document describes the original implementation plan. The manifest/operator pipeline system has been replaced with simple quick filters. See the [README](../../README.md) and [DEVELOPMENT.md](../DEVELOPMENT.md) for the current implementation.
+
 # PersonalDataHub Implementation Plan
 
 Step-by-step plan for building PersonalDataHub V1. Each step is self-contained, builds on previous steps, and includes validation criteria.
