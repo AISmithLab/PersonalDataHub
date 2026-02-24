@@ -99,30 +99,32 @@ npx pdh status   # Check if the server is running
 
 ### Step 3: Install the Skill in OpenClaw
 
-The skill is in `packages/personal-data-hub/`. OpenClaw discovers skills from directories containing a `SKILL.md` with YAML frontmatter. To register it, pick one option:
+The skill is in `packages/personaldatahub/`. OpenClaw discovers skills from directories containing a `SKILL.md` with YAML frontmatter. To register it, pick one option:
 
 **Option 1: Symlink into the global skills directory (Recommended)**
 
 ```bash
 mkdir -p ~/.openclaw/skills
-ln -s /absolute/path/to/PersonalDataHub/packages/personal-data-hub ~/.openclaw/skills/personal-data-hub
+ln -s /absolute/path/to/PersonalDataHub/packages/personaldatahub ~/.openclaw/skills/personaldatahub
 ```
 
 Replace `/absolute/path/to/PersonalDataHub` with the actual path to your cloned repo. This makes the skill available in all OpenClaw sessions.
 
 **Option 2: Add as an extra skills directory**
 
-Add the path to `skills.load.extraDirs` in `~/.openclaw/openclaw.json`:
+Add the parent directory (the one that *contains* the skill folder) to `skills.load.extraDirs` in `~/.openclaw/openclaw.json`:
 
 ```json
 {
   "skills": {
     "load": {
-      "extraDirs": ["/absolute/path/to/PersonalDataHub/packages/personal-data-hub"]
+      "extraDirs": ["/absolute/path/to/PersonalDataHub/packages"]
     }
   }
 }
 ```
+
+`extraDirs` entries are scanned for subdirectories with a `SKILL.md` — point to `packages/`, not `packages/personaldatahub/`.
 
 Start a new OpenClaw session for it to discover the skill. Run `openclaw tui` to launch a new session, then type `list skills` to verify the skill is installed.
 
@@ -238,7 +240,7 @@ It also creates an API key and saves it to the credentials file. You can manage 
 To publish or update the skill on ClawHub:
 
 ```bash
-clawhub publish packages/personal-data-hub \
+clawhub publish packages/personaldatahub \
   --slug personaldatahub \
   --name "PersonalDataHub" \
   --version 0.1.0 \

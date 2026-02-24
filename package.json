@@ -1,5 +1,5 @@
 {
-  "name": "personal-data-hub",
+  "name": "personaldatahub",
   "version": "0.1.0",
   "description": "Centralized access control layer for personal data",
   "type": "module",

@@ -561,7 +561,7 @@ Request: POST /app/v1/pull { source: "gmail", purpose: "Find emails about Q4 rep
 **What:** Create an OpenClaw extension called **PersonalDataHub** that intelligently interacts with the PersonalDataHub. The extension understands natural language queries about the user's personal data and translates them into the right sequence of PersonalDataHub API calls (pull, propose). It handles multi-step workflows — e.g., "Collect all unanswered emails since this morning and draft responses" becomes: pull emails → filter unanswered → for each email, propose a draft reply via staging.
 
 **Implement:**
-- `packages/personal-data-hub/` (OpenClaw extension):
+- `packages/personaldatahub/` (OpenClaw extension):
   - `src/index.ts` — register the extension with OpenClaw
   - `src/hub-client.ts` — thin HTTP client wrapping the 2 PersonalDataHub App API endpoints:
     - `pull(source, type?, params?, purpose)` → `POST /app/v1/pull`

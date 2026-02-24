@@ -24,7 +24,7 @@ You do not need to give agents direct access to your accounts. Agents see nothin
 If you're running [OpenClaw](https://theoperatorvault.io), install PersonalDataHub as a skill through [ClawHub](https://theoperatorvault.io/clawhub-guide):
 
 ```bash
-clawhub install personal-data-hub
+clawhub install personaldatahub
 ```
 
 That's it. Dependencies, build, init, and server startup are handled automatically. Open `http://localhost:3000` to connect your accounts.
@@ -179,7 +179,7 @@ src/
 └── index.ts        Server entrypoint
 
 packages/
-└── personal-data-hub/   Agent skill integration (tool definitions + hub client)
+└── personaldatahub/     Agent skill integration (tool definitions + hub client)
 ```
 
 ## Security Model

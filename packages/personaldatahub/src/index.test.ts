@@ -17,7 +17,7 @@ describe('PersonalDataHub Plugin', () => {
   });
 
   it('has correct plugin metadata', () => {
-    expect(plugin.id).toBe('personal-data-hub');
+    expect(plugin.id).toBe('personaldatahub');
     expect(plugin.name).toBe('Personal Data Hub');
     expect(plugin.description).toContain('PersonalDataHub');
   });

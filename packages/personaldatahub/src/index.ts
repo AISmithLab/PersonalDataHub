@@ -22,7 +22,7 @@ export interface PersonalDataHubPluginConfig {
 }
 
 export default {
-  id: 'personal-data-hub',
+  id: 'personaldatahub',
   name: 'Personal Data Hub',
   description: 'Unified interface to personal data through PersonalDataHub access control gateway',
 

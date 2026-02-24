@@ -50,7 +50,7 @@ PersonalDataHub/
 │   └── gui/
 │       └── routes.ts            # Self-contained HTML GUI with inline JS
 ├── packages/
-│   └── personal-data-hub/       # OpenClaw skill
+│   └── personaldatahub/       # OpenClaw skill
 │       └── src/
 │           ├── index.ts         # Plugin registration
 │           ├── hub-client.ts    # HTTP client for PersonalDataHub API
@@ -284,12 +284,12 @@ npx vitest run src/operators/operators.test.ts
 
 ## OpenClaw Skill
 
-The skill in `packages/personal-data-hub/` is a standalone package with its own `tsconfig.json` and test suite. It wraps the two PersonalDataHub API endpoints as OpenClaw tools.
+The skill in `packages/personaldatahub/` is a standalone package with its own `tsconfig.json` and test suite. It wraps the two PersonalDataHub API endpoints as OpenClaw tools.
 
 To work on it:
 
 ```bash
-cd packages/personal-data-hub
+cd packages/personaldatahub
 pnpm test
 ```
 
