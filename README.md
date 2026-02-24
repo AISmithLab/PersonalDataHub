@@ -15,31 +15,34 @@ PersonalDataHub is an open-source, self-hosted data hub between the services tha
 3. **Agents call** a simple REST API (`POST /pull`, `POST /propose`) with a scoped API key
 4. **You review** every outbound action (drafts, replies) before it's sent — nothing goes out without your approval
 
-You do not need to give agents direct access to your accounts. Agents see nothing by default — you explicitly whitelist access.
+You do not need to give agents direct access to your accounts. Agents see nothing by default — you explicitly whitelist access. Install it on your Mac Mini at home or on a cloud instance alongside OpenClaw.
 
 ## Quick Start
 
+### Option A: Install via ClawHub (Work-in-progress)
+
+If you're running [OpenClaw](https://theoperatorvault.io), install PersonalDataHub as a skill through [ClawHub](https://theoperatorvault.io/clawhub-guide):
+
 ```bash
-# Install dependencies
-npm install
+clawhub install personaldatahub
+```
 
-# Build
-npm run build
+That's it. Dependencies, build, init, and server startup are handled automatically. Open `http://localhost:3000` to connect your accounts.
 
-# Initialize (creates config, database, and API key)
+### Option B: Install from Source
+
+Works with or without OpenClaw.
+
+```bash
+git clone https://github.com/AISmithLab/PersonalDataHub.git
+cd PersonalDataHub
+pnpm install && pnpm build
 npx pdh init
-
-# Start the server
 npx pdh start
-
-# Open the GUI to connect your accounts
 open http://localhost:3000
 ```
 
-The `init` command generates:
-- `hub-config.yaml` — source configuration (OAuth credentials fetched automatically)
-- `pdh.db` — SQLite database for policies, staging queue, and audit log
-- An API key (`pk_xxx`) for the agent, saved to `~/.pdh/credentials.json`
+See the [Setup Guide](docs/SETUP.md) for full details on both options, including connecting data sources and verifying your installation.
 
 ## Features
 
