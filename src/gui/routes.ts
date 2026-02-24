@@ -1552,8 +1552,15 @@ function getIndexHtml(): string {
 
         if (data.ok) {
           // Save as a new named manifest (auto-activates on server)
-          var manifestName = text.length > 60 ? text.substring(0, 60) + '...' : text;
           var purposeMatch = (data.rawManifest || '').match(/@purpose:\\s*"([^"]+)"/);
+          var manifestName = (data.rules || []).map(function(r) {
+            if (r.type === 'time') return 'Only emails after ' + (r.value || '');
+            if (r.type === 'from') return 'Only from ' + (r.value || '');
+            if (r.type === 'subject') return 'Subject contains ' + (r.value || '');
+            if (r.type === 'attachment') return 'Only emails with attachments';
+            if (r.type === 'hideField') return 'Hide ' + (r.value || '') + ' field';
+            return r.type + (r.value ? ': ' + r.value : '');
+          }).join('; ') || purposeMatch && purposeMatch[1] || text;
           await fetch('/api/manifests', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

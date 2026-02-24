@@ -30,6 +30,7 @@ Rules:
 const EXPLANATION_PROMPT = `You are given a data access control manifest in DSL format.
 Explain in 1-3 plain English sentences what this manifest does.
 Focus on what data is accessible and what restrictions apply.
+Use objective, absolute language — never use relative terms like "yesterday", "last week", "recently", or "today". Always use exact dates (e.g. "after January 15, 2025") as they appear in the manifest.
 Output ONLY the explanation text, nothing else.`;
 
 export interface TranslateSuccess {
