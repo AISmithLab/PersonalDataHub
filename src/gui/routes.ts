@@ -65,7 +65,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   // Get manifests
   app.get('/api/manifests', (c) => {
     const manifests = deps.db
-      .prepare('SELECT * FROM manifests ORDER BY updated_at DESC')
+      .prepare('SELECT * FROM manifests ORDER BY created_at DESC')
       .all();
     return c.json({ ok: true, manifests });
   });
