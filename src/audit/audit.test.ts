@@ -1,16 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
-import { mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { getDb } from '../db/db.js';
 import { AuditLog } from './log.js';
 import type Database from 'better-sqlite3';
-
-function makeTmpDir(): string {
-  const dir = join(tmpdir(), `pdh-audit-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
+import { makeTmpDir } from '../test-utils.js';
 
 describe('AuditLog', () => {
   let tmpDir: string;

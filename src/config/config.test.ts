@@ -1,15 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { loadConfig, loadConfigFiles } from './loader.js';
 import { hubConfigSchema } from './schema.js';
-
-function makeTmpDir(): string {
-  const dir = join(tmpdir(), `pdh-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
+import { makeTmpDir } from '../test-utils.js';
 
 describe('Config', () => {
   let tmpDir: string;

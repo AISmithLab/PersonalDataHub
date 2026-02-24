@@ -15,6 +15,8 @@ const operators = new Map<string, Operator>([
   ['store', storeOperator],
 ]);
 
+export const KNOWN_OPERATOR_TYPES = new Set(operators.keys());
+
 export function getOperator(type: string): Operator {
   const op = operators.get(type);
   if (!op) {

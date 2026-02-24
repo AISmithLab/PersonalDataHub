@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
-import { mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { getDb } from '../db/db.js';
 import { parseManifest } from '../manifest/parser.js';
 import { executePipeline } from './engine.js';
@@ -9,12 +8,7 @@ import { createPipelineContext } from './context.js';
 import type { DataRow, SourceConnector, ConnectorRegistry } from '../connectors/types.js';
 import type { HubConfigParsed } from '../config/schema.js';
 import type Database from 'better-sqlite3';
-
-function makeTmpDir(): string {
-  const dir = join(tmpdir(), `pdh-pipe-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
+import { makeTmpDir } from '../test-utils.js';
 
 const TEST_SECRET = 'test-encryption-key-123';
 

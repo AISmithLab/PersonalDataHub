@@ -1,6 +1,5 @@
 import type { Manifest } from './types.js';
-
-const KNOWN_OPERATOR_TYPES = new Set(['pull', 'select', 'filter', 'transform', 'stage', 'store']);
+import { KNOWN_OPERATOR_TYPES } from '../operators/registry.js';
 
 const REQUIRED_PROPERTIES: Record<string, string[]> = {
   pull: ['source'],

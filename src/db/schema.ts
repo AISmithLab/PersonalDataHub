@@ -13,10 +13,12 @@ CREATE TABLE IF NOT EXISTS api_keys (
 const CREATE_MANIFESTS = `
 CREATE TABLE IF NOT EXISTS manifests (
   id TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT '',
   source TEXT NOT NULL,
   purpose TEXT NOT NULL,
   raw_text TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'active',
+  explanation TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'inactive',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`;
@@ -91,6 +93,9 @@ CREATE TABLE IF NOT EXISTS github_repos (
 export function createTables(db: Database.Database): void {
   db.exec(CREATE_API_KEYS);
   db.exec(CREATE_MANIFESTS);
+  // Migrate existing manifests tables missing new columns
+  try { db.exec("ALTER TABLE manifests ADD COLUMN name TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already exists */ }
+  try { db.exec("ALTER TABLE manifests ADD COLUMN explanation TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already exists */ }
   db.exec(CREATE_CACHED_DATA);
   for (const idx of CREATE_CACHED_DATA_INDEXES) {
     db.exec(idx);

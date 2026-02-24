@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
-import { mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { hashSync } from 'bcryptjs';
 import { getDb } from '../db/db.js';
 import { createServer } from './server.js';
@@ -11,12 +10,7 @@ import type { DataRow, SourceConnector, ConnectorRegistry } from '../connectors/
 import type { HubConfigParsed } from '../config/schema.js';
 import type Database from 'better-sqlite3';
 import type { Hono } from 'hono';
-
-function makeTmpDir(): string {
-  const dir = join(tmpdir(), `pdh-server-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
+import { makeTmpDir } from '../test-utils.js';
 
 const TEST_API_KEY = 'pk_test_key_123';
 const TEST_KEY_HASH = hashSync(TEST_API_KEY, 10);

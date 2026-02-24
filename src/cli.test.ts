@@ -1,16 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
-import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { compareSync } from 'bcryptjs';
 import Database from 'better-sqlite3';
 import { init, reset, writeCredentials, readCredentials, CREDENTIALS_PATH, CREDENTIALS_DIR } from './cli.js';
-
-function makeTmpDir(): string {
-  const dir = join(tmpdir(), `pdh-cli-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
+import { makeTmpDir } from './test-utils.js';
 
 describe('CLI init', () => {
   let tmpDir: string;
