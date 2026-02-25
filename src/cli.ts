@@ -16,9 +16,10 @@ import { existsSync, writeFileSync, readFileSync, unlinkSync, mkdirSync, realpat
 import { fileURLToPath } from 'node:url';
 import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { hashSync } from 'bcryptjs';
 import { getDb } from './db/db.js';
+import { osUserExists, createOsUser, lockdownFiles, checkProcessOwner, PDH_USER, ensureSudo } from './os-user.js';
 
 
 // --- Config file path ---
@@ -191,9 +192,11 @@ export async function init(targetDir?: string, options?: InitOptions): Promise<I
 
 /**
  * Start the PersonalDataHub server in the background.
- * Spawns a detached node process and writes the PID to ~/.pdh/server.pid.
+ * If the `personaldatahub` OS user exists, launches the server as that user
+ * via `sudo -u` for process isolation. Otherwise runs as the current user.
+ * Writes the PID to ~/.pdh/server.pid.
  */
-export function startBackground(hubDir?: string): { pid: number; hubDir: string } {
+export function startBackground(hubDir?: string): { pid: number; hubDir: string; isolated: boolean } {
   const dir = hubDir ?? readConfig()?.hubDir ?? process.cwd();
   const indexPath = resolve(dir, 'dist', 'index.js');
 
@@ -204,21 +207,28 @@ export function startBackground(hubDir?: string): { pid: number; hubDir: string 
   // Check if already running
   const existing = getServerPid();
   if (existing !== null) {
-    try {
-      process.kill(existing, 0); // Check if process exists
-      throw new Error(`Server is already running (PID ${existing}). Run 'npx pdh stop' first.`);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err;
-      // Process doesn't exist, stale PID file — clean up
-    }
+    throw new Error(`Server is already running (PID ${existing}). Run 'npx pdh stop' first.`);
   }
 
-  const child = spawn('node', [indexPath], {
-    cwd: dir,
-    detached: true,
-    stdio: 'ignore',
-    env: { ...process.env },
-  });
+  const isolated = osUserExists();
+  let child;
+
+  if (isolated) {
+    // Cache sudo credentials so the non-interactive spawn succeeds
+    ensureSudo();
+    child = spawn('sudo', ['-n', '-u', PDH_USER, 'node', indexPath], {
+      cwd: dir,
+      detached: true,
+      stdio: 'ignore',
+    });
+  } else {
+    child = spawn('node', [indexPath], {
+      cwd: dir,
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env },
+    });
+  }
 
   child.unref();
 
@@ -226,20 +236,32 @@ export function startBackground(hubDir?: string): { pid: number; hubDir: string 
   mkdirSync(CONFIG_DIR, { recursive: true });
   writeFileSync(PID_PATH, String(pid), 'utf-8');
 
-  return { pid, hubDir: dir };
+  return { pid, hubDir: dir, isolated };
 }
 
 /**
  * Stop the background PersonalDataHub server.
+ * Uses `sudo kill` if the server is running as a different user.
  */
 export function stopBackground(): boolean {
   const pid = getServerPid();
   if (pid === null) return false;
 
-  try {
-    process.kill(pid, 'SIGTERM');
-  } catch {
-    // Process already gone
+  const owner = checkProcessOwner(pid);
+
+  if (owner === 'other_user') {
+    // Server runs as personaldatahub user — need sudo to kill
+    try {
+      execSync(`sudo kill ${pid}`, { stdio: 'inherit' });
+    } catch {
+      // Process may have already exited
+    }
+  } else if (owner === 'same_user') {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // Process already gone
+    }
   }
 
   try { unlinkSync(PID_PATH); } catch { /* ignore */ }
@@ -248,17 +270,16 @@ export function stopBackground(): boolean {
 
 /**
  * Get the PID of the background server, or null if not running.
+ * Handles processes owned by the `personaldatahub` user (EPERM on signal).
  */
 export function getServerPid(): number | null {
-  try {
-    if (!existsSync(PID_PATH)) return null;
-    const pid = parseInt(readFileSync(PID_PATH, 'utf-8').trim(), 10);
-    if (isNaN(pid)) return null;
-    process.kill(pid, 0); // Check if process exists
-    return pid;
-  } catch {
-    return null;
-  }
+  if (!existsSync(PID_PATH)) return null;
+  const pid = parseInt(readFileSync(PID_PATH, 'utf-8').trim(), 10);
+  if (isNaN(pid)) return null;
+
+  const owner = checkProcessOwner(pid);
+  if (owner === 'not_found') return null;
+  return pid;
 }
 
 // --- Reset ---
@@ -269,6 +290,7 @@ const CRED_FILES = [CONFIG_PATH, PID_PATH];
 /**
  * Remove all generated PersonalDataHub files so `init` can run again cleanly.
  * Stops the background server first if it's running.
+ * Uses sudo to remove files owned by the `personaldatahub` user if needed.
  * Returns the list of files that were actually deleted.
  */
 export function reset(hubDir?: string): string[] {
@@ -283,7 +305,12 @@ export function reset(hubDir?: string): string[] {
   for (const name of HUB_FILES) {
     const p = resolve(dir, name);
     if (existsSync(p)) {
-      unlinkSync(p);
+      try {
+        unlinkSync(p);
+      } catch {
+        // File may be owned by personaldatahub — try sudo
+        execSync(`sudo rm "${p}"`, { stdio: 'inherit' });
+      }
       removed.push(p);
     }
   }
@@ -322,6 +349,19 @@ if (isDirectRun) {
       console.log(`  hub-config.yaml created  ${result.configPath}`);
       console.log(`  Database created         ${result.dbPath}`);
       console.log(`  Config saved             ${result.globalConfigPath}`);
+
+      // Phase 4: Process isolation — create OS user and lock down sensitive files
+      try {
+        console.log('\n  Setting up process isolation...');
+        createOsUser();
+        lockdownFiles([result.envPath, result.configPath, result.dbPath]);
+        console.log(`  Created '${PDH_USER}' OS user`);
+        console.log(`  Sensitive files owned by '${PDH_USER}' with mode 0600`);
+      } catch (isoErr) {
+        console.log(`\n  Warning: Process isolation not configured: ${(isoErr as Error).message}`);
+        console.log('  The server will run as the current user. See docs/SETUP.md for manual setup.');
+      }
+
       console.log(`\n  Owner password: ${result.password}`);
       console.log('  (Save this — you need it to log into the GUI)\n');
       console.log('  Next steps:');
@@ -341,6 +381,9 @@ if (isDirectRun) {
       const result = startBackground();
       console.log(`\n  PersonalDataHub server started in background (PID ${result.pid})`);
       console.log(`  Hub directory: ${result.hubDir}`);
+      if (result.isolated) {
+        console.log(`  Running as: ${PDH_USER} (process isolation enabled)`);
+      }
       console.log(`  GUI: http://localhost:3000`);
       console.log('\n  Note: The server does not auto-start on reboot.');
       console.log('  Run `npx pdh start` again after restarting your machine.\n');
