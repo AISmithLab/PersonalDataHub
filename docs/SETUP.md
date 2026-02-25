@@ -2,14 +2,44 @@
 
 How to install and run PersonalDataHub.
 
+PersonalDataHub uses **two OS users** for security isolation:
+
+- **`personaldatahub` user** — runs the server, owns the database and OAuth tokens. You switch to this user to manage sources and approve actions via the GUI.
+- **Your main user** — runs AI agents (Claude Code, Cursor, etc.). Agents talk to the server over localhost HTTP. They cannot read the database or OAuth tokens directly.
+
+This separation means a compromised agent cannot extract your Gmail/GitHub OAuth tokens from disk — the files are owned by a different OS user with `0600` permissions.
+
 ## Prerequisites
 
 - **Node.js >= 22** — check with `node --version`
 - **pnpm** — install with `npm install -g pnpm`
+- **sudo access** — needed to create the `personaldatahub` OS user
 
-## Step 1: Clone and Bootstrap
+## Step 1: Create the `personaldatahub` OS User
+
+### macOS
 
 ```bash
+# Create a hidden system user (no home directory login shell)
+sudo sysadminctl -addUser personaldatahub -shell /bin/zsh -password -
+# Create its home directory
+sudo mkdir -p /Users/personaldatahub
+sudo chown personaldatahub:staff /Users/personaldatahub
+```
+
+### Linux
+
+```bash
+sudo useradd -r -m -s /bin/bash personaldatahub
+```
+
+## Step 2: Clone and Bootstrap as `personaldatahub`
+
+Switch to the `personaldatahub` user and install:
+
+```bash
+sudo -u personaldatahub -i
+cd ~
 git clone https://github.com/AISmithLab/PersonalDataHub.git
 cd PersonalDataHub
 pnpm install && pnpm build
@@ -22,12 +52,14 @@ npx pdh init
 |------|---------|
 | `.env` | Master encryption key for OAuth tokens |
 | `hub-config.yaml` | Server config with OAuth credentials and port |
-| `pdh.db` | SQLite database |
-| `~/.pdh/config.json` | Hub URL and directory — auto-read by the MCP server |
+| `pdh.db` | SQLite database (owned by `personaldatahub`, mode `0600`) |
+| `~personaldatahub/.pdh/config.json` | Hub URL and directory |
 
-It also prints an **owner password** — save it. You need it to log into the GUI.
+It prints an **owner password** — save it. You need it to log into the GUI.
 
-## Step 2: Start the Server
+## Step 3: Start the Server
+
+Still as the `personaldatahub` user:
 
 ```bash
 npx pdh start
@@ -40,36 +72,58 @@ npx pdh status
 # or: curl http://localhost:3000/health
 ```
 
-The server does **not** auto-start on reboot — run `npx pdh start` again after restarting your machine.
+The server does **not** auto-start on reboot — run `npx pdh start` again after restarting (or set up a launchd/systemd service).
 
-## Step 3: Connect Data Sources
+You can now exit the `personaldatahub` shell:
 
-Open `http://localhost:3000` in your browser and log in with the owner password.
+```bash
+exit
+```
 
-Default OAuth credentials were configured during init — just click Connect.
+## Step 4: Connect Data Sources
 
-### Gmail
+You need to connect OAuth sources (Gmail, GitHub) from the `personaldatahub` user's browser session so that the agent running as your main user cannot intercept the keyboard or session cookie.
 
+### macOS
+
+Switch to the `personaldatahub` user's desktop session:
+
+```bash
+# Open a login window for the personaldatahub user
+# (or use Fast User Switching in System Preferences > Login Window)
+sudo -u personaldatahub open -a Safari http://localhost:3000
+```
+
+### Linux
+
+Switch to the `personaldatahub` user's desktop session (e.g., via a separate TTY or display manager), then open `http://localhost:3000` in a browser.
+
+### In the GUI
+
+Log in with the owner password from Step 2, then:
+
+**Gmail:**
 1. Click the **Gmail** tab, then **Connect Gmail**
 2. Sign in with your Google account and grant PersonalDataHub access
-3. Configure quick filters to control what agents can see:
-   - **Only emails after** — restrict to recent emails
-   - **Only from sender** / **Exclude sender** — filter by sender
-   - **Subject contains** / **Exclude subject containing** — filter by subject
-   - **Only with attachments** — keep only emails with attachments
-   - **Hide field from agents** — remove specific fields (e.g., body, sender info)
+3. Configure quick filters to control what agents can see
 
-### GitHub
-
+**GitHub:**
 1. Click the **GitHub** tab, then **Connect GitHub**
 2. Authorize PersonalDataHub to access your GitHub account
 3. Select which repos the agent can access
 
 To use your own OAuth credentials instead of the defaults, see [OAUTH-SETUP.md](./OAUTH-SETUP.md).
 
-## Step 4: Connect Your Agent
+## Step 5: Connect Your Agent (Main User)
 
-Add PersonalDataHub as an MCP server in your agent's config.
+Back as your **main user**, set up the MCP config so `~/.pdh/config.json` points to the running server. Create it if it doesn't exist:
+
+```bash
+mkdir -p ~/.pdh
+echo '{"hubUrl":"http://localhost:3000","hubDir":"/Users/personaldatahub/PersonalDataHub"}' > ~/.pdh/config.json
+```
+
+Then add PersonalDataHub as an MCP server in your agent's config.
 
 **Claude Code** — add to `.claude/settings.json`:
 
@@ -84,34 +138,50 @@ Add PersonalDataHub as an MCP server in your agent's config.
 }
 ```
 
-**Cursor** — add to MCP settings in Cursor preferences with the same `command` and `args`.
-
-**Windsurf** — add to MCP settings in Windsurf preferences with the same `command` and `args`.
+**Cursor / Windsurf** — add the same `command` and `args` in MCP settings.
 
 The MCP server reads `~/.pdh/config.json`, verifies the server is running, and registers tools for connected sources only. Disconnect a source and its tools disappear.
 
-You can test the MCP server standalone:
+You can test it standalone:
 
 ```bash
 npx pdh mcp
 # Prints registered tools to stderr, then listens on stdio
 ```
 
-## Step 5: Verify
+## Step 6: Verify
 
 Ask your agent:
 
 > "Check my recent emails"
 
-Verify in the GUI:
+Verify in the GUI (as the `personaldatahub` user):
 - **Gmail tab** → Recent Activity shows the pull request
 - **Settings tab** → Audit Log shows every data access with timestamps and purpose strings
 
 ---
 
+## Managing the Server
+
+All server management commands must be run as the `personaldatahub` user:
+
+```bash
+sudo -u personaldatahub -i
+cd ~/PersonalDataHub
+
+npx pdh status   # Check if the server is running
+npx pdh stop     # Stop the background server
+npx pdh start    # Start the server
+npx pdh reset    # Remove all generated files and start fresh
+```
+
+To approve staged actions or change filters, switch to the `personaldatahub` user's browser session and open `http://localhost:3000`.
+
+---
+
 ## Direct API Usage
 
-Any HTTP client can use PersonalDataHub's endpoints. No auth required — the server binds to `127.0.0.1` (localhost only).
+Any localhost process can call the agent API (no auth required). The GUI admin endpoints require the owner's session cookie.
 
 **Pull data:**
 
@@ -145,27 +215,23 @@ curl http://localhost:3000/app/v1/sources
 ## Troubleshooting
 
 **MCP server says "No PersonalDataHub config found"**
-- Run `npx pdh init` first, then `npx pdh start`
+- Create `~/.pdh/config.json` in your main user's home directory (see Step 5)
 
 **MCP server says "not reachable"**
-- Make sure PersonalDataHub is running: `npx pdh status`
-- If not running, start it: `npx pdh start`
+- The server runs as the `personaldatahub` user: `sudo -u personaldatahub npx pdh status`
+- If not running: `sudo -u personaldatahub -i`, then `cd ~/PersonalDataHub && npx pdh start`
 
 **No tools appear in MCP**
-- Connect at least one source via OAuth in the GUI at `http://localhost:3000`
+- Connect at least one source via OAuth in the GUI (as `personaldatahub` user)
 - Only sources with active OAuth tokens get tools registered
 
 **`npx pdh init` fails with ".env already exists"**
-- You've already initialized. Just start the server: `npx pdh start`
+- Already initialized. Start the server: `npx pdh start`
 - To re-initialize: `npx pdh reset` then `npx pdh init`
 
-**Server won't start**
-- Check if already running: `npx pdh status`
-- Stop it first: `npx pdh stop`, then start again
-
-**Port already in use**
-- Edit `hub-config.yaml` and change `port: 3000` to a different port
-- Update `~/.pdh/config.json` to match the new URL
+**Permission denied accessing pdh.db**
+- The database is owned by the `personaldatahub` user. Run server commands as that user.
+- Agents should never access the DB directly — they use the HTTP API.
 
 **OAuth redirect fails**
 - Make sure the redirect URI in your OAuth app settings matches `http://localhost:3000/oauth/<source>/callback`

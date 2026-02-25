@@ -19,22 +19,27 @@ You do not need to give agents direct access to your accounts. Agents see nothin
 
 ## Quick Start
 
+PersonalDataHub runs as a **dedicated OS user** (`personaldatahub`) so that agents cannot read your OAuth tokens or database directly. The setup creates this user, installs the server under it, then configures your main user's agent to connect via MCP.
+
 ```bash
-git clone https://github.com/AISmithLab/PersonalDataHub.git
-cd PersonalDataHub
-pnpm install && pnpm build
-npx pdh init
+# 1. Create the personaldatahub OS user (one-time)
+sudo sysadminctl -addUser personaldatahub -shell /bin/zsh -password -  # macOS
+sudo mkdir -p /Users/personaldatahub && sudo chown personaldatahub:staff /Users/personaldatahub
+
+# 2. Install and start (as personaldatahub)
+sudo -u personaldatahub -i
+cd ~ && git clone https://github.com/AISmithLab/PersonalDataHub.git
+cd PersonalDataHub && pnpm install && pnpm build
+npx pdh init    # save the owner password it prints
 npx pdh start
-open http://localhost:3000
+exit
+
+# 3. Connect your agent (as your main user)
+mkdir -p ~/.pdh
+echo '{"hubUrl":"http://localhost:3000","hubDir":"/Users/personaldatahub/PersonalDataHub"}' > ~/.pdh/config.json
 ```
 
-This installs dependencies, initializes the database, and starts the server. Save the **owner password** printed during init — you need it to log into the GUI.
-
-See the [Setup Guide](docs/SETUP.md) for connecting data sources and your agent.
-
-## Agent Integration
-
-Add PersonalDataHub as an MCP server in your agent's config. For Claude Code, add to `.claude/settings.json`:
+Then add PersonalDataHub as an MCP server in your agent's config. For Claude Code, add to `.claude/settings.json`:
 
 ```json
 {
@@ -47,7 +52,9 @@ Add PersonalDataHub as an MCP server in your agent's config. For Claude Code, ad
 }
 ```
 
-The MCP server dynamically registers tools based on which sources you've connected via OAuth. No tools appear for disconnected sources.
+Open `http://localhost:3000` in the `personaldatahub` user's browser session to connect Gmail/GitHub via OAuth and configure filters.
+
+See the [Setup Guide](docs/SETUP.md) for full details.
 
 ## Features
 
@@ -208,7 +215,7 @@ npx pdh reset             Remove all generated files and start fresh
 
 ## Security Model
 
-PersonalDataHub is designed to run on **your local machine**. The owner's OAuth tokens and encryption keys never leave the host and are never exposed to the agent.
+PersonalDataHub is designed to run on **your local machine** as a dedicated OS user (`personaldatahub`). The database, OAuth tokens, and config files are owned by this user with `0600` permissions — agents running under your main account cannot read them directly.
 
 **What the agent cannot do:**
 - Access any data outside the configured boundary (date range, repos, labels)
