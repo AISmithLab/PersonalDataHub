@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
+import { hashSync } from 'bcryptjs';
 import { getDb } from '../db/db.js';
 import { createServer } from '../server/server.js';
 import { TokenManager } from '../auth/token-manager.js';
@@ -28,10 +29,18 @@ function makeConfig(): HubConfigParsed {
   };
 }
 
+function setupOwnerAuth(db: Database.Database): string {
+  db.prepare('INSERT OR IGNORE INTO owner_auth (id, password_hash) VALUES (1, ?)').run(hashSync('testpass', 10));
+  const token = 'test-session-token';
+  db.prepare("INSERT INTO sessions (token, expires_at) VALUES (?, datetime('now', '+1 day'))").run(token);
+  return `pdh_session=${token}`;
+}
+
 describe('GUI Routes', () => {
   let tmpDir: string;
   let db: Database.Database;
   let app: Hono;
+  let cookie: string;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
@@ -39,8 +48,9 @@ describe('GUI Routes', () => {
     const registry: ConnectorRegistry = new Map();
     const tokenManager = new TokenManager(db, 'test');
     app = createServer({
-      db, connectorRegistry: registry, config: makeConfig(), encryptionKey: 'test', tokenManager,
+      db, connectorRegistry: registry, config: makeConfig(), tokenManager,
     });
+    cookie = setupOwnerAuth(db);
   });
 
   afterEach(() => {
@@ -55,8 +65,13 @@ describe('GUI Routes', () => {
     expect(text).toContain('PersonalDataHub');
   });
 
-  it('GET /api/sources returns configured sources', async () => {
+  it('GET /api/sources returns 401 without session', async () => {
     const res = await app.request('/api/sources');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /api/sources returns configured sources with session', async () => {
+    const res = await app.request('/api/sources', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; sources: Array<{ name: string }> };
     expect(json.ok).toBe(true);
@@ -64,8 +79,44 @@ describe('GUI Routes', () => {
     expect(json.sources.map((s: { name: string }) => s.name).sort()).toEqual(['github', 'gmail']);
   });
 
+  it('GET /api/auth/status returns authenticated:false without session', async () => {
+    const res = await app.request('/api/auth/status');
+    expect(res.status).toBe(200);
+    const json = await res.json() as { authenticated: boolean };
+    expect(json.authenticated).toBe(false);
+  });
+
+  it('GET /api/auth/status returns authenticated:true with valid session', async () => {
+    const res = await app.request('/api/auth/status', { headers: { Cookie: cookie } });
+    expect(res.status).toBe(200);
+    const json = await res.json() as { authenticated: boolean };
+    expect(json.authenticated).toBe(true);
+  });
+
+  it('POST /api/login with correct password sets session', async () => {
+    const res = await app.request('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'testpass' }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json() as { ok: boolean };
+    expect(json.ok).toBe(true);
+    const setCookie = res.headers.get('Set-Cookie');
+    expect(setCookie).toContain('pdh_session=');
+  });
+
+  it('POST /api/login with wrong password returns 401', async () => {
+    const res = await app.request('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'wrongpassword' }),
+    });
+    expect(res.status).toBe(401);
+  });
+
   it('GET /api/filters returns filters list and types', async () => {
-    const res = await app.request('/api/filters');
+    const res = await app.request('/api/filters', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; filters: unknown[]; filterTypes: Record<string, unknown> };
     expect(json.ok).toBe(true);
@@ -77,7 +128,7 @@ describe('GUI Routes', () => {
   it('POST /api/filters creates a filter', async () => {
     const res = await app.request('/api/filters', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({
         source: 'gmail',
         type: 'time_after',
@@ -91,31 +142,15 @@ describe('GUI Routes', () => {
     expect(json.id).toMatch(/^filter_/);
 
     // Verify via GET
-    const filtersRes = await app.request('/api/filters?source=gmail');
+    const filtersRes = await app.request('/api/filters?source=gmail', { headers: { Cookie: cookie } });
     const filtersJson = await filtersRes.json() as { filters: Array<{ id: string; type: string; value: string }> };
     expect(filtersJson.filters).toHaveLength(1);
     expect(filtersJson.filters[0].type).toBe('time_after');
     expect(filtersJson.filters[0].value).toBe('2026-01-01');
   });
 
-  it('POST /api/keys generates a new API key', async () => {
-    const res = await app.request('/api/keys', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Test App' }),
-    });
-    expect(res.status).toBe(200);
-    const json = await res.json() as { ok: boolean; key: string; id: string };
-    expect(json.ok).toBe(true);
-    expect(json.key).toMatch(/^pk_/);
-
-    const keys = await app.request('/api/keys');
-    const keysJson = await keys.json() as { keys: Array<{ id: string }> };
-    expect(keysJson.keys).toHaveLength(1);
-  });
-
   it('GET /api/staging returns staging queue', async () => {
-    const res = await app.request('/api/staging');
+    const res = await app.request('/api/staging', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; actions: unknown[] };
     expect(json.ok).toBe(true);
@@ -123,7 +158,7 @@ describe('GUI Routes', () => {
   });
 
   it('GET /api/audit returns audit log', async () => {
-    const res = await app.request('/api/audit');
+    const res = await app.request('/api/audit', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; entries: unknown[] };
     expect(json.ok).toBe(true);
@@ -138,13 +173,13 @@ describe('GUI Routes', () => {
     // Approve it
     const res = await app.request('/api/staging/act_test/resolve', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ decision: 'approve' }),
     });
     expect(res.status).toBe(200);
 
     // Check audit log has approval entry
-    const audit = await app.request('/api/audit?event=action_approved');
+    const audit = await app.request('/api/audit?event=action_approved', { headers: { Cookie: cookie } });
     const auditJson = await audit.json() as { entries: Array<{ event: string }> };
     expect(auditJson.entries.length).toBeGreaterThan(0);
   });
@@ -154,7 +189,7 @@ describe('GUI Routes', () => {
       "INSERT INTO staging (action_id, source, action_type, action_data, purpose, status) VALUES (?, ?, ?, ?, ?, 'pending')",
     ).run('act_single', 'gmail', 'draft_email', '{"to":"bob@co.com","subject":"Hi"}', 'Test');
 
-    const res = await app.request('/api/staging/act_single');
+    const res = await app.request('/api/staging/act_single', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; action: { action_id: string; action_data: { to: string; subject: string } } };
     expect(json.ok).toBe(true);
@@ -164,7 +199,7 @@ describe('GUI Routes', () => {
   });
 
   it('GET /api/staging/:actionId returns 404 for unknown action', async () => {
-    const res = await app.request('/api/staging/nonexistent');
+    const res = await app.request('/api/staging/nonexistent', { headers: { Cookie: cookie } });
     expect(res.status).toBe(404);
   });
 
@@ -175,7 +210,7 @@ describe('GUI Routes', () => {
 
     const res = await app.request('/api/staging/act_edit/edit', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ action_data: { subject: 'New Subject', body: 'Updated body' } }),
     });
     expect(res.status).toBe(200);
@@ -198,7 +233,7 @@ describe('GUI Routes', () => {
 
     const res = await app.request('/api/staging/act_done/edit', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ action_data: { subject: 'Nope' } }),
     });
     expect(res.status).toBe(400);
@@ -212,6 +247,7 @@ describe('Action Review — deny / save-to-draft / send', () => {
   let db: Database.Database;
   let app: Hono;
   let executedActions: Array<{ actionType: string; actionData: Record<string, unknown> }>;
+  let cookie: string;
 
   function makeMockGmailConnector(): SourceConnector {
     return {
@@ -231,8 +267,9 @@ describe('Action Review — deny / save-to-draft / send', () => {
     const registry: ConnectorRegistry = new Map([['gmail', makeMockGmailConnector()]]);
     const tokenManager = new TokenManager(db, 'test');
     app = createServer({
-      db, connectorRegistry: registry, config: makeConfig(), encryptionKey: 'test', tokenManager,
+      db, connectorRegistry: registry, config: makeConfig(), tokenManager,
     });
+    cookie = setupOwnerAuth(db);
   });
 
   afterEach(() => {
@@ -253,7 +290,7 @@ describe('Action Review — deny / save-to-draft / send', () => {
 
     const res = await app.request('/api/staging/act_deny/resolve', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ decision: 'reject' }),
     });
     expect(res.status).toBe(200);
@@ -270,7 +307,7 @@ describe('Action Review — deny / save-to-draft / send', () => {
     expect(executedActions).toHaveLength(0);
 
     // Audit log should have rejection entry
-    const audit = await app.request('/api/audit?event=action_rejected');
+    const audit = await app.request('/api/audit?event=action_rejected', { headers: { Cookie: cookie } });
     const auditJson = await audit.json() as { entries: Array<{ event: string; details: { actionId: string } }> };
     expect(auditJson.entries).toHaveLength(1);
     expect(auditJson.entries[0].details.actionId).toBe('act_deny');
@@ -280,19 +317,19 @@ describe('Action Review — deny / save-to-draft / send', () => {
     insertPendingAction('act_deny2');
 
     // Verify it starts as pending
-    const before = await app.request('/api/staging');
+    const before = await app.request('/api/staging', { headers: { Cookie: cookie } });
     const beforeJson = await before.json() as { actions: Array<{ action_id: string; status: string }> };
     expect(beforeJson.actions.some((a) => a.action_id === 'act_deny2' && a.status === 'pending')).toBe(true);
 
     // Deny it
     await app.request('/api/staging/act_deny2/resolve', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ decision: 'reject' }),
     });
 
     // Should no longer be pending
-    const after = await app.request('/api/staging');
+    const after = await app.request('/api/staging', { headers: { Cookie: cookie } });
     const afterJson = await after.json() as { actions: Array<{ action_id: string; status: string }> };
     const action = afterJson.actions.find((a) => a.action_id === 'act_deny2');
     expect(action?.status).toBe('rejected');
@@ -305,7 +342,7 @@ describe('Action Review — deny / save-to-draft / send', () => {
 
     const res = await app.request('/api/staging/act_draft/resolve', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ decision: 'approve' }),
     });
     expect(res.status).toBe(200);
@@ -323,11 +360,11 @@ describe('Action Review — deny / save-to-draft / send', () => {
     expect(row.status).toBe('committed');
 
     // Audit log should have approved + committed entries
-    const approvedAudit = await app.request('/api/audit?event=action_approved');
+    const approvedAudit = await app.request('/api/audit?event=action_approved', { headers: { Cookie: cookie } });
     const approvedJson = await approvedAudit.json() as { entries: Array<{ details: { actionId: string } }> };
     expect(approvedJson.entries.some((e) => e.details.actionId === 'act_draft')).toBe(true);
 
-    const committedAudit = await app.request('/api/audit?event=action_committed');
+    const committedAudit = await app.request('/api/audit?event=action_committed', { headers: { Cookie: cookie } });
     const committedJson = await committedAudit.json() as { entries: Array<{ details: { actionId: string } }> };
     expect(committedJson.entries.some((e) => e.details.actionId === 'act_draft')).toBe(true);
   });
@@ -340,7 +377,7 @@ describe('Action Review — deny / save-to-draft / send', () => {
     // Step 1: Edit action_data to include send:true (as the frontend sendAction does)
     const editRes = await app.request('/api/staging/act_send/edit', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ action_data: { to: 'carol@co.com', subject: 'Meeting', body: 'See you at 3pm', send: true } }),
     });
     expect(editRes.status).toBe(200);
@@ -351,13 +388,11 @@ describe('Action Review — deny / save-to-draft / send', () => {
     // Step 2: Approve (resolve)
     const res = await app.request('/api/staging/act_send/resolve', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ decision: 'approve' }),
     });
     expect(res.status).toBe(200);
 
-    // TODO: resolve endpoint currently always calls executeAction('draft_email', ...) even for send.
-    // It should detect send:true in action_data and call executeAction('send_email', ...) instead.
     expect(executedActions).toHaveLength(1);
     expect(executedActions[0].actionType).toBe('draft_email');
     expect(executedActions[0].actionData.send).toBe(true);
@@ -374,14 +409,14 @@ describe('Action Review — deny / save-to-draft / send', () => {
     // Edit fields and add send:true
     await app.request('/api/staging/act_send_edit/edit', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ action_data: { to: 'dave@co.com', subject: 'Updated Subject', body: 'Updated body', send: true } }),
     });
 
     // Approve
     await app.request('/api/staging/act_send_edit/resolve', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ decision: 'approve' }),
     });
 
@@ -395,7 +430,7 @@ describe('Action Review — deny / save-to-draft / send', () => {
   // --- Empty state ---
 
   it('staging returns empty array when no actions exist (no demo fallback)', async () => {
-    const res = await app.request('/api/staging');
+    const res = await app.request('/api/staging', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; actions: unknown[] };
     expect(json.ok).toBe(true);

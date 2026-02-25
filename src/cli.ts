@@ -10,7 +10,7 @@
  *   npx pdh reset              Remove all generated files and start fresh
  */
 
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { existsSync, writeFileSync, readFileSync, unlinkSync, mkdirSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, join } from 'node:path';
@@ -28,7 +28,6 @@ const PID_PATH = join(CREDENTIALS_DIR, 'server.pid');
 
 export interface Credentials {
   hubUrl: string;
-  apiKey: string;
   hubDir: string;
 }
 
@@ -50,7 +49,7 @@ export function readCredentials(): Credentials | null {
     if (!existsSync(CREDENTIALS_PATH)) return null;
     const raw = readFileSync(CREDENTIALS_PATH, 'utf-8');
     const parsed = JSON.parse(raw);
-    if (parsed.hubUrl && parsed.apiKey) return parsed as Credentials;
+    if (parsed.hubUrl) return parsed as Credentials;
     return null;
   } catch {
     return null;
@@ -78,7 +77,7 @@ async function fetchDefaultCredentials(): Promise<OAuthCredentials | null> {
 
 export interface InitResult {
   secret: string;
-  apiKey: string;
+  password: string;
   dbPath: string;
   configPath: string;
   envPath: string;
@@ -171,22 +170,20 @@ export async function init(targetDir?: string, options?: InitOptions): Promise<I
   // Initialize database
   const db = getDb(dbPath);
 
-  // Generate API key
-  const appName = options?.appName ?? 'default';
-  const id = appName.toLowerCase().replace(/\s+/g, '-');
-  const rawKey = `pk_${randomUUID().replace(/-/g, '')}`;
-  const keyHash = hashSync(rawKey, 10);
+  // Generate owner password
+  const password = randomBytes(16).toString('base64url');
+  const passwordHash = hashSync(password, 10);
   db.prepare(
-    'INSERT INTO api_keys (id, key_hash, name, allowed_manifests) VALUES (?, ?, ?, ?)',
-  ).run(id, keyHash, appName, JSON.stringify(['*']));
+    'INSERT INTO owner_auth (id, password_hash) VALUES (1, ?)',
+  ).run(passwordHash);
 
   db.close();
 
   // Write credentials file for auto-discovery by agents
   const hubUrl = `http://localhost:${port}`;
-  writeCredentials({ hubUrl, apiKey: rawKey, hubDir: dir });
+  writeCredentials({ hubUrl, hubDir: dir });
 
-  return { secret, apiKey: rawKey, dbPath, configPath, envPath, credentialsPath: CREDENTIALS_PATH, credentialsFetched };
+  return { secret, password, dbPath, configPath, envPath, credentialsPath: CREDENTIALS_PATH, credentialsFetched };
 }
 
 // --- Start / Stop / Status ---
@@ -324,7 +321,9 @@ if (isDirectRun) {
       console.log(`  hub-config.yaml created  ${result.configPath}`);
       console.log(`  Database created         ${result.dbPath}`);
       console.log(`  Credentials saved        ${result.credentialsPath}`);
-      console.log('\n  Next steps:');
+      console.log(`\n  Owner password: ${result.password}`);
+      console.log('  (Save this — you need it to log into the GUI)\n');
+      console.log('  Next steps:');
       if (result.credentialsFetched) {
         console.log('    Default OAuth credentials configured. Just click Connect in the GUI.');
       } else {

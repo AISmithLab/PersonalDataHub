@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
-import { hashSync } from 'bcryptjs';
 import { getDb } from '../db/db.js';
 import { createServer } from './server.js';
 import { AuditLog } from '../audit/log.js';
@@ -11,9 +10,6 @@ import type { HubConfigParsed } from '../config/schema.js';
 import type Database from 'better-sqlite3';
 import type { Hono } from 'hono';
 import { makeTmpDir } from '../test-utils.js';
-
-const TEST_API_KEY = 'pk_test_key_123';
-const TEST_KEY_HASH = hashSync(TEST_API_KEY, 10);
 
 function makeTestRows(): DataRow[] {
   return [
@@ -59,13 +55,6 @@ function makeConfig(): HubConfigParsed {
   };
 }
 
-function setupDb(db: Database.Database): void {
-  // Insert API key
-  db.prepare(
-    'INSERT INTO api_keys (id, key_hash, name, allowed_manifests) VALUES (?, ?, ?, ?)',
-  ).run('openclaw', TEST_KEY_HASH, 'OpenClaw Agent', '["*"]');
-}
-
 async function request(app: Hono, method: string, path: string, body?: unknown, headers?: Record<string, string>) {
   const init: RequestInit = {
     method,
@@ -88,7 +77,6 @@ describe('HTTP Server', () => {
   beforeEach(() => {
     tmpDir = makeTmpDir();
     db = getDb(join(tmpDir, 'test.db'));
-    setupDb(db);
 
     const registry: ConnectorRegistry = new Map([['gmail', makeMockConnector()]]);
     const tokenManager = new TokenManager(db, 'test-secret');
@@ -96,7 +84,6 @@ describe('HTTP Server', () => {
       db,
       connectorRegistry: registry,
       config: makeConfig(),
-      encryptionKey: 'test-secret',
       tokenManager,
     });
   });
@@ -106,28 +93,23 @@ describe('HTTP Server', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('POST /app/v1/pull without valid API key → 401', async () => {
+  it('POST /app/v1/pull without auth → 200 (agents do not need auth)', async () => {
     const res = await request(app, 'POST', '/app/v1/pull', {
       source: 'gmail',
       purpose: 'test',
     });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(200);
+    const json = await res.json() as { ok: boolean; data: DataRow[] };
+    expect(json.ok).toBe(true);
+    expect(json.data.length).toBeGreaterThan(0);
   });
 
-  it('POST /app/v1/pull with invalid bearer token → 401', async () => {
-    const res = await request(app, 'POST', '/app/v1/pull', {
-      source: 'gmail',
-      purpose: 'test',
-    }, { Authorization: 'Bearer invalid_key' });
-    expect(res.status).toBe(401);
-  });
-
-  it('POST /app/v1/pull with valid key and purpose → returns data, audit log entry', async () => {
+  it('POST /app/v1/pull with purpose → returns data, audit log entry', async () => {
     const res = await request(app, 'POST', '/app/v1/pull', {
       source: 'gmail',
       type: 'email',
       purpose: 'Find Q4 report emails',
-    }, { Authorization: `Bearer ${TEST_API_KEY}` });
+    });
 
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; data: DataRow[] };
@@ -144,7 +126,7 @@ describe('HTTP Server', () => {
   it('POST /app/v1/pull without purpose → 400', async () => {
     const res = await request(app, 'POST', '/app/v1/pull', {
       source: 'gmail',
-    }, { Authorization: `Bearer ${TEST_API_KEY}` });
+    });
 
     expect(res.status).toBe(400);
     const json = await res.json() as { ok: boolean; error: { message: string } };
@@ -152,13 +134,13 @@ describe('HTTP Server', () => {
     expect(json.error.message).toContain('purpose');
   });
 
-  it('POST /app/v1/propose with valid key and purpose → creates staging row, audit entry', async () => {
+  it('POST /app/v1/propose with purpose → creates staging row, audit entry', async () => {
     const res = await request(app, 'POST', '/app/v1/propose', {
       source: 'gmail',
       action_type: 'draft_email',
       action_data: { to: 'alice@co.com', subject: 'Re: Q4', body: 'Looks good.' },
       purpose: 'Draft reply to Alice about Q4 report',
-    }, { Authorization: `Bearer ${TEST_API_KEY}` });
+    });
 
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; actionId: string; status: string };

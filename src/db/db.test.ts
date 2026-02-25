@@ -26,17 +26,25 @@ describe('Database', () => {
       .all() as { name: string }[];
     const tableNames = tables.map((t) => t.name);
 
-    expect(tableNames).toContain('api_keys');
+    expect(tableNames).toContain('owner_auth');
+    expect(tableNames).toContain('sessions');
     expect(tableNames).toContain('manifests');
     expect(tableNames).toContain('staging');
     expect(tableNames).toContain('audit_log');
     expect(tableNames).not.toContain('cached_data');
+    expect(tableNames).not.toContain('api_keys');
   });
 
-  it('api_keys table has correct columns', () => {
-    const cols = db.prepare("PRAGMA table_info('api_keys')").all() as { name: string; type: string }[];
+  it('owner_auth table has correct columns', () => {
+    const cols = db.prepare("PRAGMA table_info('owner_auth')").all() as { name: string }[];
     const colNames = cols.map((c) => c.name);
-    expect(colNames).toEqual(['id', 'key_hash', 'name', 'allowed_manifests', 'enabled', 'created_at']);
+    expect(colNames).toEqual(['id', 'password_hash', 'created_at']);
+  });
+
+  it('sessions table has correct columns', () => {
+    const cols = db.prepare("PRAGMA table_info('sessions')").all() as { name: string }[];
+    const colNames = cols.map((c) => c.name);
+    expect(colNames).toEqual(['token', 'created_at', 'expires_at']);
   });
 
   it('manifests table has correct columns', () => {
@@ -55,20 +63,6 @@ describe('Database', () => {
     const cols = db.prepare("PRAGMA table_info('audit_log')").all() as { name: string }[];
     const colNames = cols.map((c) => c.name);
     expect(colNames).toEqual(['id', 'timestamp', 'event', 'source', 'details']);
-  });
-
-  it('inserts and reads api_keys with allowed_manifests JSON', () => {
-    const manifests = JSON.stringify(['email-search', 'github-issues']);
-    db.prepare(
-      'INSERT INTO api_keys (id, key_hash, name, allowed_manifests) VALUES (?, ?, ?, ?)',
-    ).run('openclaw', 'hash_abc', 'OpenClaw Agent', manifests);
-
-    const row = db.prepare('SELECT * FROM api_keys WHERE id = ?').get('openclaw') as Record<string, unknown>;
-    expect(row.id).toBe('openclaw');
-    expect(row.key_hash).toBe('hash_abc');
-    expect(row.name).toBe('OpenClaw Agent');
-    expect(JSON.parse(row.allowed_manifests as string)).toEqual(['email-search', 'github-issues']);
-    expect(row.enabled).toBe(1);
   });
 
   it('inserts and reads manifests', () => {

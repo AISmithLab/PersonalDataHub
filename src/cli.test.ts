@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
 import { rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
-import { compareSync } from 'bcryptjs';
 import Database from 'better-sqlite3';
 import { init, reset, writeCredentials, readCredentials, CREDENTIALS_PATH, CREDENTIALS_DIR } from './cli.js';
 import { makeTmpDir } from './test-utils.js';
@@ -37,33 +36,24 @@ describe('CLI init', () => {
     const db = new Database(join(tmpDir, 'pdh.db'));
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
     const names = tables.map(t => t.name);
-    expect(names).toContain('api_keys');
+    expect(names).toContain('owner_auth');
+    expect(names).toContain('sessions');
     expect(names).toContain('manifests');
     expect(names).toContain('staging');
     expect(names).toContain('audit_log');
+    expect(names).not.toContain('api_keys');
     db.close();
   });
 
-  it('generates a valid API key starting with pk_', async () => {
+  it('generates a password and stores hashed version in owner_auth', async () => {
     const result = await init(tmpDir);
-    expect(result.apiKey).toMatch(/^pk_[a-f0-9]{32}$/);
-  });
+    expect(result.password).toBeTruthy();
+    expect(result.password.length).toBeGreaterThan(10);
 
-  it('stores hashed API key that verifies against raw key', async () => {
-    const result = await init(tmpDir);
     const db = new Database(join(tmpDir, 'pdh.db'));
-    const row = db.prepare('SELECT * FROM api_keys').get() as { key_hash: string; name: string };
-    expect(compareSync(result.apiKey, row.key_hash)).toBe(true);
-    expect(row.name).toBe('default');
-    db.close();
-  });
-
-  it('uses custom app name for API key', async () => {
-    await init(tmpDir, { appName: 'My Agent' });
-    const db = new Database(join(tmpDir, 'pdh.db'));
-    const row = db.prepare('SELECT * FROM api_keys').get() as { id: string; name: string };
-    expect(row.id).toBe('my-agent');
-    expect(row.name).toBe('My Agent');
+    const row = db.prepare('SELECT * FROM owner_auth WHERE id = 1').get() as { password_hash: string } | undefined;
+    expect(row).toBeTruthy();
+    expect(row!.password_hash).toBeTruthy();
     db.close();
   });
 
@@ -83,8 +73,8 @@ describe('CLI init', () => {
     expect(existsSync(CREDENTIALS_PATH)).toBe(true);
     const creds = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf-8'));
     expect(creds.hubUrl).toBe('http://localhost:3000');
-    expect(creds.apiKey).toBe(result.apiKey);
     expect(creds.hubDir).toBe(tmpDir);
+    expect(creds).not.toHaveProperty('apiKey');
   });
 
   it('writes credentials with custom port', async () => {
@@ -155,7 +145,7 @@ describe('CLI reset', () => {
     reset(tmpDir);
     // Second init should not throw
     const result = await init(tmpDir);
-    expect(result.apiKey).toMatch(/^pk_/);
+    expect(result.password).toBeTruthy();
   });
 
   it('returns empty array when nothing to remove', () => {
@@ -185,11 +175,11 @@ describe('Credentials file', () => {
   });
 
   it('writeCredentials creates the file and readCredentials reads it', () => {
-    writeCredentials({ hubUrl: 'http://localhost:9999', apiKey: 'pk_test', hubDir: '/tmp' });
+    writeCredentials({ hubUrl: 'http://localhost:9999', hubDir: '/tmp' });
     const creds = readCredentials();
     expect(creds).not.toBeNull();
     expect(creds!.hubUrl).toBe('http://localhost:9999');
-    expect(creds!.apiKey).toBe('pk_test');
+    expect(creds!.hubDir).toBe('/tmp');
   });
 
   it('readCredentials returns null for missing file', () => {

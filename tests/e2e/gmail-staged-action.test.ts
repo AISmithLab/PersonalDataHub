@@ -11,9 +11,10 @@ describe('E2E: Gmail Staged Action', () => {
   let tmpDir: string;
   let audit: AuditLog;
   let connector: SourceConnector;
+  let sessionCookie: string;
 
   beforeEach(() => {
-    ({ app, db, tmpDir, audit, connector } = setupE2eApp());
+    ({ app, db, tmpDir, audit, connector, sessionCookie } = setupE2eApp());
   });
 
   afterEach(() => cleanup(db, tmpDir));
@@ -49,10 +50,10 @@ describe('E2E: Gmail Staged Action', () => {
     });
     const { actionId } = await proposeRes.json() as { actionId: string };
 
-    // Approve via GUI API
+    // Approve via GUI API (requires session auth)
     const approveRes = await app.request(`/api/staging/${actionId}/resolve`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: sessionCookie },
       body: JSON.stringify({ decision: 'approve' }),
     });
     expect(approveRes.status).toBe(200);
@@ -78,10 +79,10 @@ describe('E2E: Gmail Staged Action', () => {
     });
     const { actionId } = await proposeRes.json() as { actionId: string };
 
-    // Reject
+    // Reject (requires session auth)
     await app.request(`/api/staging/${actionId}/resolve`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: sessionCookie },
       body: JSON.stringify({ decision: 'reject' }),
     });
 

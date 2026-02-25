@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
-import { hashSync } from 'bcryptjs';
+import { compareSync } from 'bcryptjs';
 import type Database from 'better-sqlite3';
 import type { ConnectorRegistry } from '../connectors/types.js';
 import type { HubConfigParsed } from '../config/schema.js';
@@ -28,7 +28,59 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
     return c.html(getIndexHtml());
   });
 
-  // --- GUI API endpoints ---
+  // --- Owner auth endpoints (before middleware) ---
+
+  // Auth status check
+  app.get('/api/auth/status', (c) => {
+    const cookie = parseCookie(c.req.header('Cookie') ?? '', 'pdh_session');
+    if (!cookie) return c.json({ authenticated: false });
+    const session = deps.db.prepare(
+      "SELECT * FROM sessions WHERE token = ? AND expires_at > datetime('now')",
+    ).get(cookie) as { token: string } | undefined;
+    return c.json({ authenticated: !!session });
+  });
+
+  // Login
+  app.post('/api/login', async (c) => {
+    const body = await c.req.json();
+    const { password } = body;
+    if (!password) return c.json({ ok: false, error: 'Password required' }, 400);
+
+    const row = deps.db.prepare('SELECT password_hash FROM owner_auth WHERE id = 1').get() as { password_hash: string } | undefined;
+    if (!row || !compareSync(password, row.password_hash)) {
+      return c.json({ ok: false, error: 'Invalid password' }, 401);
+    }
+
+    const token = randomUUID();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    deps.db.prepare('INSERT INTO sessions (token, expires_at) VALUES (?, ?)').run(token, expiresAt);
+
+    c.header('Set-Cookie', `pdh_session=${token}; HttpOnly; Path=/; SameSite=Strict`);
+    return c.json({ ok: true });
+  });
+
+  // Logout
+  app.post('/api/logout', (c) => {
+    const cookie = parseCookie(c.req.header('Cookie') ?? '', 'pdh_session');
+    if (cookie) {
+      deps.db.prepare('DELETE FROM sessions WHERE token = ?').run(cookie);
+    }
+    c.header('Set-Cookie', 'pdh_session=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0');
+    return c.json({ ok: true });
+  });
+
+  // Session auth middleware for all /api/* routes below
+  app.use('/api/*', async (c, next) => {
+    const cookie = parseCookie(c.req.header('Cookie') ?? '', 'pdh_session');
+    if (!cookie) return c.json({ ok: false, error: 'Unauthorized' }, 401);
+    const session = deps.db.prepare(
+      "SELECT * FROM sessions WHERE token = ? AND expires_at > datetime('now')",
+    ).get(cookie) as { token: string } | undefined;
+    if (!session) return c.json({ ok: false, error: 'Unauthorized' }, 401);
+    await next();
+  });
+
+  // --- GUI API endpoints (protected by session middleware) ---
 
   // Get all sources and their status
   app.get('/api/sources', async (c) => {
@@ -99,38 +151,6 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   app.delete('/api/filters/:id', (c) => {
     const id = c.req.param('id');
     deps.db.prepare('DELETE FROM filters WHERE id = ?').run(id);
-    return c.json({ ok: true });
-  });
-
-  // Get API keys
-  app.get('/api/keys', (c) => {
-    const keys = deps.db
-      .prepare('SELECT id, name, allowed_manifests, enabled, created_at FROM api_keys')
-      .all();
-    return c.json({ ok: true, keys });
-  });
-
-  // Generate new API key
-  app.post('/api/keys', async (c) => {
-    const body = await c.req.json();
-    const { name, allowed_manifests } = body;
-
-    const id = name.toLowerCase().replace(/\s+/g, '-');
-    const rawKey = `pk_${randomUUID().replace(/-/g, '')}`;
-    const keyHash = hashSync(rawKey, 10);
-
-    deps.db.prepare(
-      'INSERT INTO api_keys (id, key_hash, name, allowed_manifests) VALUES (?, ?, ?, ?)',
-    ).run(id, keyHash, name, JSON.stringify(allowed_manifests ?? ['*']));
-
-    // Return the raw key only once — it won't be shown again
-    return c.json({ ok: true, id, key: rawKey });
-  });
-
-  // Revoke API key
-  app.delete('/api/keys/:id', (c) => {
-    const id = c.req.param('id');
-    deps.db.prepare('UPDATE api_keys SET enabled = 0 WHERE id = ?').run(id);
     return c.json({ ok: true });
   });
 
@@ -435,6 +455,11 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   return app;
 }
 
+function parseCookie(header: string, name: string): string | null {
+  const match = header.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return match ? match[1] : null;
+}
+
 function getIndexHtml(): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -690,7 +715,26 @@ function getIndexHtml(): string {
   </style>
 </head>
 <body>
-  <div id="app">
+  <!-- Login screen -->
+  <div id="login-screen" style="display:none;justify-content:center;align-items:center;min-height:100vh;background:var(--bg)">
+    <div style="background:var(--card);padding:40px;border-radius:12px;border:1px solid var(--border);box-shadow:0 2px 12px rgba(0,0,0,0.06);max-width:400px;width:100%">
+      <div style="text-align:center;margin-bottom:24px">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <h1 style="font-size:20px;font-weight:700;margin-top:12px">PersonalDataHub</h1>
+        <p style="font-size:14px;color:var(--muted);margin-top:4px">Enter your owner password to continue</p>
+      </div>
+      <form onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="login-password" placeholder="Owner password" autofocus>
+        </div>
+        <div id="login-error" style="color:var(--destructive);font-size:13px;margin-bottom:12px"></div>
+        <button type="submit" class="btn btn-primary" style="width:100%">Sign in</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="app" style="display:none">
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div class="sidebar-brand">
@@ -735,6 +779,7 @@ function getIndexHtml(): string {
       </nav>
       <div class="sidebar-footer">
         <span class="sidebar-save-flash" id="sidebar-flash">Saved</span>
+        <button class="btn btn-ghost btn-sm" onclick="logout()" style="width:100%;margin-top:8px;font-size:13px">Sign out</button>
       </div>
     </aside>
     <div class="main-content">
@@ -761,7 +806,7 @@ function getIndexHtml(): string {
     ];
 
     let state = {
-      sources: [], filters: [], keys: [], staging: [], audit: [],
+      sources: [], filters: [], staging: [], audit: [],
       gmail: {},
       github: { repoList: [], reposLoading: false, reposLoaded: false, filterOwner: '', search: '' },
       expandedRepos: {},
@@ -785,17 +830,15 @@ function getIndexHtml(): string {
     window.switchTab = switchTab;
 
     async function fetchData() {
-      const [sources, filtersData, keys, staging, audit] = await Promise.all([
+      const [sources, filtersData, staging, audit] = await Promise.all([
         fetch('/api/sources').then(r => r.json()),
         fetch('/api/filters').then(r => r.json()),
-        fetch('/api/keys').then(r => r.json()),
         fetch('/api/staging').then(r => r.json()),
         fetch('/api/audit?limit=20').then(r => r.json()),
       ]);
       state.sources = sources.sources || [];
       state.filters = filtersData.filters || [];
       state.filterTypes = filtersData.filterTypes || {};
-      state.keys = keys.keys || [];
       state.staging = staging.actions || [];
       state.audit = audit.entries || [];
 
@@ -877,7 +920,6 @@ function getIndexHtml(): string {
       var activeFilterCount = gmailFilters.filter(function(f) { return f.enabled; }).length;
       var enabledRepos = (state.github.repoList || []).filter(function(r) { return r.enabled; }).length;
       var totalRepos = (state.github.repoList || []).length;
-      var activeKeys = state.keys.filter(function(k) { return k.enabled; }).length;
       var pendingCount = state.staging.filter(function(a) { return a.status === 'pending'; }).length;
 
       var recentHtml = '';
@@ -932,15 +974,6 @@ function getIndexHtml(): string {
               <span class="nav-badge-muted" style="font-size:12px">soon</span>
             </div>
             <p style="font-size:14px;color:var(--muted);margin-bottom:8px">Coming soon</p>
-          </div>
-
-          <div class="card" style="cursor:pointer" onclick="switchTab('settings')">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-              <span style="font-weight:600;font-size:14px">API Keys</span>
-            </div>
-            <span style="font-size:14px;color:var(--muted)"><strong class="font-mono" style="color:var(--fg)">\${activeKeys}</strong> active key\${activeKeys !== 1 ? 's' : ''}</span>
-            <div style="margin-top:12px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Manage <span style="font-size:14px">&rarr;</span></div>
           </div>
 
           <div class="card" style="cursor:pointer" onclick="switchTab('settings')">
@@ -1289,24 +1322,6 @@ function getIndexHtml(): string {
     function renderSettingsTab() {
       return \`
         <div class="card">
-          <h2>API Keys</h2>
-          \${state.keys.length ? '<table><tr><th>ID</th><th>Name</th><th>Manifests</th><th>Status</th><th>Actions</th></tr>' +
-            state.keys.map(k => '<tr><td>' + k.id + '</td><td>' + k.name + '</td><td style="font-size:14px">' + k.allowed_manifests + '</td><td><span class="status ' + (k.enabled ? 'connected' : 'disconnected') + '">' + (k.enabled ? 'Active' : 'Revoked') + '</span></td><td>' +
-              (k.enabled ? '<button class="btn btn-danger btn-sm" onclick="revokeKey(\\'' + k.id + '\\')">Revoke</button>' : '') +
-              '</td></tr>').join('') +
-            '</table>' : '<p class="empty">No API keys.</p>'}
-          <div style="margin-top:16px">
-            <h3>Generate New Key</h3>
-            <div class="form-group">
-              <label>App Name</label>
-              <input type="text" id="newKeyName" placeholder="e.g., OpenClaw Agent">
-            </div>
-            <button class="btn btn-primary" onclick="generateKey()">Generate Key</button>
-            <div id="newKeyResult"></div>
-          </div>
-        </div>
-
-        <div class="card">
           <h2>Audit Log</h2>
           \${state.audit.length ? '<table><tr><th>Time</th><th>Event</th><th>Source</th><th>Details</th></tr>' +
             state.audit.map(e => {
@@ -1645,37 +1660,19 @@ function getIndexHtml(): string {
       await fetchData();
     }
 
-    async function generateKey() {
-      const name = document.getElementById('newKeyName').value;
-      if (!name) { alert('Enter an app name'); return; }
-
-      const res = await fetch('/api/keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
-      });
-      const data = await res.json();
-      document.getElementById('newKeyResult').innerHTML =
-        '<div class="key-display" style="margin-top:8px"><strong>API Key (copy now, shown only once):</strong><br>' + data.key + '</div>';
-      document.getElementById('newKeyName').value = '';
-      await fetchData();
-    }
-
-    async function revokeKey(id) {
-      if (!confirm('Revoke key ' + id + '?')) return;
-      await fetch('/api/keys/' + id, { method: 'DELETE' });
-      await fetchData();
+    async function logout() {
+      await fetch('/api/logout', { method: 'POST' });
+      window.location.reload();
     }
 
     // Make functions available globally
+    window.logout = logout;
     window.startOAuth = startOAuth;
     window.disconnectSource = disconnectSource;
     window.resolveAction = resolveAction;
     window.approveAction = approveAction;
     window.editAction = editAction;
     window.cancelEdit = cancelEdit;
-    window.generateKey = generateKey;
-    window.revokeKey = revokeKey;
     window.toggleRepo = toggleRepo;
     window.saveGithub = saveGithub;
     window.chk = chk;
@@ -1712,8 +1709,38 @@ function getIndexHtml(): string {
       }
     })();
 
-    // Initial load
-    fetchData();
+    // Login form handler
+    async function handleLogin(e) {
+      e.preventDefault();
+      var pw = document.getElementById('login-password').value;
+      var err = document.getElementById('login-error');
+      err.textContent = '';
+      var res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw })
+      });
+      if (res.ok) {
+        document.getElementById('login-screen').style.display = 'none';
+        document.getElementById('app').style.display = 'flex';
+        fetchData();
+      } else {
+        err.textContent = 'Invalid password';
+      }
+    }
+    window.handleLogin = handleLogin;
+
+    // Check auth on load
+    fetch('/api/auth/status').then(r => r.json()).then(function(data) {
+      if (data.authenticated) {
+        document.getElementById('login-screen').style.display = 'none';
+        document.getElementById('app').style.display = 'flex';
+        fetchData();
+      } else {
+        document.getElementById('login-screen').style.display = 'flex';
+        document.getElementById('app').style.display = 'none';
+      }
+    });
   </script>
 </body>
 </html>`;

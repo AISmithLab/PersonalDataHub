@@ -12,7 +12,6 @@ interface ServerDeps {
   db: Database.Database;
   connectorRegistry: ConnectorRegistry;
   config: HubConfigParsed;
-  encryptionKey?: string;
   tokenManager: TokenManager;
 }
 

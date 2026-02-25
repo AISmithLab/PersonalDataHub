@@ -4,14 +4,12 @@ import { tmpdir } from 'node:os';
 import { hashSync } from 'bcryptjs';
 import { getDb } from '../../src/db/db.js';
 import { createServer } from '../../src/server/server.js';
+import { TokenManager } from '../../src/auth/token-manager.js';
 import { AuditLog } from '../../src/audit/log.js';
 import type { DataRow, SourceConnector, ConnectorRegistry } from '../../src/connectors/types.js';
 import type { HubConfigParsed } from '../../src/config/schema.js';
 import type Database from 'better-sqlite3';
 import type { Hono } from 'hono';
-
-export const TEST_API_KEY = 'pk_test_e2e_key_123';
-export const TEST_KEY_HASH = hashSync(TEST_API_KEY, 10);
 
 export function makeTmpDir(): string {
   const dir = join(tmpdir(), `pdh-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -117,29 +115,31 @@ export function setupE2eApp(gmailRows?: DataRow[], configOverride?: HubConfigPar
   connector: SourceConnector;
   config: HubConfigParsed;
   connectorRegistry: ConnectorRegistry;
+  sessionCookie: string;
 } {
   const tmpDir = makeTmpDir();
   const db = getDb(join(tmpDir, 'test.db'));
 
-  // Insert API key
-  db.prepare(
-    'INSERT INTO api_keys (id, key_hash, name, allowed_manifests) VALUES (?, ?, ?, ?)',
-  ).run('test-app', TEST_KEY_HASH, 'Test App', '["*"]');
+  // Set up owner auth and a session for GUI admin endpoints
+  db.prepare('INSERT INTO owner_auth (id, password_hash) VALUES (1, ?)').run(hashSync('e2e-test-pass', 10));
+  const sessionToken = 'e2e-session-token';
+  db.prepare("INSERT INTO sessions (token, expires_at) VALUES (?, datetime('now', '+1 day'))").run(sessionToken);
 
   const connector = makeMockGmailConnector(gmailRows ?? makeGmailRows());
   const registry: ConnectorRegistry = new Map([['gmail', connector]]);
   const config = configOverride ?? makeConfig();
 
+  const tokenManager = new TokenManager(db, 'e2e-test-secret');
   const app = createServer({
     db,
     connectorRegistry: registry,
     config,
-    encryptionKey: 'e2e-test-secret',
+    tokenManager,
   });
 
   const audit = new AuditLog(db);
 
-  return { app, db, tmpDir, audit, connector, config, connectorRegistry: registry };
+  return { app, db, tmpDir, audit, connector, config, connectorRegistry: registry, sessionCookie: `pdh_session=${sessionToken}` };
 }
 
 export async function request(
@@ -147,14 +147,10 @@ export async function request(
   method: string,
   path: string,
   body?: unknown,
-  authenticated = true,
 ) {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (authenticated) {
-    headers['Authorization'] = `Bearer ${TEST_API_KEY}`;
-  }
 
   const init: RequestInit = { method, headers };
   if (body) {

@@ -1,13 +1,17 @@
 import type Database from 'better-sqlite3';
 
-const CREATE_API_KEYS = `
-CREATE TABLE IF NOT EXISTS api_keys (
-  id TEXT PRIMARY KEY,
-  key_hash TEXT NOT NULL,
-  name TEXT NOT NULL,
-  allowed_manifests TEXT NOT NULL DEFAULT '[]',
-  enabled INTEGER NOT NULL DEFAULT 1,
+const CREATE_OWNER_AUTH = `
+CREATE TABLE IF NOT EXISTS owner_auth (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  password_hash TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`;
+
+const CREATE_SESSIONS = `
+CREATE TABLE IF NOT EXISTS sessions (
+  token TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL
 )`;
 
 const CREATE_MANIFESTS = `
@@ -82,7 +86,8 @@ CREATE TABLE IF NOT EXISTS github_repos (
 )`;
 
 export function createTables(db: Database.Database): void {
-  db.exec(CREATE_API_KEYS);
+  db.exec(CREATE_OWNER_AUTH);
+  db.exec(CREATE_SESSIONS);
   db.exec(CREATE_MANIFESTS);
   // Migrate existing manifests tables missing new columns
   try { db.exec("ALTER TABLE manifests ADD COLUMN name TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already exists */ }

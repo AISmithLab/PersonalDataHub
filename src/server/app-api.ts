@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { compareSync } from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { ConnectorRegistry, DataRow } from '../connectors/types.js';
@@ -14,36 +13,9 @@ interface AppApiDeps {
 
 }
 
-interface ApiKeyRow {
-  id: string;
-  key_hash: string;
-  name: string;
-  allowed_manifests: string;
-  enabled: number;
-}
-
-type Env = { Variables: { apiKey: ApiKeyRow } };
-
-export function createAppApi(deps: AppApiDeps): Hono<Env> {
-  const app = new Hono<Env>();
+export function createAppApi(deps: AppApiDeps): Hono {
+  const app = new Hono();
   const auditLog = new AuditLog(deps.db);
-
-  // Auth middleware
-  app.use('*', async (c, next) => {
-    const authHeader = c.req.header('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return c.json({ ok: false, error: { code: 'UNAUTHORIZED', message: 'Missing or invalid Authorization header' } }, 401);
-    }
-
-    const token = authHeader.slice('Bearer '.length);
-    const apiKey = verifyApiKey(deps.db, token);
-    if (!apiKey) {
-      return c.json({ ok: false, error: { code: 'UNAUTHORIZED', message: 'Invalid API key' } }, 401);
-    }
-
-    c.set('apiKey', apiKey);
-    await next();
-  });
 
   // POST /pull
   app.post('/pull', async (c) => {
@@ -58,7 +30,6 @@ export function createAppApi(deps: AppApiDeps): Hono<Env> {
       return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required field: source' } }, 400);
     }
 
-    const apiKey = c.get('apiKey');
     const sourceConfig = deps.config.sources[source];
     if (!sourceConfig) {
       return c.json({ ok: false, error: { code: 'NOT_FOUND', message: `Unknown source: "${source}"` } }, 404);
@@ -79,7 +50,7 @@ export function createAppApi(deps: AppApiDeps): Hono<Env> {
     const filtered = applyFilters(rows, filters);
 
     // Log to audit
-    auditLog.logPull(source, purpose, filtered.length, `app:${apiKey.id}`);
+    auditLog.logPull(source, purpose, filtered.length, 'agent');
 
     return c.json({
       ok: true,
@@ -101,8 +72,6 @@ export function createAppApi(deps: AppApiDeps): Hono<Env> {
       return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required fields: source, action_type' } }, 400);
     }
 
-    const apiKey = c.get('apiKey');
-
     // Insert into staging
     const actionId = `act_${randomUUID().slice(0, 12)}`;
     deps.db.prepare(
@@ -111,7 +80,7 @@ export function createAppApi(deps: AppApiDeps): Hono<Env> {
     ).run(actionId, '', source, action_type, JSON.stringify(action_data ?? {}), purpose);
 
     // Log to audit
-    auditLog.logActionProposed(actionId, source, action_type, purpose, `app:${apiKey.id}`);
+    auditLog.logActionProposed(actionId, source, action_type, purpose, 'agent');
 
     return c.json({
       ok: true,
@@ -122,16 +91,3 @@ export function createAppApi(deps: AppApiDeps): Hono<Env> {
 
   return app;
 }
-
-function verifyApiKey(db: Database.Database, token: string): ApiKeyRow | null {
-  const rows = db.prepare('SELECT * FROM api_keys WHERE enabled = 1').all() as ApiKeyRow[];
-
-  for (const row of rows) {
-    if (compareSync(token, row.key_hash)) {
-      return row;
-    }
-  }
-
-  return null;
-}
-

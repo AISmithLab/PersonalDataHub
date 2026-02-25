@@ -105,4 +105,4 @@ if (config.sources.github?.enabled) {
   }
 }
 
-startServer({ db, connectorRegistry, config, encryptionKey, tokenManager });
+startServer({ db, connectorRegistry, config, tokenManager });
