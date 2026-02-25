@@ -17,6 +17,13 @@ PersonalDataHub is an open-source, self-hosted data hub between the services tha
 
 You do not need to give agents direct access to your accounts. Agents see nothing by default — you explicitly whitelist access.
 
+
+### Demo
+
+https://github.com/user-attachments/assets/62e7a26a-44a6-4a78-8b99-59e66b1e8464
+
+
+
 ## Quick Start
 
 PersonalDataHub runs as a **dedicated OS user** (`personaldatahub`) so that agents cannot read your OAuth tokens or database directly. The setup creates this user, installs the server under it, then configures your main user's agent to connect via MCP.
