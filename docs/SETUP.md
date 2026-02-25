@@ -110,21 +110,49 @@ sudo npx pdh uninstall-service
 
 ## Step 4: Connect Data Sources
 
-You need to connect OAuth sources (Gmail, GitHub) from the `personaldatahub` user's browser session so that the agent running as your main user cannot intercept the keyboard or session cookie.
+To connect Gmail, GitHub, and other sources, you need to open the PersonalDataHub GUI at `http://localhost:3000` and log in with the owner password from Step 2.
 
-### macOS
+**Important: why browser isolation matters.** When you log into the GUI, a session cookie (`pdh_session`) is stored in your browser. An AI agent with shell access (like Claude Code) running as your main user can read your browser's cookie store on disk:
 
-Switch to the `personaldatahub` user's desktop session:
+- Chrome (Linux): `~/.config/google-chrome/Default/Cookies`
+- Chrome (macOS): `~/Library/Application Support/Google/Chrome/Default/Cookies`
+- Firefox: `~/.mozilla/firefox/<profile>/cookies.sqlite`
+
+If the agent extracts this cookie, it can call admin endpoints (approve actions, change filters, disconnect sources) without your knowledge. To prevent this, open the GUI in a browser session that the agent cannot access.
+
+### Approach 1: SSH tunnel from a different machine (recommended for servers)
+
+If PersonalDataHub runs on a remote or headless server, SSH tunnel from your local machine:
 
 ```bash
-# Open a login window for the personaldatahub user
-# (or use Fast User Switching in System Preferences > Login Window)
-sudo -u personaldatahub open -a Safari http://localhost:3000
+ssh -L 3000:localhost:3000 youruser@your-server
 ```
 
-### Linux
+Then open `http://localhost:3000` in your **local** browser. The session cookie lives in your local browser — the agent on the server has no way to access it. This is the most secure approach.
 
-Switch to the `personaldatahub` user's desktop session (e.g., via a separate TTY or display manager), then open `http://localhost:3000` in a browser.
+### Approach 2: Separate desktop session (macOS)
+
+On macOS, open the GUI in a browser running as the `personaldatahub` user. The browser cookie file will be owned by `personaldatahub` with `0600` permissions, so the agent running as your main user cannot read it.
+
+```bash
+# Option A: Open Safari as the personaldatahub user
+sudo -u personaldatahub open -a Safari http://localhost:3000
+
+# Option B: Use Fast User Switching (System Settings > Login Window)
+# Log in as personaldatahub and open a browser there
+```
+
+### Approach 3: Separate desktop session (Linux desktop)
+
+On Linux with a desktop environment, switch to the `personaldatahub` user's session:
+
+```bash
+# Switch to a new TTY (Ctrl+Alt+F2), log in as personaldatahub, and open a browser
+sudo -u personaldatahub -i
+firefox http://localhost:3000 &
+```
+
+Or use your display manager's user switching feature to log into a `personaldatahub` desktop session.
 
 ### In the GUI
 
