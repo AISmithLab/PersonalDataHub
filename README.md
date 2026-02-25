@@ -15,23 +15,9 @@ PersonalDataHub is an open-source, self-hosted data hub between the services tha
 3. **Agents discover tools** via MCP (source-specific tools like `read_emails`, `search_github_issues`) or call the REST API directly
 4. **You review** every outbound action (drafts, replies) before it's sent — nothing goes out without your approval
 
-You do not need to give agents direct access to your accounts. Agents see nothing by default — you explicitly whitelist access. Install it on your Mac Mini at home or on a cloud instance.
+You do not need to give agents direct access to your accounts. Agents see nothing by default — you explicitly whitelist access.
 
 ## Quick Start
-
-### Option A: Install via ClawHub
-
-If you're running [OpenClaw](https://theoperatorvault.io), install PersonalDataHub as a skill through [ClawHub](https://theoperatorvault.io/clawhub-guide):
-
-```bash
-clawhub install personaldatahub
-```
-
-That's it. Dependencies, build, init, and server startup are handled automatically. Open `http://localhost:3000` to connect your accounts.
-
-### Option B: Install from Source
-
-Works with any MCP-compatible agent (Claude Code, Cursor, Windsurf) or without any agent framework.
 
 ```bash
 git clone https://github.com/AISmithLab/PersonalDataHub.git
@@ -42,13 +28,13 @@ npx pdh start
 open http://localhost:3000
 ```
 
-See the [Setup Guide](docs/SETUP.md) for full details on both options, including connecting data sources and verifying your installation.
+This installs dependencies, initializes the database, and starts the server. Save the **owner password** printed during init — you need it to log into the GUI.
+
+See the [Setup Guide](docs/SETUP.md) for connecting data sources and your agent.
 
 ## Agent Integration
 
-### MCP Server (Recommended)
-
-PersonalDataHub includes a stdio MCP server that any MCP-compatible agent can use. Add to your agent's MCP config (e.g., `.claude/settings.json` for Claude Code):
+Add PersonalDataHub as an MCP server in your agent's config. For Claude Code, add to `.claude/settings.json`:
 
 ```json
 {
@@ -62,10 +48,6 @@ PersonalDataHub includes a stdio MCP server that any MCP-compatible agent can us
 ```
 
 The MCP server dynamically registers tools based on which sources you've connected via OAuth. No tools appear for disconnected sources.
-
-### OpenClaw Skill
-
-If you're using OpenClaw, the skill in `packages/personaldatahub/` wraps the API as OpenClaw tools. See the [Setup Guide](docs/SETUP.md) for installation.
 
 ## Features
 
@@ -211,9 +193,6 @@ src/
 ├── audit/          Immutable audit trail
 ├── cli.ts          CLI commands (init, start, stop, status, mcp, reset)
 └── index.ts        Server entrypoint
-
-packages/
-└── personaldatahub/     Agent skill integration (tool definitions + hub client)
 ```
 
 ## CLI Commands
@@ -247,8 +226,8 @@ For the full threat model with attack/mitigation tables for Gmail and GitHub, se
 
 ## Documentation
 
-- [Setup Guide](docs/SETUP.md) — install and run PersonalDataHub
-- [OAuth Setup](docs/OAUTH-SETUP.md) — OAuth credential configuration (uses PKCE for secure authorization)
+- [Setup Guide](docs/SETUP.md) — install, connect sources, and connect your agent
+- [OAuth Setup](docs/OAUTH-SETUP.md) — using your own OAuth credentials instead of the defaults
 - [Development Guide](docs/DEVELOPMENT.md) — codebase structure, adding connectors, testing
 - [Security & Threat Model](docs/SECURITY.md) — detailed attack surface analysis for Gmail and GitHub
 - [Design Doc](docs/architecture-design/design-v1.md) — full architecture and design rationale
