@@ -2,7 +2,7 @@
 
 How to install and run PersonalDataHub.
 
-## Option A: Install via ClawHub (Recommended)
+## Option A: Install via ClawHub (Recommended for OpenClaw users)
 
 Install PersonalDataHub as an [OpenClaw](https://theoperatorvault.io) skill through [ClawHub](https://theoperatorvault.io/clawhub-guide), the community marketplace for OpenClaw skills.
 
@@ -22,15 +22,15 @@ clawhub install personaldatahub
 This downloads the skill and runs the install hook, which:
 1. Installs dependencies (`pnpm install`)
 2. Builds the project (`pnpm build`)
-3. Runs `npx pdh init "OpenClaw Agent"` — generates a master secret, config, database, and API key
-4. Saves credentials to `~/.pdh/credentials.json` (auto-read by agents)
+3. Runs `npx pdh init "OpenClaw Agent"` — generates a master secret, config, database, and owner password
+4. Saves hub config to `~/.pdh/config.json` (auto-read by agents)
 5. Starts the server in the background (`npx pdh start`)
 
-No manual configuration needed — agents read credentials automatically.
+No manual configuration needed — agents read config automatically.
 
 ### Step 2: Connect Data Sources
 
-Open `http://localhost:3000` in your browser:
+Open `http://localhost:3000` in your browser and log in with the owner password printed during init:
 
 1. **Gmail** — Click "Connect Gmail" to start OAuth. Configure quick filters (date range, senders, subjects, hidden fields).
 2. **GitHub** — Click "Connect GitHub" to start OAuth. Select which repos the agent can access and at what permission level.
@@ -41,7 +41,7 @@ Ask your AI agent:
 
 > "Check my recent emails"
 
-The agent uses `personal_data_pull` through PersonalDataHub. Verify in the GUI:
+Verify in the GUI:
 - **Gmail tab** → Recent Activity shows the pull request
 - **Settings tab** → Audit Log shows every data access with timestamps and purpose strings
 
@@ -55,7 +55,7 @@ clawhub update personaldatahub
 
 ## Option B: Install from Source
 
-Install directly from the repository. Works with or without OpenClaw.
+Install directly from the repository. Works with any MCP-compatible agent (Claude Code, Cursor, Windsurf) or without any agent framework.
 
 ### Prerequisites
 
@@ -71,9 +71,12 @@ pnpm install && pnpm build
 npx pdh init
 ```
 
-This generates a master secret, config, database, API key, and saves credentials to `~/.pdh/credentials.json`.
-
-
+This generates:
+- A master secret (`.env`)
+- Server config (`hub-config.yaml`)
+- SQLite database (`pdh.db`)
+- Owner password (printed to console — save it)
+- Global config at `~/.pdh/config.json` (auto-read by agents and the MCP server)
 
 ### Step 2: Start the Server
 
@@ -95,9 +98,36 @@ Other server commands:
 ```bash
 npx pdh stop     # Stop the background server
 npx pdh status   # Check if the server is running
+npx pdh reset    # Remove all generated files and start fresh
 ```
 
-### Step 3: Install the Skill in OpenClaw
+### Step 3: Connect Your Agent
+
+#### MCP Agent (Claude Code, Cursor, Windsurf)
+
+Add PersonalDataHub as an MCP server in your agent's config. For Claude Code, add to `.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "personaldatahub": {
+      "command": "npx",
+      "args": ["pdh", "mcp"]
+    }
+  }
+}
+```
+
+The MCP server (`npx pdh mcp`) reads `~/.pdh/config.json` for the hub URL, verifies the server is running, discovers which sources are connected, and registers source-specific tools. Only connected sources get tools — disconnect Gmail and the `read_emails` tool disappears.
+
+You can also test the MCP server standalone:
+
+```bash
+npx pdh mcp
+# Prints registered tools to stderr, then listens on stdio
+```
+
+#### OpenClaw
 
 The skill is in `packages/personaldatahub/`. OpenClaw discovers skills from directories containing a `SKILL.md` with YAML frontmatter. To register it, pick one option:
 
@@ -126,15 +156,15 @@ Add the parent directory (the one that *contains* the skill folder) to `skills.l
 
 `extraDirs` entries are scanned for subdirectories with a `SKILL.md` — point to `packages/`, not `packages/personaldatahub/`.
 
-Start a new OpenClaw session for it to discover the skill. Run `openclaw tui` to launch a new session, then type `list skills` to verify the skill is installed.
+Start a new OpenClaw session for it to discover the skill.
 
-The skill reads credentials automatically from `~/.pdh/credentials.json` — no manual configuration needed. If the credentials file doesn't exist, the skill falls back to auto-discovery (probes `localhost:3000` and `localhost:7007`).
+The skill reads config automatically from `~/.pdh/config.json` — no manual configuration needed.
 
-**Not using OpenClaw?** Skip this step — you can use the API directly. See [Direct API Usage](#direct-api-usage) below.
+**Not using any agent framework?** Skip this step — you can use the API directly. See [Direct API Usage](#direct-api-usage) below.
 
 ### Step 4: Connect Data Sources
 
-Open `http://localhost:3000` in your browser. Default OAuth credentials were configured during `npx pdh init`. Just click Connect.
+Open `http://localhost:3000` in your browser. Log in with the owner password printed during `npx pdh init`. Default OAuth credentials were configured during init — just click Connect.
 
 #### Connecting Gmail
 
@@ -169,14 +199,13 @@ Same as Option A Step 3 — ask your agent to check recent emails and verify act
 
 ## Direct API Usage
 
-Any HTTP client can use PersonalDataHub's two endpoints. Both require an API key (`Authorization: Bearer pk_xxx`). Find your API key in `~/.pdh/credentials.json` or generate one in the GUI under **Settings > Generate API Key**.
+Any HTTP client can use PersonalDataHub's endpoints. No auth is required — the server binds to `127.0.0.1` (localhost only). The GUI is password-protected separately.
 
 ### Pull Data
 
 ```bash
 curl -X POST http://localhost:3000/app/v1/pull \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer pk_your_key_here" \
   -d '{"source": "gmail", "purpose": "Find recent emails"}'
 ```
 
@@ -185,7 +214,6 @@ curl -X POST http://localhost:3000/app/v1/pull \
 ```bash
 curl -X POST http://localhost:3000/app/v1/propose \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer pk_your_key_here" \
   -d '{
     "source": "gmail",
     "action_type": "draft_email",
@@ -195,6 +223,14 @@ curl -X POST http://localhost:3000/app/v1/propose \
 ```
 
 Actions are staged for owner review — not executed until approved via the GUI.
+
+### Discover Connected Sources
+
+```bash
+curl http://localhost:3000/app/v1/sources
+```
+
+Returns which sources are configured and which have active OAuth tokens.
 
 ---
 
@@ -212,20 +248,21 @@ The GUI provides toggle-based quick filters for Gmail. Each filter can be enable
 | Only with attachments | Keep only emails that have attachments |
 | Hide field from agents | Remove a field (e.g., body) before delivery |
 
-Filters are applied at read time — cached data is stored unfiltered, so you can adjust filters without re-syncing.
+Filters are applied at read time on every request.
 
 ---
 
 ## How Auto-Setup Works
 
-When the skill starts, it resolves config in this order:
+When an agent connects (via MCP or the OpenClaw skill), it resolves config in this order:
 
-1. **Plugin config** — `hubUrl` + `apiKey` passed directly
-2. **Environment variables** — `PDH_HUB_URL` + `PDH_API_KEY`
-3. **Credentials file** — reads `~/.pdh/credentials.json` (written by `npx pdh init`)
-4. **Auto-discovery** — probes `localhost:3000`, `localhost:7007`, `127.0.0.1:3000`, `127.0.0.1:7007` for a running hub, then creates an API key
+1. **MCP server** — `npx pdh mcp` reads `~/.pdh/config.json` directly
+2. **Plugin config** — `hubUrl` passed directly (OpenClaw skill)
+3. **Environment variables** — `PDH_HUB_URL`
+4. **Config file** — reads `~/.pdh/config.json` (written by `npx pdh init`)
+5. **Auto-discovery** — probes `localhost:3000`, `localhost:7007`, `127.0.0.1:3000`, `127.0.0.1:7007` for a running hub
 
-If no config is found at any step, the skill logs setup instructions and gracefully degrades (no tools registered).
+If no config is found at any step, the agent logs setup instructions and gracefully degrades (no tools registered).
 
 ## What `npx pdh init` Does
 
@@ -233,12 +270,12 @@ The init command creates:
 
 | File | Purpose |
 |------|---------|
-| `.env` | Contains `PDH_SECRET=<random 32-byte base64>` — the master encryption key for cached data |
-| `hub-config.yaml` | Minimal config with `sources: {}` and `port: 3000` — sources are configured via the GUI |
-| `pdh.db` | SQLite database with all tables initialized (api_keys, filters, cached_data, staging, audit_log) |
-| `~/.pdh/credentials.json` | Credentials (`hubUrl`, `apiKey`, `hubDir`) — auto-read by agents at startup |
+| `.env` | Contains `PDH_SECRET=<random 32-byte base64>` — the master encryption key for OAuth tokens |
+| `hub-config.yaml` | Config with source OAuth credentials and `port: 3000` — sources are connected via the GUI |
+| `pdh.db` | SQLite database with all tables initialized (oauth_tokens, filters, staging, audit_log, owner_auth) |
+| `~/.pdh/config.json` | Hub config (`hubUrl`, `hubDir`) — auto-read by the MCP server and agents at startup |
 
-It also creates an API key and saves it to the credentials file. You can manage API keys in the GUI.
+It also generates an owner password for the GUI and prints it to the console.
 
 ## Publishing to ClawHub
 
@@ -258,15 +295,20 @@ Want to contribute to PersonalDataHub? See [DEVELOPMENT.md](./DEVELOPMENT.md) fo
 
 ## Troubleshooting
 
-**Skill says "Missing hubUrl or apiKey"**
+**MCP server says "No PersonalDataHub config found"**
+- Run `npx pdh init` first, then `npx pdh start`
+
+**MCP server says "not reachable"**
 - Make sure PersonalDataHub is running: `npx pdh status`
 - If not running, start it: `npx pdh start`
-- Check credentials exist: `cat ~/.pdh/credentials.json`
-- If no credentials, re-run: `npx pdh init`
+
+**No tools appear in MCP**
+- Connect at least one source via OAuth in the GUI at `http://localhost:3000`
+- Only sources with active OAuth tokens get tools registered
 
 **`npx pdh init` fails with ".env already exists"**
 - You've already initialized. Just start the server: `npx pdh start`
-- To re-initialize, delete `.env`, `hub-config.yaml`, and `pdh.db` first
+- To re-initialize: `npx pdh reset` then `npx pdh init`
 
 **Server won't start**
 - Check if already running: `npx pdh status`
@@ -274,7 +316,7 @@ Want to contribute to PersonalDataHub? See [DEVELOPMENT.md](./DEVELOPMENT.md) fo
 
 **Port already in use**
 - Edit `hub-config.yaml` and change `port: 3000` to a different port
-- Update `~/.pdh/credentials.json` to match the new URL
+- Re-run `npx pdh init` or update `~/.pdh/config.json` to match the new URL
 
 **OAuth redirect fails**
 - Make sure the redirect URI in your Google Cloud / GitHub OAuth app settings matches `http://localhost:3000/oauth/<source>/callback` (e.g., `http://localhost:3000/oauth/gmail/callback`)

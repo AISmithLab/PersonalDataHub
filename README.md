@@ -1,7 +1,7 @@
 # PersonalDataHub
 
 
-PersonalDataHub is an open-source, self-hosted data hub between the services that manage your personal data (Gmail, GitHub, etc.) and your AI agents (e.g., OpenClaw). It connects to your services via secure protocols (e.g., OAuth2), and lets agents query them through REST APIs — all running locally on your machine, with no data sent to third parties. You configure quick filters to control what agents can see, and review every action they propose before it's executed.
+PersonalDataHub is an open-source, self-hosted data hub between the services that manage your personal data (Gmail, GitHub, etc.) and your AI agents. It connects to your services via OAuth2, and lets agents query them through an MCP server or REST API — all running locally on your machine, with no data sent to third parties. You configure quick filters to control what agents can see, and review every action they propose before it's executed.
 
 ![](architecture.png)
 
@@ -12,10 +12,10 @@ PersonalDataHub is an open-source, self-hosted data hub between the services tha
 
 1. **You connect** your accounts via OAuth2 — PersonalDataHub stores the tokens locally
 2. **You configure** quick filters to control what the agent can see: date ranges, senders, subjects, hidden fields
-3. **Agents call** a simple REST API (`POST /pull`, `POST /propose`) with a scoped API key
+3. **Agents discover tools** via MCP (source-specific tools like `read_emails`, `search_github_issues`) or call the REST API directly
 4. **You review** every outbound action (drafts, replies) before it's sent — nothing goes out without your approval
 
-You do not need to give agents direct access to your accounts. Agents see nothing by default — you explicitly whitelist access. Install it on your Mac Mini at home or on a cloud instance alongside OpenClaw.
+You do not need to give agents direct access to your accounts. Agents see nothing by default — you explicitly whitelist access. Install it on your Mac Mini at home or on a cloud instance.
 
 ## Quick Start
 
@@ -31,7 +31,7 @@ That's it. Dependencies, build, init, and server startup are handled automatical
 
 ### Option B: Install from Source
 
-Works with or without OpenClaw.
+Works with any MCP-compatible agent (Claude Code, Cursor, Windsurf) or without any agent framework.
 
 ```bash
 git clone https://github.com/AISmithLab/PersonalDataHub.git
@@ -44,6 +44,29 @@ open http://localhost:3000
 
 See the [Setup Guide](docs/SETUP.md) for full details on both options, including connecting data sources and verifying your installation.
 
+## Agent Integration
+
+### MCP Server (Recommended)
+
+PersonalDataHub includes a stdio MCP server that any MCP-compatible agent can use. Add to your agent's MCP config (e.g., `.claude/settings.json` for Claude Code):
+
+```json
+{
+  "mcpServers": {
+    "personaldatahub": {
+      "command": "npx",
+      "args": ["pdh", "mcp"]
+    }
+  }
+}
+```
+
+The MCP server dynamically registers tools based on which sources you've connected via OAuth. No tools appear for disconnected sources.
+
+### OpenClaw Skill
+
+If you're using OpenClaw, the skill in `packages/personaldatahub/` wraps the API as OpenClaw tools. See the [Setup Guide](docs/SETUP.md) for installation.
+
 ## Features
 
 ### Data Sources
@@ -54,6 +77,19 @@ See the [Setup Guide](docs/SETUP.md) for full details on both options, including
 | **GitHub** | Issues and PRs from selected repos | Via agent's own scoped credentials |
 
 New sources can be added by implementing the `SourceConnector` interface.
+
+### Tools
+
+Tools are source-specific and only appear when the source is connected via OAuth:
+
+| Tool | Source | Description |
+|------|--------|-------------|
+| `read_emails` | Gmail | Pull emails, filtered by owner's policy |
+| `draft_email` | Gmail | Create a draft (staged for approval) |
+| `send_email` | Gmail | Send an email (staged for approval) |
+| `reply_to_email` | Gmail | Reply to an email (staged for approval) |
+| `search_github_issues` | GitHub | Search issues across selected repos |
+| `search_github_prs` | GitHub | Search pull requests across selected repos |
 
 ### Quick Filters
 
@@ -69,14 +105,7 @@ Control what data agents can see using simple toggle-based filters in the GUI:
 | **Only with attachments** | Keep only rows that have attachments |
 | **Hide field from agents** | Remove a field (e.g., body) before delivery |
 
-Filters are stored in the database and applied at read time — cached data is stored unfiltered, so you can adjust filters without re-syncing.
-
-### Caching
-
-Data can be fetched live on every request, or cached locally with background sync:
-
-- **Cache off** (default) — each `POST /pull` fetches directly from the source API
-- **Cache on** — a background job syncs data to a local SQLite table (with optional AES-256-GCM encryption); `POST /pull` reads from the cache
+Filters are stored in the database and applied at read time.
 
 ### Action Staging
 
@@ -84,12 +113,12 @@ When an agent wants to send an email or create a draft, the action enters a **st
 
 ### Web GUI
 
-A built-in admin dashboard at `http://localhost:3000` for:
+A built-in admin dashboard at `http://localhost:3000` (password-protected) for:
 
 - **Sources** — connect Gmail/GitHub via OAuth, configure boundaries (date range, labels, repos)
 - **Filters** — toggle quick filters to control what agents can see
 - **Staging** — review, edit, approve, or reject proposed agent actions
-- **Settings** — manage API keys, browse the audit log, select GitHub repos
+- **Settings** — browse the audit log, select GitHub repos
 
 ### Audit Log
 
@@ -97,7 +126,7 @@ Every data access and action is logged with a purpose string, timestamp, source,
 
 ## API
 
-Two endpoints. Both require an API key (`Authorization: Bearer pk_xxx`).
+Two endpoints. No auth required — the server binds to `127.0.0.1` (localhost only).
 
 ### Pull Data
 
@@ -135,12 +164,20 @@ POST /app/v1/propose
 
 Actions are staged for owner review — not executed until approved via the GUI.
 
+### Discover Sources
+
+```
+GET /app/v1/sources
+```
+
+Returns which sources are configured and which have active OAuth connections. Used by the MCP server for dynamic tool registration.
+
 ## Architecture
 
 ### Core Principles
 
 - **Zero access by default** — every piece of data, every repo, every action must be explicitly allowed
-- **On-the-fly by default** — fetches from source APIs on demand; nothing written to disk unless you enable caching
+- **On-the-fly** — fetches from source APIs on demand; nothing written to disk beyond OAuth tokens and the audit log
 - **Outbound control** — actions like sending email are staged for owner review; for sources like GitHub where the agent has its own credentials, PersonalDataHub layers additional boundary controls on top
 - **Auditable** — every data movement is logged with a purpose string
 
@@ -155,7 +192,8 @@ Actions are staged for owner review — not executed until approved via the GUI.
 - **Runtime:** Node.js 22+
 - **Framework:** [Hono](https://hono.dev)
 - **Database:** SQLite via better-sqlite3
-- **Auth:** PKCE OAuth (Gmail, GitHub), bcrypt API key hashing, AES-256-GCM encryption
+- **Auth:** PKCE OAuth (Gmail, GitHub), bcrypt password hashing, AES-256-GCM token encryption
+- **Agent Protocol:** MCP (Model Context Protocol) via `@modelcontextprotocol/sdk`
 - **Config:** YAML with Zod validation and `${ENV_VAR}` support
 
 ### Project Structure
@@ -167,22 +205,31 @@ src/
 ├── connectors/     Source adapters (Gmail, GitHub)
 ├── db/             SQLite schema, encryption helpers
 ├── filters.ts      Quick filter types, catalog, and apply logic
-├── sync/           Background cache sync scheduler
+├── mcp/            MCP stdio server with source-specific tools
 ├── server/         HTTP server + app API routes
 ├── gui/            Web admin dashboard
 ├── audit/          Immutable audit trail
-├── cli.ts          CLI commands (init, start, stop, reset, demo-load)
+├── cli.ts          CLI commands (init, start, stop, status, mcp, reset)
 └── index.ts        Server entrypoint
 
 packages/
 └── personaldatahub/     Agent skill integration (tool definitions + hub client)
 ```
 
+## CLI Commands
+
+```
+npx pdh init [app-name]   Bootstrap a new installation
+npx pdh start             Start the server in the background
+npx pdh stop              Stop the background server
+npx pdh status            Check if the server is running
+npx pdh mcp               Start a stdio MCP server for agent access
+npx pdh reset             Remove all generated files and start fresh
+```
+
 ## Security Model
 
 PersonalDataHub is designed to run on **your local machine**. The owner's OAuth tokens and encryption keys never leave the host and are never exposed to the agent.
-
-**What the agent holds:** a PersonalDataHub API key (`pk_xxx`) that can only call the Hub API — not Gmail or GitHub directly.
 
 **What the agent cannot do:**
 - Access any data outside the configured boundary (date range, repos, labels)
@@ -195,7 +242,6 @@ PersonalDataHub is designed to run on **your local machine**. The owner's OAuth 
 - Once data passes through filters and reaches the agent, PersonalDataHub can't control what the agent does with it — network sandboxing at the agent runtime level is the mitigation
 - A host-level compromise (attacker reads `hub-config.yaml` and `.env`) gives access to the owner's OAuth tokens and encryption keys — host-level security (disk encryption, OS access controls) is the owner's responsibility
 - No built-in rate limiting yet (future enhancement)
-- Agents may pretend to be a human user to interact with the hub to override the access, not sure if they are smart enough today (future enhancement).
 
 For the full threat model with attack/mitigation tables for Gmail and GitHub, see [SECURITY.md](docs/SECURITY.md).
 
@@ -203,9 +249,9 @@ For the full threat model with attack/mitigation tables for Gmail and GitHub, se
 
 - [Setup Guide](docs/SETUP.md) — install and run PersonalDataHub
 - [OAuth Setup](docs/OAUTH-SETUP.md) — OAuth credential configuration (uses PKCE for secure authorization)
-- [Development Guide](docs/DEVELOPMENT.md) — codebase structure, adding connectors, demo data, testing
+- [Development Guide](docs/DEVELOPMENT.md) — codebase structure, adding connectors, testing
 - [Security & Threat Model](docs/SECURITY.md) — detailed attack surface analysis for Gmail and GitHub
-- [Design Doc](docs/architecture-design/design.md) — full architecture and design rationale
+- [Design Doc](docs/architecture-design/design-v1.md) — full architecture and design rationale
 
 ## License
 

@@ -8,40 +8,43 @@ How the codebase is structured and how to modify it.
 PersonalDataHub/
 ├── src/
 │   ├── index.ts                 # Entry point — loads config, creates DB, starts server
+│   ├── cli.ts                   # CLI commands (init, start, stop, status, mcp, reset)
 │   ├── config/                  # Configuration system
 │   │   ├── types.ts             # TypeScript interfaces (HubConfig, SourceConfig, etc.)
 │   │   ├── schema.ts            # Zod schemas for config validation
 │   │   └── loader.ts            # YAML loading with ${ENV_VAR} resolution
 │   ├── db/                      # Database layer
 │   │   ├── db.ts                # SQLite connection (WAL mode, foreign keys)
-│   │   ├── schema.ts            # CREATE TABLE statements (6 tables)
-│   │   └── encryption.ts        # AES-256-GCM encrypt/decrypt for cached data
+│   │   ├── schema.ts            # CREATE TABLE statements
+│   │   └── encryption.ts        # AES-256-GCM encrypt/decrypt for OAuth tokens
+│   ├── auth/                    # Authentication
+│   │   ├── oauth-routes.ts      # OAuth flows (Gmail, GitHub)
+│   │   └── token-manager.ts     # Encrypted token storage and refresh
 │   ├── connectors/              # Source service integrations
 │   │   ├── types.ts             # DataRow interface, SourceConnector interface
 │   │   ├── gmail/
-│   │   │   └── connector.ts     # Gmail fetch, executeAction, sync
+│   │   │   └── connector.ts     # Gmail fetch, executeAction
 │   │   └── github/
 │   │       ├── connector.ts     # GitHub access validation, fetch issues/PRs
 │   │       └── setup.ts         # Grant/revoke collaborator access
-│   ├── fixtures/
-│   │   └── emails.ts            # Synthetic demo email dataset (15 emails)
-│   ├── demo.ts                  # Load/unload demo data into DB
 │   ├── filters.ts               # Quick filter types, catalog, and apply logic
-│   ├── sync/
-│   │   └── scheduler.ts         # Background cache sync (fetch + store)
+│   ├── mcp/                     # MCP server
+│   │   ├── server.ts            # Stdio MCP server with source-specific tools
+│   │   └── server.test.ts       # MCP server tests
 │   ├── audit/
 │   │   └── log.ts               # AuditLog class — typed write methods + filtered queries
 │   ├── server/                  # HTTP layer
-│   │   ├── server.ts            # Hono app setup, mounts API + GUI routes
-│   │   └── app-api.ts           # POST /pull, POST /propose with API key auth
-│   └── gui/
-│       └── routes.ts            # Self-contained HTML GUI with inline JS
+│   │   ├── server.ts            # Hono app setup, mounts API + GUI + OAuth routes
+│   │   └── app-api.ts           # POST /pull, POST /propose, GET /sources
+│   ├── gui/
+│   │   └── routes.ts            # Self-contained HTML GUI with inline JS
+│   └── test-utils.ts            # Shared test utilities
 ├── packages/
-│   └── personaldatahub/       # OpenClaw skill
+│   └── personaldatahub/         # OpenClaw skill
 │       └── src/
 │           ├── index.ts         # Plugin registration
 │           ├── hub-client.ts    # HTTP client for PersonalDataHub API
-│           ├── tools.ts         # personal_data_pull, personal_data_propose tools
+│           ├── tools.ts         # Tool definitions
 │           └── prompts.ts       # System prompt for teaching agents
 ├── tests/
 │   └── e2e/                     # End-to-end integration tests
@@ -49,9 +52,8 @@ PersonalDataHub/
 │       ├── gmail-recent-readonly.test.ts
 │       ├── gmail-metadata-only.test.ts
 │       ├── gmail-full-access-redacted.test.ts
-│       ├── gmail-staged-action.test.ts
-│       └── gmail-cache-sync.test.ts
-├── docs/                        # Design docs
+│       └── gmail-staged-action.test.ts
+├── docs/                        # Documentation
 ├── hub-config.example.yaml
 ├── package.json
 ├── tsconfig.json
@@ -66,8 +68,9 @@ PersonalDataHub/
 | Language | TypeScript (strict, ESM, NodeNext modules) |
 | Runtime | Node.js >= 22 |
 | Database | better-sqlite3 (WAL mode) |
-| Encryption | AES-256-GCM (application-level) |
+| Encryption | AES-256-GCM (application-level, for OAuth tokens) |
 | HTTP Server | Hono (bound to 127.0.0.1) |
+| Agent Protocol | MCP via @modelcontextprotocol/sdk |
 | Config | YAML + Zod validation |
 | Gmail API | googleapis |
 | GitHub API | octokit |
@@ -95,16 +98,15 @@ pnpm lint
 
 ## Database Schema
 
-Six tables in SQLite:
+Tables in SQLite:
 
 | Table | Purpose |
 |---|---|
-| `api_keys` | Hashed API keys for agent authentication |
+| `oauth_tokens` | Encrypted OAuth tokens per source |
+| `owner_auth` | Bcrypt-hashed owner password for GUI access |
 | `filters` | Quick filter definitions per source (type, value, enabled) |
-| `cached_data` | Encrypted local cache of source data (optional) |
 | `staging` | Outbound actions pending owner review |
 | `audit_log` | Every data movement with timestamps and purpose |
-| `manifests` | Legacy — retained for backward compatibility |
 
 ## Key Data Types
 
@@ -145,66 +147,50 @@ Available filter types: `time_after`, `from_include`, `subject_include`, `exclud
 ```typescript
 interface SourceConnector {
   name: string;
-  fetch(boundary: Record<string, unknown>, params?: Record<string, unknown>): Promise<DataRow[]>;
-  executeAction?(actionType: string, actionData: Record<string, unknown>): Promise<{ success: boolean }>;
-  sync?(db: Database, encryptionKey: string): Promise<void>;
+  fetch(boundary: SourceBoundary, params?: Record<string, unknown>): Promise<DataRow[]>;
+  executeAction(actionType: string, actionData: Record<string, unknown>): Promise<ActionResult>;
 }
 ```
 
 2. Register the connector in `src/index.ts` by adding it to the connector registry.
 
-3. Add tests in `src/connectors/<source>/<source>.test.ts`.
+3. Add MCP tools for the new source in `src/mcp/server.ts` — add a `registerXxxTools()` function and wire it to the source name in `startMcpServer()`.
 
-4. The connector maps source API responses into `DataRow[]` — all content goes in `data`, the four fixed fields (`source`, `source_item_id`, `type`, `timestamp`) are set at the top level.
+4. Add tests in `src/connectors/<source>/<source>.test.ts`.
+
+5. The connector maps source API responses into `DataRow[]` — all content goes in `data`, the four fixed fields (`source`, `source_item_id`, `type`, `timestamp`) are set at the top level.
 
 ## How Data Flows
 
 ### Pull request (`POST /app/v1/pull`)
 
-1. The server verifies the API key
-2. If cache is enabled for the source, reads from the `cached_data` table; otherwise fetches live from the connector
-3. Loads enabled quick filters from the `filters` table for that source
-4. Applies filters: row predicates first (time_after, from_include, etc.), then field removal (hide_field)
+1. Fetches live data from the connector using the configured boundary
+2. Loads enabled quick filters from the `filters` table for that source
+3. Applies filters: row predicates first (time_after, from_include, etc.), then field removal (hide_field)
+4. Logs the access to the audit log
 5. Returns the filtered data
 
 ```
-Request → API key check → fetch data (cache or live) → apply filters → response
+Request → fetch data (live from source) → apply filters → audit log → response
 ```
 
-### Background sync (cache enabled)
+### MCP tool call (e.g., `read_emails`)
 
-1. A timer fires at the configured `sync_interval`
-2. Fetches all data from the connector within the configured boundary
-3. Upserts rows into `cached_data` with optional AES-256-GCM encryption
-4. No filters applied during sync — everything is cached, filters are applied at read time
+1. Agent calls the MCP tool via stdio
+2. The MCP server builds an HTTP request body from the tool arguments
+3. Calls `POST /app/v1/pull` on the local HTTP server
+4. Returns the JSON response as MCP text content
+
+```
+Agent → MCP stdio → fetch(hubUrl/app/v1/pull) → HTTP server → connector → filters → response
+```
 
 ### Propose action (`POST /app/v1/propose`)
 
-1. The server verifies the API key
-2. Inserts the action into the `staging` table with status `pending`
+1. Inserts the action into the `staging` table with status `pending`
+2. Logs the proposal to the audit log
 3. Owner reviews in the GUI and approves/rejects
 4. On approval, the connector's `executeAction` is called
-
-## Demo Data
-
-You can load synthetic email data to try the full pull flow without connecting a real Gmail account. Demo data is inserted directly into `cached_data`, so pull requests serve it without needing OAuth or a live connector.
-
-```bash
-# Load 15 synthetic emails
-npx pdh demo-load
-
-# Start the server, then pull
-npx pdh start
-curl -X POST http://localhost:3000/app/v1/pull \
-  -H "Authorization: Bearer <your-api-key>" \
-  -H "Content-Type: application/json" \
-  -d '{"source": "gmail", "purpose": "Test demo pull"}'
-
-# Remove all demo data when done
-npx pdh demo-unload
-```
-
-You can then configure quick filters in the GUI to see how they affect the returned data. Demo data is identified by prefix: emails have `source_item_id` starting with `demo_`. Loading is idempotent (safe to run multiple times).
 
 ## Testing
 
@@ -218,9 +204,15 @@ To run a specific test file:
 npx vitest run tests/e2e/gmail-recent-readonly.test.ts
 ```
 
+To run just the MCP server tests:
+
+```bash
+npx vitest run src/mcp/server.test.ts
+```
+
 ## OpenClaw Skill
 
-The skill in `packages/personaldatahub/` is a standalone package with its own `tsconfig.json` and test suite. It wraps the two PersonalDataHub API endpoints as OpenClaw tools.
+The skill in `packages/personaldatahub/` is a standalone package with its own `tsconfig.json` and test suite. It wraps the PersonalDataHub API endpoints as OpenClaw tools.
 
 To work on it:
 
@@ -230,3 +222,21 @@ pnpm test
 ```
 
 The skill has no dependency on the main PersonalDataHub source — it only talks to the Hub over HTTP.
+
+## MCP Server
+
+The MCP server (`src/mcp/server.ts`) provides a stdio transport for MCP-compatible agents. It:
+
+1. Reads `~/.pdh/config.json` for the hub URL
+2. Health-checks the running HTTP server
+3. Queries `GET /app/v1/sources` to discover connected sources
+4. Registers source-specific tools dynamically (only for connected sources)
+
+To test the MCP server manually:
+
+```bash
+npx pdh mcp
+# Logs registered tools to stderr, then listens on stdio for MCP protocol messages
+```
+
+To add tools for a new source, add a `registerXxxTools()` function in `src/mcp/server.ts` and call it conditionally based on the source's connection status.
