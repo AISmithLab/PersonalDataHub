@@ -41,6 +41,16 @@ mkdir -p ~/.pdh
 echo '{"hubUrl":"http://localhost:3000","hubDir":"/Users/personaldatahub/PersonalDataHub"}' > ~/.pdh/config.json
 ```
 
+
+
+### Connect Your Sources
+
+Open `http://localhost:3000` in the `personaldatahub` user's browser session to connect Gmail/GitHub via OAuth and configure filters.
+
+See the [Setup Guide](docs/SETUP.md) for full details including Linux instructions.
+
+
+
 ### Connect Your Agents
 
 You can connect multiple AI agents — each one that needs access to your personal data should be configured.
@@ -63,12 +73,6 @@ You can connect multiple AI agents — each one that needs access to your person
 ```bash
 clawhub install personaldatahub
 ```
-
-### Connect Your Sources
-
-Open `http://localhost:3000` in the `personaldatahub` user's browser session to connect Gmail/GitHub via OAuth and configure filters.
-
-See the [Setup Guide](docs/SETUP.md) for full details including Linux instructions.
 
 ## Features
 
@@ -253,7 +257,8 @@ For the full threat model with attack/mitigation tables for Gmail and GitHub, se
 - [OAuth Setup](docs/OAUTH-SETUP.md) — using your own OAuth credentials instead of the defaults
 - [Development Guide](docs/DEVELOPMENT.md) — codebase structure, adding connectors, testing
 - [Security & Threat Model](docs/SECURITY.md) — detailed attack surface analysis for Gmail and GitHub
-- [Design Doc](docs/architecture-design/design-v1.md) — full architecture and design rationale
+- [Design Doc v1](docs/architecture-design/design-v1.md) — full architecture and design rationale
+- [Design Doc v2](docs/architecture-design/design-v2.md) — deployment, auto-start, and browser session security
 
 ## License
 
