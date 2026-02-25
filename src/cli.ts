@@ -210,11 +210,12 @@ export function startBackground(hubDir?: string): { pid: number; hubDir: string;
     throw new Error(`Server is already running (PID ${existing}). Run 'npx pdh stop' first.`);
   }
 
-  const isolated = osUserExists();
+  const alreadyPdh = isRunningAsPdhUser();
+  const isolated = !alreadyPdh && osUserExists();
   let child;
 
   if (isolated) {
-    // Cache sudo credentials so the non-interactive spawn succeeds
+    // Running as main user but personaldatahub user exists — launch via sudo
     ensureSudo();
     child = spawn('sudo', ['-n', '-u', PDH_USER, 'node', indexPath], {
       cwd: dir,
@@ -222,6 +223,7 @@ export function startBackground(hubDir?: string): { pid: number; hubDir: string;
       stdio: 'ignore',
     });
   } else {
+    // Running as personaldatahub directly, or no dedicated user — launch node directly
     child = spawn('node', [indexPath], {
       cwd: dir,
       detached: true,
