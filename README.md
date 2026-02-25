@@ -41,11 +41,11 @@ mkdir -p ~/.pdh
 echo '{"hubUrl":"http://localhost:3000","hubDir":"/Users/personaldatahub/PersonalDataHub"}' > ~/.pdh/config.json
 ```
 
-### Connect Your Agent
+### Connect Your Agents
 
-**Option A: MCP (recommended)** — works with Claude Code, Cursor, Windsurf, and any MCP-compatible agent.
+You can connect multiple AI agents — each one that needs access to your personal data should be configured.
 
-Add to your agent's MCP config. For Claude Code, add to `.claude/settings.json`:
+**Claude Code, Cursor, Windsurf** — add PersonalDataHub as an MCP server. For Claude Code, add to `.claude/settings.json`:
 
 ```json
 {
@@ -58,7 +58,11 @@ Add to your agent's MCP config. For Claude Code, add to `.claude/settings.json`:
 }
 ```
 
-**Option B: OpenClaw** — if your agent uses the OpenClaw framework, PersonalDataHub is available as an OpenClaw skill (`@openclaw/personaldatahub`). The skill auto-discovers the running server via `~/.pdh/config.json` and registers `pull` and `propose` tools. See [`packages/personaldatahub/SKILL.md`](packages/personaldatahub/SKILL.md) for details.
+**OpenClaw** — install the PersonalDataHub skill from ClawHub:
+
+```bash
+clawhub install personaldatahub
+```
 
 ### Connect Your Sources
 
