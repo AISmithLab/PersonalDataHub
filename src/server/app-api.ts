@@ -47,7 +47,10 @@ export function createAppApi(deps: AppApiDeps): Hono {
     }
 
     const boundary = sourceConfig.boundary ?? {};
-    const rows = await connector.fetch(boundary);
+    const params: Record<string, unknown> = {};
+    if (body.query) params.query = body.query;
+    if (body.limit) params.limit = body.limit;
+    const rows = await connector.fetch(boundary, Object.keys(params).length > 0 ? params : undefined);
 
     // Load enabled filters and apply
     const filters = await deps.store.getEnabledFiltersBySource(source) as QuickFilter[];
