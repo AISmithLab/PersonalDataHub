@@ -40,7 +40,8 @@ sudo -u personaldatahub -i
 cd ~ && git clone https://github.com/AISmithLab/PersonalDataHub.git
 cd PersonalDataHub && pnpm install && pnpm build
 npx pdh init    # save the owner password it prints
-npx pdh start
+npx pdh start. # node dist/index.js   This will keep the server in the foreground with all console output
+  visible.
 exit
 
 # 3. Connect your agent (as your main user)
