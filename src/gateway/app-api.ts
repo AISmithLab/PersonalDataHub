@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
-import type { DataStore } from '../db/datastore.js';
-import type { ConnectorRegistry } from '../connectors/types.js';
+import type { DataStore } from '../database/datastore.js';
+import type { ConnectorRegistry } from './connectors/types.js';
 import type { HubConfigParsed } from '../config/schema.js';
-import type { TokenManager } from '../auth/token-manager.js';
-import { AuditLog } from '../audit/log.js';
-import { applyFilters, type QuickFilter } from '../filters.js';
+import type { TokenManager } from './auth/token-manager.js';
+import { AuditLog } from './audit/log.js';
+import { applyFilters, type QuickFilter } from './filters.js';
 
 export interface AppApiDeps {
   store: DataStore;
@@ -20,7 +20,9 @@ export function createAppApi(deps: AppApiDeps): Hono {
 
   // POST /pull
   app.post('/pull', async (c) => {
+    console.log('[app-api] /pull handler entered');
     const body = await c.req.json();
+    console.log('[app-api] /pull body:', JSON.stringify(body));
     const { source, purpose } = body;
 
     if (!purpose) {
@@ -47,7 +49,11 @@ export function createAppApi(deps: AppApiDeps): Hono {
     }
 
     const boundary = sourceConfig.boundary ?? {};
-    const rows = await connector.fetch(boundary);
+    const params: Record<string, unknown> = {};
+    if (body.query) params.query = body.query;
+    if (body.limit) params.limit = body.limit;
+    console.log('[app-api] /pull source=%s query=%s limit=%s', source, body.query ?? '(none)', body.limit ?? '(default)');
+    const rows = await connector.fetch(boundary, Object.keys(params).length > 0 ? params : undefined);
 
     // Load enabled filters and apply
     const filters = await deps.store.getEnabledFiltersBySource(source) as QuickFilter[];
