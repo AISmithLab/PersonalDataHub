@@ -45,6 +45,8 @@ export class GmailConnector implements SourceConnector {
     const query = buildGmailQuery(boundary, params);
     const maxResults = (params?.limit as number) ?? 50;
 
+    console.log('[gmail] query=%s maxResults=%d', query, maxResults);
+
     const listResponse = await this.gmail.users.messages.list({
       userId: 'me',
       q: query,
@@ -52,6 +54,7 @@ export class GmailConnector implements SourceConnector {
     });
 
     const messages = listResponse.data.messages ?? [];
+    console.log('[gmail] messages returned: %d', messages.length);
     const rows: DataRow[] = [];
 
     for (const msg of messages) {

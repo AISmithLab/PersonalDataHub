@@ -50,6 +50,7 @@ export function createAppApi(deps: AppApiDeps): Hono {
     const params: Record<string, unknown> = {};
     if (body.query) params.query = body.query;
     if (body.limit) params.limit = body.limit;
+    console.log('[app-api] /pull source=%s query=%s limit=%s', source, body.query ?? '(none)', body.limit ?? '(default)');
     const rows = await connector.fetch(boundary, Object.keys(params).length > 0 ? params : undefined);
 
     // Load enabled filters and apply
