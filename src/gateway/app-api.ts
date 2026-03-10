@@ -6,7 +6,7 @@ import type { HubConfigParsed } from '../config/schema.js';
 import type { TokenManager } from './auth/token-manager.js';
 import { AuditLog } from './audit/log.js';
 import type { QuickFilter } from './filters.js';
-import { quickFiltersToSteps, executePipeline, validatePipeline } from './pipeline/index.js';
+import { quickFiltersToSteps, executePipeline, validatePipeline, checkActionAllowed, RateLimiter } from './pipeline/index.js';
 import type { PipelineDefinition } from './pipeline/index.js';
 
 export interface AppApiDeps {
@@ -19,6 +19,8 @@ export interface AppApiDeps {
 export function createAppApi(deps: AppApiDeps): Hono {
   const app = new Hono();
   const auditLog = new AuditLog(deps.store);
+  const pipelineCache = new Map<string, PipelineDefinition>();
+  const rateLimiter = new RateLimiter();
 
   // POST /pull
   app.post('/pull', async (c) => {
@@ -137,6 +139,18 @@ export function createAppApi(deps: AppApiDeps): Hono {
       return c.json({ ok: false, error: { code: 'SOURCE_NOT_CONNECTED', message: `Source "${source}" is not connected. Complete OAuth setup in the GUI first.` } }, 400);
     }
 
+    // Rate limit check (before fetching data)
+    if (def.rate_limit?.max_pulls_per_hour !== undefined) {
+      const rateCheck = rateLimiter.checkRateLimit(def.pipeline, def.rate_limit.max_pulls_per_hour);
+      if (!rateCheck.allowed) {
+        const retryAfterSec = Math.ceil((rateCheck.retryAfterMs ?? 0) / 1000);
+        return c.json(
+          { ok: false, error: { code: 'RATE_LIMITED', message: `Pipeline "${def.pipeline}" exceeded max_pulls_per_hour (${def.rate_limit.max_pulls_per_hour})` } },
+          { status: 429, headers: { 'Retry-After': String(retryAfterSec) } },
+        );
+      }
+    }
+
     // Fetch data
     const boundary = sourceConfig.boundary ?? {};
     const params: Record<string, unknown> = {};
@@ -150,16 +164,28 @@ export function createAppApi(deps: AppApiDeps): Hono {
 
     const pipelineResult = executePipeline(rows, allSteps);
 
+    // Enforce max_results_per_pull
+    let resultRows = pipelineResult.rows;
+    if (def.rate_limit?.max_results_per_pull !== undefined && resultRows.length > def.rate_limit.max_results_per_pull) {
+      resultRows = resultRows.slice(0, def.rate_limit.max_results_per_pull);
+    }
+
+    // Cache the pipeline definition (for action restriction on /propose)
+    pipelineCache.set(def.pipeline, def);
+
+    // Record the pull for rate limiting
+    rateLimiter.recordPull(def.pipeline);
+
     // Log to audit
-    await auditLog.logPull(source, purpose, pipelineResult.rows.length, 'agent');
+    await auditLog.logPull(source, purpose, resultRows.length, 'agent');
 
     return c.json({
       ok: true,
-      data: pipelineResult.rows,
+      data: resultRows,
       meta: {
         pipeline: def.pipeline,
         itemsFetched: rows.length,
-        itemsReturned: pipelineResult.meta.outputCount,
+        itemsReturned: resultRows.length,
         pipelineSteps: pipelineResult.meta.stepsApplied,
         piiRedactions: pipelineResult.meta.piiRedactions,
       },
@@ -169,7 +195,7 @@ export function createAppApi(deps: AppApiDeps): Hono {
   // POST /propose
   app.post('/propose', async (c) => {
     const body = await c.req.json();
-    const { source, action_type, action_data, purpose } = body;
+    const { source, action_type, action_data, purpose, pipeline } = body;
 
     if (!purpose) {
       return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required field: purpose' } }, 400);
@@ -177,6 +203,17 @@ export function createAppApi(deps: AppApiDeps): Hono {
 
     if (!source || !action_type) {
       return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required fields: source, action_type' } }, 400);
+    }
+
+    // Action restriction: if pipeline field is present, check allowed_actions
+    if (pipeline) {
+      const cachedDef = pipelineCache.get(pipeline);
+      if (cachedDef) {
+        const actionCheck = checkActionAllowed(cachedDef, action_type);
+        if (!actionCheck.allowed) {
+          return c.json({ ok: false, error: { code: 'ACTION_NOT_ALLOWED', message: actionCheck.reason } }, 403);
+        }
+      }
     }
 
     // Insert into staging
