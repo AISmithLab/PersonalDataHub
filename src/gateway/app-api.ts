@@ -7,7 +7,7 @@ import type { TokenManager } from './auth/token-manager.js';
 import { AuditLog } from './audit/log.js';
 import type { QuickFilter } from './filters.js';
 import { quickFiltersToSteps, executePipeline, validatePipeline, checkActionAllowed, RateLimiter } from './pipeline/index.js';
-import type { PipelineDefinition } from './pipeline/index.js';
+import type { PipelineDefinition, PipelineStep } from './pipeline/index.js';
 
 export interface AppApiDeps {
   store: DataStore;
@@ -113,7 +113,7 @@ export function createAppApi(deps: AppApiDeps): Hono {
     // Check required operators
     const requiredOps = pipelineConfig.required_operators ?? [];
     const stepOps = new Set(def.steps.map((s) => s.op));
-    const missingOps = requiredOps.filter((op) => !stepOps.has(op));
+    const missingOps = requiredOps.filter((op) => !stepOps.has(op as PipelineStep['op']));
     if (missingOps.length > 0) {
       return c.json({ ok: false, error: { code: 'MISSING_REQUIRED_OPERATORS', message: `Pipeline must include operators: ${missingOps.join(', ')}` } }, 400);
     }

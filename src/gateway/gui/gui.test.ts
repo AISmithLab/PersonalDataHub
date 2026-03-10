@@ -26,6 +26,7 @@ function makeConfig(): HubConfigParsed {
         boundary: { repos: ['myorg/frontend'] },
       },
     },
+    pipeline: { allow_custom_pipelines: false, required_operators: [], max_steps: 20 },
     port: 3000,
   };
 }

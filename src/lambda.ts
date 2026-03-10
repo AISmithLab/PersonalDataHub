@@ -50,6 +50,7 @@ function loadConfigFromEnv(): HubConfigParsed {
       dynamodb_table: process.env.DYNAMODB_TABLE,
     },
     sources,
+    pipeline: { allow_custom_pipelines: false, required_operators: [], max_steps: 20 },
     port: 3000,
   };
 }

@@ -54,6 +54,7 @@ function makeConfig(): HubConfigParsed {
         boundary: { after: '2026-01-01' },
       },
     },
+    pipeline: { allow_custom_pipelines: false, required_operators: [], max_steps: 20 },
     port: 3000,
   };
 }

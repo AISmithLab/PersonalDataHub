@@ -60,7 +60,11 @@ export const hubConfigSchema = z.object({
   sources: z.record(z.string(), sourceConfigSchema).default({}),
   encryption_key: z.string().optional(),
   ai: aiProviderSchema.optional(),
-  pipeline: pipelineConfigSchema.default({}),
+  pipeline: pipelineConfigSchema.default({
+    allow_custom_pipelines: false,
+    required_operators: [],
+    max_steps: 20,
+  }),
   port: z.number().default(3000),
 });
 
