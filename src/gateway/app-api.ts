@@ -5,7 +5,8 @@ import type { ConnectorRegistry } from './connectors/types.js';
 import type { HubConfigParsed } from '../config/schema.js';
 import type { TokenManager } from './auth/token-manager.js';
 import { AuditLog } from './audit/log.js';
-import { applyFilters, type QuickFilter } from './filters.js';
+import type { QuickFilter } from './filters.js';
+import { quickFiltersToSteps, executePipeline } from './pipeline/index.js';
 
 export interface AppApiDeps {
   store: DataStore;
@@ -55,9 +56,11 @@ export function createAppApi(deps: AppApiDeps): Hono {
     console.log('[app-api] /pull source=%s query=%s limit=%s', source, body.query ?? '(none)', body.limit ?? '(default)');
     const rows = await connector.fetch(boundary, Object.keys(params).length > 0 ? params : undefined);
 
-    // Load enabled filters and apply
+    // Load enabled filters, translate to pipeline steps, and execute
     const filters = await deps.store.getEnabledFiltersBySource(source) as QuickFilter[];
-    const filtered = applyFilters(rows, filters);
+    const steps = quickFiltersToSteps(filters);
+    const pipelineResult = executePipeline(rows, steps);
+    const filtered = pipelineResult.rows;
 
     // Log to audit
     await auditLog.logPull(source, purpose, filtered.length, 'agent');
@@ -65,7 +68,11 @@ export function createAppApi(deps: AppApiDeps): Hono {
     return c.json({
       ok: true,
       data: filtered,
-      meta: { itemsFetched: rows.length, itemsReturned: filtered.length },
+      meta: {
+        itemsFetched: rows.length,
+        itemsReturned: filtered.length,
+        pipelineSteps: pipelineResult.meta.stepsApplied,
+      },
     });
   });
 

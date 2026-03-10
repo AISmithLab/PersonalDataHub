@@ -73,6 +73,129 @@ The agent **describes what it wants**; the hub **decides what it gets**.
 
 ---
 
+## Operator Reference
+
+Each operator is a pure function `(rows: DataRow[], step: PipelineStep) => DataRow[]`. Steps execute sequentially — the output of one becomes the input of the next. Implementation: `src/gateway/pipeline/operators.ts`.
+
+### `pull_source`
+
+Declares which data source to fetch from. **Not executed by the pipeline engine** — data is fetched before the pipeline runs. Exists so pipeline definitions are self-describing.
+
+```json
+{ "op": "pull_source", "source": "gmail", "query": "is:unread" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `source` | string | yes | Data source name (e.g. `"gmail"`, `"github"`) |
+| `query` | string | no | Source-specific search query passed to the connector |
+
+### `time_window`
+
+Filters rows by timestamp. Keeps rows where `row.timestamp` falls within the specified range. Either bound can be omitted for an open-ended range.
+
+```json
+{ "op": "time_window", "after": "2026-03-01T00:00:00Z", "before": "2026-03-08T00:00:00Z" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `after` | string (ISO date) | no | Keep rows at or after this timestamp |
+| `before` | string (ISO date) | no | Keep rows at or before this timestamp |
+
+**QuickFilter equivalent:** `time_after` maps to `{ op: 'time_window', after: value }`.
+
+### `select_fields`
+
+Allowlist: keeps only the specified keys in `row.data`. Envelope fields (`source`, `source_item_id`, `type`, `timestamp`) are always preserved on the row itself — they are not part of `row.data`.
+
+```json
+{ "op": "select_fields", "fields": ["subject", "author_name", "snippet"] }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `fields` | string[] (non-empty) | yes | Field names to keep in `row.data`. Case-insensitive matching. |
+
+**No QuickFilter equivalent.** This is new — enables per-agent data minimization.
+
+### `exclude_fields`
+
+Blocklist: removes specified keys from `row.data`. The inverse of `select_fields`.
+
+```json
+{ "op": "exclude_fields", "fields": ["body", "raw_html"] }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `fields` | string[] (non-empty) | yes | Field names to remove from `row.data`. Case-insensitive matching. |
+
+**QuickFilter equivalent:** `hide_field` maps to `{ op: 'exclude_fields', fields: [value] }`.
+
+### `filter_rows`
+
+Keeps or drops rows based on a case-insensitive substring match on a field value. Optionally checks a second field (`or_field`) — the row matches if *either* field contains the needle.
+
+```json
+{ "op": "filter_rows", "field": "author_email", "or_field": "author_name", "contains": "alice", "mode": "include" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `field` | string | yes | Primary field to check in `row.data` |
+| `contains` | string | yes | Substring to search for (case-insensitive) |
+| `mode` | `"include"` \| `"exclude"` | yes | `include` keeps matching rows; `exclude` drops them |
+| `or_field` | string | no | Secondary field — row matches if either field contains the needle |
+
+**QuickFilter equivalents:**
+- `from_include` → `{ field: 'author_email', or_field: 'author_name', contains: value, mode: 'include' }`
+- `subject_include` → `{ field: 'title', contains: value, mode: 'include' }`
+- `exclude_sender` → `{ field: 'author_email', or_field: 'author_name', contains: value, mode: 'exclude' }`
+- `exclude_keyword` → `{ field: 'title', contains: value, mode: 'exclude' }`
+
+### `has_attachment`
+
+Keeps only rows where `row.data.attachments` is a non-empty array. No parameters.
+
+```json
+{ "op": "has_attachment" }
+```
+
+**QuickFilter equivalent:** `has_attachment` maps directly.
+
+### `redact_pii`
+
+Regex-replaces PII patterns across all string values in `row.data` with `[REDACTED]`. Recurses into nested objects and arrays. Tracks the total number of redactions in pipeline metadata.
+
+```json
+{ "op": "redact_pii" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `patterns` | string[] | no | Custom regex patterns. If omitted, uses built-in defaults. |
+
+**Built-in patterns:** SSN (`\d{3}-\d{2}-\d{4}`), US phone number, email address, credit card number (13-16 digits).
+
+**Limitations:** Pattern-based only. Cannot detect unstructured sensitive content ("I'm getting divorced", "we're acquiring CompanyX"). See "What It Doesn't Add" above.
+
+### `limit`
+
+Truncates the row list to at most `max` entries. Applied after all filtering, so it caps the final output.
+
+```json
+{ "op": "limit", "max": 50 }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `max` | integer (positive) | yes | Maximum number of rows to return |
+
+**No QuickFilter equivalent.** New operator.
+
+---
+
 ## Architecture
 
 ### Current flow

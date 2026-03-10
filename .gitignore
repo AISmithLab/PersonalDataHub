@@ -12,3 +12,4 @@ hub-config.yaml
 .claude/
 coverage/
 *.tsbuildinfo
+reference/
