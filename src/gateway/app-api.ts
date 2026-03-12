@@ -91,7 +91,8 @@ export function createAppApi(deps: AppApiDeps): Hono {
   // POST /propose
   app.post('/propose', async (c) => {
     const body = await c.req.json();
-    const { source, action_type, action_data, purpose } = body;
+    const { source, action_type, action_data, params, purpose } = body;
+    const actionPayload = action_data ?? params;
 
     if (!purpose) {
       return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required field: purpose' } }, 400);
@@ -108,7 +109,7 @@ export function createAppApi(deps: AppApiDeps): Hono {
       manifestId: '',
       source,
       actionType: action_type,
-      actionData: JSON.stringify(action_data ?? {}),
+      actionData: JSON.stringify(actionPayload ?? {}),
       purpose,
     });
 
