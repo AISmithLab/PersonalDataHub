@@ -66,8 +66,23 @@ export function createAppApi(deps: AppApiDeps): Hono {
       meta: { itemsFetched: rows.length, itemsReturned: filtered.length },
     };
 
-    // Log to audit with a summary of what the agent received
-    const responseSummary = JSON.stringify(responsePayload).slice(0, 500);
+    // Log to audit with a clean, readable summary (no raw HTML/JSON blobs)
+    const summaryData = filtered.slice(0, 3).map((row) => {
+      const d = row.data as Record<string, unknown>;
+      const rawBody = typeof d.body === 'string' ? d.body : '';
+      const cleanBody = rawBody.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+      return {
+        from: String(d.author_email || d.author_name || '').slice(0, 100),
+        title: String(d.title || '').slice(0, 200),
+        snippet: String((d.snippet as string) || cleanBody.slice(0, 150) || '').slice(0, 150),
+        date: row.timestamp || '',
+      };
+    });
+    const responseSummary = JSON.stringify({
+      ok: true,
+      data: summaryData,
+      meta: { itemsFetched: rows.length, itemsReturned: filtered.length },
+    });
     await auditLog.logPull(source, purpose, filtered.length, 'agent', responseSummary);
 
     return c.json(responsePayload);

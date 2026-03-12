@@ -137,6 +137,7 @@ export interface DataStore {
   // --- Audit Log ---
   insertAuditEntry(entry: { timestamp: string; event: string; source: string | null; details: string }): MaybePromise<void>;
   queryAuditEntries(filters: { after?: string; before?: string; event?: string; source?: string; limit?: number }): MaybePromise<AuditRow[]>;
+  deleteAllAuditEntries(): MaybePromise<void>;
 
   // --- GitHub Repos ---
   upsertGitHubRepos(repos: GitHubRepoInput[]): MaybePromise<void>;

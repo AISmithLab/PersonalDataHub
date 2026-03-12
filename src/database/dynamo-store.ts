@@ -424,6 +424,28 @@ export class DynamoDataStore implements DataStore {
     return rows;
   }
 
+  async deleteAllAuditEntries(): Promise<void> {
+    // Scan for all audit entries, then batch-delete
+    const result = await this.docClient.send(new ScanCommand({
+      TableName: this.tableName,
+      FilterExpression: 'SK = :sk',
+      ExpressionAttributeValues: { ':sk': 'AUDIT' },
+      ProjectionExpression: 'PK, SK',
+    }));
+    const items = result.Items ?? [];
+    // BatchWrite in chunks of 25 (DynamoDB limit)
+    for (let i = 0; i < items.length; i += 25) {
+      const batch = items.slice(i, i + 25);
+      await this.docClient.send(new BatchWriteCommand({
+        RequestItems: {
+          [this.tableName]: batch.map((item) => ({
+            DeleteRequest: { Key: { PK: item.PK, SK: item.SK } },
+          })),
+        },
+      }));
+    }
+  }
+
   // --- GitHub Repos ---
 
   async upsertGitHubRepos(repos: GitHubRepoInput[]): Promise<void> {

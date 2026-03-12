@@ -55,6 +55,10 @@ export class AuditLog {
     await this.insert('action_committed', source, { actionId, result });
   }
 
+  async clearAll(): Promise<void> {
+    await this.store.deleteAllAuditEntries();
+  }
+
   async getEntries(filters?: AuditFilters): Promise<AuditEntry[]> {
     const rows = await this.store.queryAuditEntries({
       after: filters?.after,

@@ -204,6 +204,11 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
     return c.json({ ok: true, entries });
   });
 
+  app.delete('/api/audit', async (c) => {
+    await auditLog.clearAll();
+    return c.json({ ok: true });
+  });
+
   // --- GitHub repo discovery endpoints ---
 
   // Fetch all repos from GitHub API, upsert into DB, return with selection state
@@ -857,11 +862,11 @@ function getIndexHtml(): string {
           else if (e.event.indexOf('proposed') !== -1) evClass = 'pending';
           var time = new Date(e.timestamp);
           var timeStr = time.getHours().toString().padStart(2,'0') + ':' + time.getMinutes().toString().padStart(2,'0');
-          var respLine = d.responseSummary ? '<div style="padding:2px 0 4px 52px;border-bottom:1px solid var(--border)"><details style="font-size:12px;color:var(--muted);cursor:pointer"><summary style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><em>Response:</em> ' + d.responseSummary.slice(0, 80) + (d.responseSummary.length > 80 ? '...' : '') + '</summary><pre style="white-space:pre-wrap;word-break:break-all;margin:4px 0;padding:6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;max-height:150px;overflow:auto;font-size:11px">' + d.responseSummary.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</pre></details></div>' : '';
+          var respLine = d.responseSummary ? '<div style="padding:2px 0 4px 52px;border-bottom:1px solid var(--border)"><details style="font-size:12px;color:var(--muted);cursor:pointer"><summary style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><em>Response:</em> ' + formatResponsePreview(d.responseSummary) + '</summary>' + formatResponseDetails(d.responseSummary) + '</details></div>' : '';
           return '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;' + (respLine ? '' : 'border-bottom:1px solid var(--border);') + 'font-size:14px">' +
             '<span class="font-mono" style="font-size:14px;color:var(--muted);min-width:40px">' + timeStr + '</span>' +
             '<span class="status ' + evClass + '" style="font-size:14px">' + e.event + '</span>' +
-            '<span style="flex:1;color:var(--muted);font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (d.purpose || d.result || (e.source || '')) + '</span>' +
+            '<span style="flex:1;color:var(--muted);font-size:14px;overflow-wrap:break-word;word-break:break-word">' + (d.purpose || d.result || (e.source || '')) + '</span>' +
             '</div>' + respLine;
         }).join('');
       } else {
@@ -913,7 +918,10 @@ function getIndexHtml(): string {
         </div>
 
         <div class="card">
-          <h2>Recent Activity</h2>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <h2 style="margin:0">Recent Activity</h2>
+            \${state.audit.length ? '<button class="btn btn-sm" style="font-size:12px;padding:4px 10px;color:var(--destructive);border-color:var(--destructive)" onclick="clearAuditLog()">Clear history</button>' : ''}
+          </div>
           \${recentHtml}
         </div>
       \`;
@@ -1256,9 +1264,9 @@ function getIndexHtml(): string {
               const detailsCopy = Object.assign({}, d);
               delete detailsCopy.responseSummary;
               const respCell = resp
-                ? '<details style="font-size:13px;max-width:400px;cursor:pointer"><summary style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px">' + resp.slice(0,80) + (resp.length > 80 ? '...' : '') + '</summary><pre style="white-space:pre-wrap;word-break:break-all;margin:6px 0;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;max-height:200px;overflow:auto;font-size:12px">' + resp.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</pre></details>'
+                ? '<details style="font-size:13px;max-width:500px;cursor:pointer"><summary style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:400px">' + formatResponsePreview(resp) + '</summary>' + formatResponseDetails(resp) + '</details>'
                 : '-';
-              return '<tr><td style="font-size:14px">' + new Date(e.timestamp).toLocaleString() + '</td><td>' + e.event + '</td><td>' + (e.source || '-') + '</td><td style="font-size:14px">' + JSON.stringify(detailsCopy).slice(0,100) + '</td><td>' + respCell + '</td></tr>';
+              return '<tr><td style="font-size:14px">' + new Date(e.timestamp).toLocaleString() + '</td><td>' + e.event + '</td><td>' + (e.source || '-') + '</td><td style="font-size:14px;max-width:300px;overflow-wrap:break-word;word-break:break-word">' + JSON.stringify(detailsCopy).slice(0,200) + (JSON.stringify(detailsCopy).length > 200 ? '...' : '') + '</td><td>' + respCell + '</td></tr>';
             }).join('') +
             '</table>' : '<p class="empty">No audit entries.</p>'}
         </div>
@@ -1492,6 +1500,62 @@ function getIndexHtml(): string {
       return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
+    function formatResponsePreview(raw) {
+      try {
+        var parsed = JSON.parse(raw);
+        if (parsed.data && Array.isArray(parsed.data) && parsed.data.length > 0) {
+          var items = parsed.data;
+          var first = items[0].data || items[0];
+          if (first.title || first.author_email || first.subject || first.author_name) {
+            var total = (parsed.meta && parsed.meta.itemsReturned) || items.length;
+            var subjects = items.map(function(item) {
+              var d = item.data || item;
+              return d.title || d.subject || '(no subject)';
+            });
+            var preview = total + ' item(s)';
+            if (total > items.length) preview += ' (showing ' + items.length + ')';
+            preview += ': ' + subjects.join(', ');
+            return escapeHtml(preview);
+          }
+        }
+      } catch(e) {}
+      return escapeHtml(raw.slice(0, 160)) + (raw.length > 160 ? '...' : '');
+    }
+
+    function formatResponseDetails(raw) {
+      try {
+        var parsed = JSON.parse(raw);
+        if (parsed.data && Array.isArray(parsed.data) && parsed.data.length > 0) {
+          var items = parsed.data;
+          var first = items[0].data || items[0];
+          if (first.title || first.author_email || first.subject || first.author_name) {
+            var html = '<table style="width:100%;font-size:12px;border-collapse:collapse;margin:4px 0">';
+            html += '<tr style="background:var(--bg)"><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">From</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Subject</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Date</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Preview</th></tr>';
+            items.forEach(function(item) {
+              var d = item.data || item;
+              var from = d.author_email || d.author_name || d.from || '';
+              var subject = d.title || d.subject || '';
+              var preview = d.snippet || (d.body ? String(d.body).slice(0, 120) : '') || '';
+              var dateStr = d.date || item.timestamp || '';
+              var dateFmt = dateStr ? new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+              html += '<tr><td style="padding:4px 8px;border-bottom:1px solid var(--border);white-space:nowrap">' + escapeHtml(from) + '</td><td style="padding:4px 8px;border-bottom:1px solid var(--border)">' + escapeHtml(subject) + '</td><td style="padding:4px 8px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--muted)">' + escapeHtml(dateFmt) + '</td><td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--muted)">' + escapeHtml(preview.slice(0, 120)) + '</td></tr>';
+            });
+            html += '</table>';
+            if (parsed.meta) {
+              var total = parsed.meta.itemsReturned || 0;
+              var shown = items.length;
+              var msg = shown < total
+                ? 'Showing ' + shown + ' of ' + total + ' items returned (' + parsed.meta.itemsFetched + ' fetched)'
+                : total + ' of ' + parsed.meta.itemsFetched + ' items returned';
+              html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">' + escapeHtml(msg) + '</div>';
+            }
+            return html;
+          }
+        }
+      } catch(e) {}
+      return '<pre style="white-space:pre-wrap;word-break:break-all;margin:4px 0;padding:6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;max-height:300px;overflow:auto;font-size:11px">' + raw.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</pre>';
+    }
+
     function relativeTime(dateStr) {
       if (!dateStr) return '';
       var now = Date.now();
@@ -1566,6 +1630,14 @@ function getIndexHtml(): string {
       if (eb) eb.style.display = '';
       if (cb) cb.style.display = 'none';
     }
+
+    async function clearAuditLog() {
+      if (!confirm('Delete all audit log history? This cannot be undone.')) return;
+      await fetch('/api/audit', { method: 'DELETE' });
+      state.audit = [];
+      render();
+    }
+    window.clearAuditLog = clearAuditLog;
 
     async function approveAction(actionId) {
       var editTo = document.getElementById('edit-to-' + actionId);

@@ -255,6 +255,10 @@ export class SqliteDataStore implements DataStore {
     return this.db.prepare(query).all(...params) as AuditRow[];
   }
 
+  deleteAllAuditEntries(): void {
+    this.db.prepare('DELETE FROM audit_log').run();
+  }
+
   // --- GitHub Repos ---
 
   upsertGitHubRepos(repos: GitHubRepoInput[]): void {
