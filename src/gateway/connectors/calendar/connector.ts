@@ -43,13 +43,18 @@ export class GoogleCalendarConnector implements SourceConnector {
   async fetch(boundary: SourceBoundary, params?: Record<string, unknown>): Promise<DataRow[]> {
     const listParams: calendar_v3.Params$Resource$Events$List = {
       calendarId: 'primary',
-      maxResults: (params?.limit as number) ?? 50,
+      maxResults: (params?.limit as number) ?? 100,
       singleEvents: true,
       orderBy: 'startTime',
     };
 
     if (boundary.after) {
       listParams.timeMin = new Date(boundary.after).toISOString();
+    } else {
+      // Default to showing events from 7 days ago to ensure recent/upcoming visibility
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      listParams.timeMin = sevenDaysAgo.toISOString();
     }
 
     if (params?.query) {

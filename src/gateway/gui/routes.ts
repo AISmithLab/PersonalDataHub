@@ -879,7 +879,7 @@ function getIndexHtml(): string {
       if (gm && gm.connected && !state.realEmails && !state.emailsLoading) {
         state.emailsLoading = true;
         state.emailsError = null;
-        fetch('/api/gmail/preview?limit=20')
+        fetch('/api/gmail/preview?limit=20&t=' + Date.now())
           .then(function(r) { return r.json(); })
           .then(function(data) {
             state.emailsLoading = false;
@@ -903,7 +903,7 @@ function getIndexHtml(): string {
       if (cal && cal.connected && !state.realEvents && !state.eventsLoading) {
         state.eventsLoading = true;
         state.eventsError = null;
-        fetch('/api/calendar/preview?limit=20')
+        fetch('/api/calendar/preview?limit=20&t=' + Date.now())
           .then(function(r) { return r.json(); })
           .then(function(data) {
             state.eventsLoading = false;
@@ -921,7 +921,6 @@ function getIndexHtml(): string {
             render();
           });
       }
-
       render();
     }
 
@@ -2055,12 +2054,14 @@ function getIndexHtml(): string {
       state.realEmails = null;
       state.emailsError = null;
       state.emailsLoading = false;
+      render(); // Show loading state immediately
       fetchData();
     };
     window.refreshCalendarEvents = function() {
       state.realEvents = null;
       state.eventsError = null;
       state.eventsLoading = false;
+      render(); // Show loading state immediately
       fetchData();
     };
     window.toggleEditAction = toggleEditAction;

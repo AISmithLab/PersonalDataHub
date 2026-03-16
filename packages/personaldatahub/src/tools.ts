@@ -40,34 +40,50 @@ export const PROPOSE_TOOL_SCHEMA = {
   properties: {
     source: {
       type: 'string' as const,
-      description: 'The source service for this action (e.g., "gmail")',
+      description: 'The source service for this action (e.g., "gmail", "google_calendar")',
     },
     action_type: {
       type: 'string' as const,
-      description: 'The type of action to propose (e.g., "draft_email", "send_email", "reply_email")',
+      description: 'The type of action to propose (e.g., "draft_email", "send_email", "create_event")',
     },
     to: {
       type: 'string' as const,
-      description: 'Recipient email address',
+      description: 'Recipient email address (for email actions)',
     },
     subject: {
       type: 'string' as const,
-      description: 'Email subject line',
+      description: 'Email subject line (for email actions)',
     },
     body: {
       type: 'string' as const,
-      description: 'Email body content',
+      description: 'Email body or event description',
+    },
+    title: {
+      type: 'string' as const,
+      description: 'Event title (for calendar actions)',
+    },
+    start: {
+      type: 'string' as const,
+      description: 'Event start time in ISO format (for calendar actions)',
+    },
+    end: {
+      type: 'string' as const,
+      description: 'Event end time in ISO format (for calendar actions)',
+    },
+    location: {
+      type: 'string' as const,
+      description: 'Event location (for calendar actions)',
     },
     in_reply_to: {
       type: 'string' as const,
-      description: 'Message ID to reply to (for reply_email and threaded draft_email). Optional.',
+      description: 'Message ID to reply to (for email actions). Optional.',
     },
     purpose: {
       type: 'string' as const,
       description: 'A clear description of why this action is being proposed. Required for transparency and audit.',
     },
   },
-  required: ['source', 'action_type', 'to', 'subject', 'body', 'purpose'] as const,
+  required: ['source', 'action_type', 'body', 'purpose'] as const,
 };
 
 /**
@@ -130,13 +146,19 @@ export function createProposeTool(client: HubClient) {
       const purpose = args.purpose as string;
 
       const action_data: Record<string, unknown> = {
-        to: args.to,
-        subject: args.subject,
         body: args.body,
       };
-      if (args.in_reply_to) {
-        action_data.in_reply_to = args.in_reply_to;
-      }
+
+      // Gmail fields
+      if (args.to) action_data.to = args.to;
+      if (args.subject) action_data.subject = args.subject;
+      if (args.in_reply_to) action_data.in_reply_to = args.in_reply_to;
+
+      // Calendar fields
+      if (args.title) action_data.title = args.title;
+      if (args.start) action_data.start = args.start;
+      if (args.end) action_data.end = args.end;
+      if (args.location) action_data.location = args.location;
 
       const result = await client.propose({
         source,
