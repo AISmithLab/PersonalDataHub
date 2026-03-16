@@ -166,10 +166,18 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
         const connector = deps.connectorRegistry.get(action.source);
         if (connector) {
           try {
-            // Always save as Gmail draft on approve — owner sends manually from Gmail
+            const actionData = JSON.parse(action.action_data);
+            let actionType = action.action_type;
+
+            // If it's a gmail source and the user clicked 'Send' (which sets send: true in action_data),
+            // we override the actionType to 'send_email'.
+            if (action.source === 'gmail' && actionData.send) {
+              actionType = 'send_email';
+            }
+
             const result = await connector.executeAction(
-              'draft_email',
-              JSON.parse(action.action_data),
+              actionType,
+              actionData,
             );
             await deps.store.updateStagingStatus(actionId, 'committed');
             await auditLog.logActionCommitted(actionId, action.source, result.success ? 'success' : 'failure');

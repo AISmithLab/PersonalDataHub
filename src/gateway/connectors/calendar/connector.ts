@@ -98,11 +98,11 @@ export class GoogleCalendarConnector implements SourceConnector {
       location: data.location as string,
       start: {
         dateTime: data.start as string,
-        timeZone: data.timeZone as string,
+        timeZone: (data.timeZone as string) || 'UTC',
       },
       end: {
         dateTime: data.end as string,
-        timeZone: data.timeZone as string,
+        timeZone: (data.timeZone as string) || 'UTC',
       },
       attendees: (data.attendees as Array<{ email: string }>) ?? [],
     };
