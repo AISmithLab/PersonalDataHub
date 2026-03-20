@@ -44,46 +44,21 @@ export const PROPOSE_TOOL_SCHEMA = {
     },
     action_type: {
       type: 'string' as const,
-      description: 'The type of action to propose (e.g., "draft_email", "send_email", "create_event")',
+      description: 'The type of action to propose (e.g., "draft_email", "reply_email", "send_email", "create_event", "delete_event")',
     },
-    to: {
-      type: 'string' as const,
-      description: 'Recipient email address (for email actions)',
-    },
-    subject: {
-      type: 'string' as const,
-      description: 'Email subject line (for email actions)',
-    },
-    body: {
-      type: 'string' as const,
-      description: 'Email body or event description',
-    },
-    title: {
-      type: 'string' as const,
-      description: 'Event title (for calendar actions)',
-    },
-    start: {
-      type: 'string' as const,
-      description: 'Event start time in ISO format (for calendar actions)',
-    },
-    end: {
-      type: 'string' as const,
-      description: 'Event end time in ISO format (for calendar actions)',
-    },
-    location: {
-      type: 'string' as const,
-      description: 'Event location (for calendar actions)',
-    },
-    in_reply_to: {
-      type: 'string' as const,
-      description: 'Message ID to reply to (for email actions). Optional.',
+    action_data: {
+      type: 'object' as const,
+      description:
+        'Source-specific action payload. ' +
+        'For gmail: { to, subject, body, in_reply_to? }. ' +
+        'For google_calendar: { title, start, end, location?, body?, timeZone?, eventId? }.',
     },
     purpose: {
       type: 'string' as const,
       description: 'A clear description of why this action is being proposed. Required for transparency and audit.',
     },
   },
-  required: ['source', 'action_type', 'body', 'purpose'] as const,
+  required: ['source', 'action_type', 'action_data', 'purpose'] as const,
 };
 
 /**
@@ -141,30 +116,11 @@ export function createProposeTool(client: HubClient) {
       'Always provide a clear purpose explaining why this action is being proposed.',
     parameters: PROPOSE_TOOL_SCHEMA,
     async execute(_toolCallId: string, args: Record<string, unknown>) {
-      const source = args.source as string;
-      const action_type = args.action_type as string;
-      const purpose = args.purpose as string;
-
-      const action_data: Record<string, unknown> = {
-        body: args.body,
-      };
-
-      // Gmail fields
-      if (args.to) action_data.to = args.to;
-      if (args.subject) action_data.subject = args.subject;
-      if (args.in_reply_to) action_data.in_reply_to = args.in_reply_to;
-
-      // Calendar fields
-      if (args.title) action_data.title = args.title;
-      if (args.start) action_data.start = args.start;
-      if (args.end) action_data.end = args.end;
-      if (args.location) action_data.location = args.location;
-
       const result = await client.propose({
-        source,
-        action_type,
-        action_data,
-        purpose,
+        source: args.source as string,
+        action_type: args.action_type as string,
+        action_data: args.action_data as Record<string, unknown>,
+        purpose: args.purpose as string,
       });
 
       return {
