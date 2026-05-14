@@ -1721,60 +1721,53 @@ function getIndexHtml(): string {
       \`;
     }
 
+    // Callback registry for AndroidSms.getMessages() results delivered via
+    // evaluateJavascript from SmsPlugin's JavascriptInterface.
+    window._smsCbs = {};
+    window._smsDeliver = function(callbackId, messages, error) {
+      var cb = window._smsCbs[callbackId];
+      if (cb) { delete window._smsCbs[callbackId]; cb(messages, error); }
+    };
+
     function loadSmsMessages(force) {
       if (!force && state.sms.messages !== null) return;
+      if (!force && state.sms.error) return;
       if (state.sms.loading) return;
 
       state.sms.loading = true;
       state.sms.error = null;
       if (currentTab === 'sms') render();
 
-      // The Capacitor plugin bridge is only available on the capacitor://localhost
-      // origin, not on http://127.0.0.1:3000 (this page).  Load a hidden iframe
-      // from the Capacitor origin; it calls SmsPlugin and postMessages the result.
-      var old = document.getElementById('sms-bridge-frame');
-      if (old) old.remove();
+      if (!window.AndroidSms) {
+        state.sms.loading = false;
+        state.sms.error = 'NOT_ANDROID';
+        if (currentTab === 'sms') render();
+        return;
+      }
 
       var reqId = Date.now().toString();
-      var iframe = document.createElement('iframe');
-      iframe.id = 'sms-bridge-frame';
-      iframe.style.cssText = 'display:none;position:fixed;width:0;height:0;border:none';
-      iframe.src = 'capacitor://localhost/sms-bridge.html?box=' + encodeURIComponent(state.sms.box) + '&reqId=' + reqId;
-
-      var cleanup = null;
-      var timer = setTimeout(function () {
-        cleanup();
+      var timer = setTimeout(function() {
+        delete window._smsCbs[reqId];
         state.sms.loading = false;
-        state.sms.error = 'SMS bridge timed out — check SMS permission in Android Settings';
+        state.sms.error = 'Timed out reading SMS — check permission in Android Settings';
         if (currentTab === 'sms') render();
       }, 10000);
 
-      function onMessage(e) {
-        if (!e.data || e.data.type !== 'pdh-sms-result' || e.data.reqId !== reqId) return;
-        cleanup();
+      window._smsCbs[reqId] = function(messages, error) {
+        clearTimeout(timer);
         state.sms.loading = false;
-        var err = e.data.error;
-        if (err) {
-          var el = err.toLowerCase();
+        if (error) {
+          var el = error.toLowerCase();
           state.sms.error = (el.includes('denied') || el.includes('permission'))
-            ? 'PERMISSION_DENIED'
-            : err === 'bridge-unavailable' ? 'NOT_ANDROID' : err;
+            ? 'PERMISSION_DENIED' : error;
         } else {
-          state.sms.messages = e.data.messages;
+          state.sms.messages = messages;
           state.sms.error = null;
         }
         if (currentTab === 'sms') render();
-      }
-
-      cleanup = function () {
-        clearTimeout(timer);
-        window.removeEventListener('message', onMessage);
-        var f = document.getElementById('sms-bridge-frame');
-        if (f) f.remove();
       };
 
-      window.addEventListener('message', onMessage);
-      document.body.appendChild(iframe);
+      window.AndroidSms.getMessages(reqId, state.sms.box, 100);
     }
     window.loadSmsMessages = loadSmsMessages;
 

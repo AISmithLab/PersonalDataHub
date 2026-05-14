@@ -9,4 +9,10 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(SmsPlugin.class);
         super.onCreate(savedInstanceState);
     }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        SmsPlugin.handlePermissionsResult(requestCode, grantResults);
+    }
 }
