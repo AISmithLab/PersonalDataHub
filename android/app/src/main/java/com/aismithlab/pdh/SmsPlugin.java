@@ -4,6 +4,7 @@ import android.Manifest;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
+import android.telephony.SmsManager;
 import android.webkit.JavascriptInterface;
 
 import androidx.core.app.ActivityCompat;
@@ -22,15 +23,17 @@ import com.getcapacitor.annotation.PermissionCallback;
 @CapacitorPlugin(
     name = "Sms",
     permissions = {
-        @Permission(strings = { Manifest.permission.READ_SMS }, alias = "readSms")
+        @Permission(strings = { Manifest.permission.READ_SMS }, alias = "readSms"),
+        @Permission(strings = { Manifest.permission.SEND_SMS }, alias = "sendSms")
     }
 )
 public class SmsPlugin extends Plugin {
 
-    static final int JS_SMS_PERMISSION_REQUEST = 9001;
+    static final int JS_SMS_READ_REQUEST = 9001;
+    static final int JS_SMS_SEND_REQUEST = 9002;
 
-    // Pending bridge instance waiting for a permission result from MainActivity.
-    private static SmsJsBridge pendingBridge = null;
+    private static SmsJsBridge pendingReadBridge = null;
+    private static SmsJsBridge pendingSendBridge = null;
 
     @Override
     public void load() {
@@ -39,23 +42,32 @@ public class SmsPlugin extends Plugin {
             getBridge().getWebView().addJavascriptInterface(bridge, "AndroidSms"));
     }
 
-    /** Called by MainActivity.onRequestPermissionsResult for our request code. */
     static void handlePermissionsResult(int requestCode, int[] grantResults) {
-        if (requestCode != JS_SMS_PERMISSION_REQUEST || pendingBridge == null) return;
         boolean granted = grantResults.length > 0
             && grantResults[0] == PackageManager.PERMISSION_GRANTED;
-        SmsJsBridge b = pendingBridge;
-        pendingBridge = null;
-        b.onPermissionResult(granted);
+        if (requestCode == JS_SMS_READ_REQUEST && pendingReadBridge != null) {
+            SmsJsBridge b = pendingReadBridge;
+            pendingReadBridge = null;
+            b.onReadPermissionResult(granted);
+        } else if (requestCode == JS_SMS_SEND_REQUEST && pendingSendBridge != null) {
+            SmsJsBridge b = pendingSendBridge;
+            pendingSendBridge = null;
+            b.onSendPermissionResult(granted);
+        }
     }
 
     // -------------------------------------------------------------------------
-    // JavascriptInterface — available on ALL origins, including http://127.0.0.1
+    // JavascriptInterface — exposed as window.AndroidSms on ALL origins
     // -------------------------------------------------------------------------
     class SmsJsBridge {
-        private volatile String pendingCallbackId;
+        // read state
+        private volatile String pendingReadCbId;
         private volatile String pendingBox;
         private volatile int    pendingLimit;
+        // send state
+        private volatile String pendingSendCbId;
+        private volatile String pendingSendTo;
+        private volatile String pendingSendBody;
 
         @JavascriptInterface
         public void getMessages(String callbackId, String box, int limit) {
@@ -63,50 +75,97 @@ public class SmsPlugin extends Plugin {
                     == PackageManager.PERMISSION_GRANTED) {
                 fetchAndDeliver(callbackId, box, limit);
             } else {
-                pendingCallbackId = callbackId;
-                pendingBox        = box;
-                pendingLimit      = limit;
-                pendingBridge     = this;
+                pendingReadCbId = callbackId;
+                pendingBox      = box;
+                pendingLimit    = limit;
+                pendingReadBridge = this;
                 getActivity().runOnUiThread(() ->
                     ActivityCompat.requestPermissions(getActivity(),
                         new String[]{ Manifest.permission.READ_SMS },
-                        JS_SMS_PERMISSION_REQUEST));
+                        JS_SMS_READ_REQUEST));
             }
         }
 
-        void onPermissionResult(boolean granted) {
-            String cid = pendingCallbackId;
-            String b   = pendingBox;
-            int    l   = pendingLimit;
-            pendingCallbackId = null;
-            if (granted) {
-                fetchAndDeliver(cid, b, l);
+        @JavascriptInterface
+        public void sendMessage(String callbackId, String to, String body) {
+            if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.SEND_SMS)
+                    == PackageManager.PERMISSION_GRANTED) {
+                doSend(callbackId, to, body);
             } else {
-                deliverError(cid, "PERMISSION_DENIED");
+                pendingSendCbId  = callbackId;
+                pendingSendTo    = to;
+                pendingSendBody  = body;
+                pendingSendBridge = this;
+                getActivity().runOnUiThread(() ->
+                    ActivityCompat.requestPermissions(getActivity(),
+                        new String[]{ Manifest.permission.SEND_SMS },
+                        JS_SMS_SEND_REQUEST));
             }
+        }
+
+        void onReadPermissionResult(boolean granted) {
+            String cid   = pendingReadCbId;
+            String box   = pendingBox;
+            int    limit = pendingLimit;
+            pendingReadCbId = null;
+            if (granted) fetchAndDeliver(cid, box, limit);
+            else deliverReadError(cid, "PERMISSION_DENIED");
+        }
+
+        void onSendPermissionResult(boolean granted) {
+            String cid  = pendingSendCbId;
+            String to   = pendingSendTo;
+            String body = pendingSendBody;
+            pendingSendCbId = null;
+            if (granted) doSend(cid, to, body);
+            else deliverSendResult(cid, "PERMISSION_DENIED");
         }
 
         private void fetchAndDeliver(String callbackId, String box, int limit) {
             new Thread(() -> {
                 try {
                     String json = readSmsJson(box, limit);
-                    deliverResult(callbackId, json);
+                    deliverReadResult(callbackId, json);
                 } catch (Exception e) {
-                    deliverError(callbackId, e.getMessage() != null ? e.getMessage() : "Read failed");
+                    deliverReadError(callbackId, e.getMessage() != null ? e.getMessage() : "Read failed");
                 }
             }).start();
         }
 
-        private void deliverResult(String callbackId, String json) {
+        private void doSend(String callbackId, String to, String body) {
+            try {
+                SmsManager smsManager = SmsManager.getDefault();
+                // splitMessage handles texts over 160 chars
+                java.util.ArrayList<String> parts = smsManager.divideMessage(body);
+                if (parts.size() == 1) {
+                    smsManager.sendTextMessage(to, null, body, null, null);
+                } else {
+                    smsManager.sendMultipartTextMessage(to, null, parts, null, null);
+                }
+                deliverSendResult(callbackId, null);
+            } catch (Exception e) {
+                deliverSendResult(callbackId, e.getMessage() != null ? e.getMessage() : "Send failed");
+            }
+        }
+
+        private void deliverReadResult(String callbackId, String json) {
             String js = "window._smsDeliver&&window._smsDeliver('"
                 + esc(callbackId) + "'," + json + ",null)";
             getBridge().getWebView().post(() ->
                 getBridge().getWebView().evaluateJavascript(js, null));
         }
 
-        private void deliverError(String callbackId, String error) {
+        private void deliverReadError(String callbackId, String error) {
             String js = "window._smsDeliver&&window._smsDeliver('"
                 + esc(callbackId) + "',null,'" + esc(error) + "')";
+            getBridge().getWebView().post(() ->
+                getBridge().getWebView().evaluateJavascript(js, null));
+        }
+
+        private void deliverSendResult(String callbackId, String error) {
+            String errPart = error != null ? "'" + esc(error) + "'" : "null";
+            String js = "window._smsSendDeliver&&window._smsSendDeliver('"
+                + esc(callbackId) + "'," + errPart + ")";
             getBridge().getWebView().post(() ->
                 getBridge().getWebView().evaluateJavascript(js, null));
         }

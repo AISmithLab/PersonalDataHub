@@ -39,6 +39,7 @@ const aiProviderSchema = z.object({
   provider: z.string(),
   api_key: z.string(),
   model: z.string().optional(),
+  base_url: z.string().optional(),
 });
 
 const deploymentSchema = z.object({

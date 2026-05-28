@@ -15,4 +15,5 @@ public class MainActivity extends BridgeActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         SmsPlugin.handlePermissionsResult(requestCode, grantResults);
     }
+
 }

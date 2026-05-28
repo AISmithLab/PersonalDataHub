@@ -43,6 +43,7 @@ if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 process.env.PDH_DB_PATH = join(dataDir, 'pdh.db');
 
 const configPath = process.env.PDH_CONFIG_PATH ?? join(dataDir, 'hub-config.yaml');
+process.env.PDH_CONFIG_PATH = configPath;
 
 // Bootstrap a default config if none exists yet
 if (!existsSync(configPath)) {

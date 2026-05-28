@@ -850,6 +850,11 @@ function getIndexHtml(): string {
           <span class="nav-label">Slack</span>
           <span class="nav-badge-muted">soon</span>
         </a>
+        <a class="nav-item" data-tab="ai" onclick="switchTab('ai')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          <span class="nav-label">AI Assistant</span>
+          <span class="status-dot" id="ai-dot" style="background:var(--muted)"></span>
+        </a>
         <div class="nav-group-label">System</div>
         <a class="nav-item" data-tab="settings" onclick="switchTab('settings')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -894,6 +899,10 @@ function getIndexHtml(): string {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.63 3.4 2 2 0 0 1 3.6 1.21h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16.92z"/></svg>
       <span>SMS</span>
     </a>
+    <a data-tab="ai" onclick="switchTab('ai')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      <span>AI</span>
+    </a>
     <a data-tab="settings" onclick="switchTab('settings')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       <span>Settings</span>
@@ -933,6 +942,7 @@ function getIndexHtml(): string {
       eventsError: null,
       filterTypes: {},
       sms: { messages: null, loading: false, error: null, box: 'inbox' },
+      chat: { messages: [], loading: false, error: null, aiAvailable: false, stagedSmsIds: [] },
     };
     let _saveTimer = null;
 
@@ -1006,6 +1016,14 @@ function getIndexHtml(): string {
             render();
           });
       }
+      // Check AI configuration status
+      fetch('/api/chat/status').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          state.chat.aiAvailable = d.configured;
+          if (currentTab === 'ai') render();
+        }
+      }).catch(function() { /* non-fatal */ });
+
       render();
     }
 
@@ -1021,6 +1039,7 @@ function getIndexHtml(): string {
         case 'github': content.innerHTML = renderGitHubTab(); break;
         case 'google_calendar': content.innerHTML = renderCalendarTab(); break;
         case 'sms': content.innerHTML = renderSmsTab(); loadSmsMessages(); break;
+        case 'ai': content.innerHTML = renderAiTab(); break;
         case 'settings': content.innerHTML = renderSettingsTab(); break;
       }
       // Update sidebar badges and status dots
@@ -1063,6 +1082,11 @@ function getIndexHtml(): string {
       var ghDot = document.getElementById('github-dot');
       if (ghDot) {
         ghDot.className = 'status-dot ' + (ghSource && ghSource.connected ? 'status-dot-connected' : 'status-dot-disconnected');
+      }
+      // AI status dot
+      var aiDot = document.getElementById('ai-dot');
+      if (aiDot) {
+        aiDot.style.background = state.chat.aiAvailable ? 'var(--success)' : 'var(--muted)';
       }
 
       if (focusId) {
@@ -1771,8 +1795,249 @@ function getIndexHtml(): string {
     }
     window.loadSmsMessages = loadSmsMessages;
 
+    // ---- AI chat ----
+
+    // Callback registry for AndroidSms.sendMessage() results
+    window._smsSendCbs = {};
+    window._smsSendDeliver = function(callbackId, error) {
+      var cb = window._smsSendCbs[callbackId];
+      if (cb) { delete window._smsSendCbs[callbackId]; cb(error); }
+    };
+
+    async function sendSmsAction(actionId, to, body) {
+      if (!window.AndroidSms || !window.AndroidSms.sendMessage) {
+        alert('SMS sending is only available on Android.');
+        return;
+      }
+      var cbId = 'smssend_' + Date.now();
+      window._smsSendCbs[cbId] = async function(error) {
+        if (error && error !== 'null') {
+          alert('Failed to send SMS: ' + error);
+          return;
+        }
+        await fetch('/api/staging/' + actionId + '/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decision: 'approve' }),
+        });
+        state.chat.stagedSmsIds = state.chat.stagedSmsIds.filter(function(id) { return id !== actionId; });
+        await fetchData();
+      };
+      window.AndroidSms.sendMessage(cbId, to, body);
+    }
+    window.sendSmsAction = sendSmsAction;
+
+    async function rejectSmsAction(actionId) {
+      await fetch('/api/staging/' + actionId + '/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'reject' }),
+      });
+      state.chat.stagedSmsIds = state.chat.stagedSmsIds.filter(function(id) { return id !== actionId; });
+      await fetchData();
+    }
+    window.rejectSmsAction = rejectSmsAction;
+
+    function renderAiTab() {
+      var chat = state.chat;
+      if (!chat.aiAvailable) {
+        return '<div class="card" style="max-width:420px;margin:40px auto;text-align:center;padding:32px">' +
+          '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5" style="margin-bottom:16px"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>' +
+          '<h3 style="margin:0 0 8px">AI Assistant not configured</h3>' +
+          '<p style="color:var(--muted);font-size:14px;margin:0 0 20px">Add an API key in Settings to get started.</p>' +
+          '<button class="btn btn-primary" onclick="switchTab(\'settings\')">Go to Settings</button>' +
+          '</div>';
+      }
+
+      // Build pending SMS staged actions for this chat session
+      var smsPending = state.staging.filter(function(a) {
+        return a.source === 'sms' && a.status === 'pending';
+      });
+
+      var messagesHtml = '';
+      if (!chat.messages.length) {
+        messagesHtml = '<div style="text-align:center;color:var(--muted);font-size:14px;padding:40px 20px">' +
+          'Ask me anything about your data — emails, calendar, GitHub, or SMS.' +
+          '</div>';
+      } else {
+        chat.messages.forEach(function(msg) {
+          var isUser = msg.role === 'user';
+          messagesHtml += '<div style="display:flex;justify-content:' + (isUser ? 'flex-end' : 'flex-start') + ';margin-bottom:12px">' +
+            '<div style="max-width:80%;padding:10px 14px;border-radius:' + (isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px') + ';' +
+            'background:' + (isUser ? 'var(--primary)' : 'var(--card-bg)') + ';' +
+            'color:' + (isUser ? '#fff' : 'var(--fg)') + ';' +
+            'border:' + (isUser ? 'none' : '1px solid var(--border)') + ';' +
+            'font-size:14px;line-height:1.5;white-space:pre-wrap;word-break:break-word">' +
+            escapeHtml(msg.content) + '</div></div>';
+        });
+      }
+
+      var smsPendingHtml = '';
+      if (smsPending.length) {
+        smsPending.forEach(function(a) {
+          var data = typeof a.action_data === 'string' ? JSON.parse(a.action_data) : a.action_data;
+          var safeId = a.action_id.replace(/'/g, "\\\\'");
+          var safeTo = (data.to || '').replace(/'/g, "\\\\'");
+          var safeBody = (data.body || '').replace(/'/g, "\\\\'");
+          smsPendingHtml += '<div style="margin:8px 0;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--card-bg)">' +
+            '<div style="font-size:12px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Staged SMS</div>' +
+            '<div style="font-size:14px;margin-bottom:4px"><strong>To:</strong> ' + escapeHtml(data.to || '') + '</div>' +
+            '<div style="font-size:14px;margin-bottom:12px;white-space:pre-wrap">' + escapeHtml(data.body || '') + '</div>' +
+            '<div style="display:flex;gap:8px">' +
+            '<button class="btn btn-outline btn-sm" style="color:var(--destructive);border-color:rgba(239,68,68,0.3)" onclick="rejectSmsAction(\\'' + safeId + '\\')">Deny</button>' +
+            '<button class="btn btn-sm" style="background:var(--primary);color:#fff" onclick="sendSmsAction(\\'' + safeId + '\\',\\'' + safeTo + '\\',\\'' + safeBody + '\\')">Send SMS</button>' +
+            '</div></div>';
+        });
+      }
+
+      var loadingHtml = chat.loading
+        ? '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;color:var(--muted);font-size:13px"><div class="spinner" style="width:16px;height:16px;border-width:2px"></div>Thinking…</div>'
+        : '';
+      var errorHtml = chat.error
+        ? '<div style="padding:8px 12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;color:var(--destructive);font-size:13px;margin-top:8px">' + escapeHtml(chat.error) + '</div>'
+        : '';
+
+      return '<div style="display:flex;flex-direction:column;height:calc(100vh - 80px)">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)">' +
+        '<h2 style="margin:0;display:flex;align-items:center;gap:8px">' +
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>' +
+        'AI Assistant</h2>' +
+        '<button class="btn btn-outline btn-sm" onclick="clearChat()">Clear</button>' +
+        '</div>' +
+        '<div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px 20px">' +
+        messagesHtml + smsPendingHtml + loadingHtml + errorHtml +
+        '</div>' +
+        '<div style="padding:12px 20px;border-top:1px solid var(--border)">' +
+        '<div style="display:flex;gap:8px">' +
+        '<input id="chat-input" type="text" placeholder="Ask about your data…" ' +
+        'style="flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:var(--card-bg);color:var(--fg)" ' +
+        'onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();sendChatMessage();}" ' +
+        (chat.loading ? 'disabled ' : '') + '/>' +
+        '<button class="btn btn-primary" onclick="sendChatMessage()" ' + (chat.loading ? 'disabled ' : '') + 'style="padding:10px 18px">Send</button>' +
+        '</div></div></div>';
+    }
+
+    async function sendChatMessage() {
+      var input = document.getElementById('chat-input');
+      if (!input) return;
+      var text = input.value.trim();
+      if (!text || state.chat.loading) return;
+      input.value = '';
+
+      state.chat.messages.push({ role: 'user', content: text });
+      state.chat.loading = true;
+      state.chat.error = null;
+      if (currentTab === 'ai') render();
+
+      var msgs = state.chat.messages.slice(-50);
+      var sms = state.sms.messages;
+
+      try {
+        var res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: msgs, sms: sms }),
+        });
+        var data = await res.json();
+        state.chat.loading = false;
+        if (data.ok) {
+          state.chat.messages.push({ role: 'assistant', content: data.reply });
+          if (data.stagedActionIds && data.stagedActionIds.length) {
+            state.chat.stagedSmsIds = state.chat.stagedSmsIds.concat(data.stagedActionIds);
+            await fetchData();
+          }
+        } else {
+          state.chat.error = data.error || 'Unknown error';
+        }
+      } catch (err) {
+        state.chat.loading = false;
+        state.chat.error = err.message || 'Network error';
+      }
+      if (currentTab === 'ai') {
+        render();
+        var msgs2 = document.getElementById('chat-messages');
+        if (msgs2) msgs2.scrollTop = msgs2.scrollHeight;
+      }
+    }
+    window.sendChatMessage = sendChatMessage;
+
+    function clearChat() {
+      state.chat.messages = [];
+      state.chat.error = null;
+      state.chat.stagedSmsIds = [];
+      if (currentTab === 'ai') render();
+    }
+    window.clearChat = clearChat;
+
+    function saveAiKey() {
+      var key = document.getElementById('ai-api-key').value.trim();
+      var model = document.getElementById('ai-model').value.trim();
+      var provider = document.getElementById('ai-provider').value.trim();
+      var baseUrl = document.getElementById('ai-base-url').value.trim();
+      if (!key) { alert('API key is required'); return; }
+      fetch('/api/settings/ai-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: key, model: model || undefined, provider: provider || 'anthropic', base_url: baseUrl || undefined }),
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          state.chat.aiAvailable = true;
+          var flash = document.getElementById('ai-flash');
+          if (flash) { flash.style.opacity = '1'; setTimeout(function() { flash.style.opacity = '0'; }, 2000); }
+        } else {
+          alert('Error: ' + (d.error || 'Unknown error'));
+        }
+      }).catch(function() { alert('Network error'); });
+    }
+    window.saveAiKey = saveAiKey;
+
+    function toggleAiBaseUrl() {
+      var provider = document.getElementById('ai-provider').value;
+      var customUrls = { anthropic: 'https://api.anthropic.com/v1', openai: '', groq: 'https://api.groq.com/openai/v1', google: 'https://generativelanguage.googleapis.com/v1beta/openai/', ollama: 'http://localhost:11434/v1' };
+      var defaultModels = { anthropic: 'claude-sonnet-4-6', openai: 'gpt-4o', groq: 'llama-3.3-70b-versatile', google: 'gemini-2.0-flash', ollama: 'llama3' };
+      var urlEl = document.getElementById('ai-base-url');
+      var modelEl = document.getElementById('ai-model');
+      if (urlEl) urlEl.placeholder = customUrls[provider] || 'https://...';
+      if (modelEl && !modelEl.value) modelEl.placeholder = defaultModels[provider] || 'model name';
+    }
+    window.toggleAiBaseUrl = toggleAiBaseUrl;
+
     function renderSettingsTab() {
+      var aiConfigured = state.chat.aiAvailable;
       return \`
+        <div class="card">
+          <h2>AI Assistant</h2>
+          <p style="font-size:14px;color:var(--muted);margin-bottom:16px">Connect any OpenAI-compatible AI provider.</p>
+          <div style="display:grid;gap:12px;max-width:480px">
+            <div>
+              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px">Provider</label>
+              <select id="ai-provider" onchange="toggleAiBaseUrl()" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg);color:var(--fg);font-size:14px">
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="openai">OpenAI (GPT)</option>
+                <option value="groq">Groq</option>
+                <option value="google">Google (Gemini)</option>
+                <option value="ollama">Ollama (local)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px">API Key</label>
+              <input type="password" id="ai-api-key" placeholder="sk-ant-..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg);color:var(--fg);font-size:14px;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px">Model <span style="font-weight:400">(optional — uses provider default if blank)</span></label>
+              <input type="text" id="ai-model" placeholder="claude-sonnet-4-6" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg);color:var(--fg);font-size:14px;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px">Base URL <span style="font-weight:400">(optional — uses provider default if blank)</span></label>
+              <input type="text" id="ai-base-url" placeholder="https://api.anthropic.com/v1" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg);color:var(--fg);font-size:14px;box-sizing:border-box">
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <button class="btn btn-primary" onclick="saveAiKey()">Save</button>
+              <span id="ai-flash" style="font-size:13px;color:var(--success);opacity:0;transition:opacity 0.3s">Saved</span>
+              <span style="font-size:13px;color:\${aiConfigured ? 'var(--success)' : 'var(--muted)'}">\${aiConfigured ? '● Connected' : '○ Not configured'}</span>
+            </div>
+          </div>
+        </div>
         <div class="card">
           <h2>Audit Log</h2>
           \${state.audit.length ? '<table><tr><th>Time</th><th>Event</th><th>Source</th><th>Details</th><th>Response</th></tr>' +
@@ -2170,8 +2435,22 @@ function getIndexHtml(): string {
 
       pending.forEach(function(a) {
         var data = typeof a.action_data === 'string' ? JSON.parse(a.action_data) : a.action_data;
-        var label = actionTypeLabel(a.action_type);
         var safe = a.action_id.replace(/'/g, "\\\\'");
+
+        // SMS actions are executed client-side via AndroidSms
+        if (a.source === 'sms' && a.action_type === 'send_sms') {
+          var safeTo = (data.to || '').replace(/'/g, "\\\\'");
+          var safeBody = (data.body || '').replace(/'/g, "\\\\'");
+          html += '<div class="email-card" id="card-' + a.action_id + '">';
+          html += '<div class="email-card-header"><span class="email-card-title">SMS to ' + escapeHtml(data.to || '') + '</span></div>';
+          html += '<div class="email-card-meta"><div class="email-field"><span class="email-field-label">To</span><span>' + escapeHtml(data.to || '') + '</span></div></div>';
+          html += '<div class="email-card-body"><pre class="email-body-display">' + escapeHtml(data.body || '') + '</pre></div>';
+          html += '<div class="email-card-actions">';
+          html += '<button class="btn btn-deny" onclick="rejectSmsAction(\\'' + safe + '\\')">Deny</button>';
+          html += '<button class="btn btn-approve" onclick="sendSmsAction(\\'' + safe + '\\',\\'' + safeTo + '\\',\\'' + safeBody + '\\')">Send SMS</button>';
+          html += '</div></div>';
+          return;
+        }
 
         html += '<div class="email-card" id="card-' + a.action_id + '">';
         html += '<div class="email-card-header"><span class="email-card-title">' + escapeHtml(a.purpose || data.subject || 'Untitled') + '</span></div>';

@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- READ_SMS is required for the SMS page (runtime permission, requested on first use) -->
     <uses-permission android:name="android.permission.READ_SMS" />
+    <!-- SEND_SMS is required for AI-assisted replies (runtime permission, requested on first use) -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
 
     <application
         android:allowBackup="true"
