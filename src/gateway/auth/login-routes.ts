@@ -47,7 +47,7 @@ export function createLoginRoutes(deps: LoginDeps): Hono {
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     await deps.store.createSession(token, expiresAt);
 
-    c.header('Set-Cookie', `pdh_session=${token}; HttpOnly; Path=/; SameSite=Lax`);
+    c.header('Set-Cookie', `pdh_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`);
     return c.json({ ok: true });
   });
 
@@ -70,7 +70,7 @@ export function createLoginRoutes(deps: LoginDeps): Hono {
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     await deps.store.createSession(token, expiresAt);
 
-    c.header('Set-Cookie', `pdh_session=${token}; HttpOnly; Path=/; SameSite=Lax`);
+    c.header('Set-Cookie', `pdh_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`);
     return c.json({ ok: true });
   });
 

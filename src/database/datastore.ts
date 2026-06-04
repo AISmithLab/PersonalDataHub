@@ -50,6 +50,13 @@ export interface AuditRow {
   details: string;
 }
 
+export interface MemoryRow {
+  id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface GitHubRepoRow {
   full_name: string;
   owner: string;
@@ -148,4 +155,10 @@ export interface DataStore {
   // --- OAuth State (CSRF) ---
   setOAuthState(state: string, data: OAuthStateData): MaybePromise<void>;
   getAndDeleteOAuthState(state: string): MaybePromise<OAuthStateData | null>;
+
+  // --- AI Memories ---
+  listMemories(): MaybePromise<MemoryRow[]>;
+  insertMemory(id: string, content: string): MaybePromise<void>;
+  updateMemory(id: string, content: string): MaybePromise<void>;
+  deleteMemory(id: string): MaybePromise<void>;
 }

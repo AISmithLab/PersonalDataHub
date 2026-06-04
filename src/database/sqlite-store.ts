@@ -15,6 +15,7 @@ import type {
   StagingRow,
   FilterRow,
   AuditRow,
+  MemoryRow,
   GitHubRepoRow,
   GitHubRepoInput,
   OAuthStateData,
@@ -323,5 +324,23 @@ export class SqliteDataStore implements DataStore {
     if (!data) return null;
     this.pendingStates.delete(state);
     return data;
+  }
+
+  // --- AI Memories ---
+
+  listMemories(): MemoryRow[] {
+    return this.db.prepare('SELECT * FROM ai_memories ORDER BY created_at ASC').all() as MemoryRow[];
+  }
+
+  insertMemory(id: string, content: string): void {
+    this.db.prepare("INSERT INTO ai_memories (id, content) VALUES (?, ?)").run(id, content);
+  }
+
+  updateMemory(id: string, content: string): void {
+    this.db.prepare("UPDATE ai_memories SET content = ?, updated_at = datetime('now') WHERE id = ?").run(content, id);
+  }
+
+  deleteMemory(id: string): void {
+    this.db.prepare('DELETE FROM ai_memories WHERE id = ?').run(id);
   }
 }

@@ -86,6 +86,14 @@ CREATE TABLE IF NOT EXISTS github_repos (
   fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`;
 
+const CREATE_AI_MEMORIES = `
+CREATE TABLE IF NOT EXISTS ai_memories (
+  id TEXT PRIMARY KEY,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`;
+
 export function createTables(db: Database.Database): void {
   db.exec(CREATE_USERS);
   db.exec(CREATE_SESSIONS);
@@ -98,4 +106,5 @@ export function createTables(db: Database.Database): void {
   db.exec(CREATE_OAUTH_TOKENS);
   db.exec(CREATE_FILTERS);
   db.exec(CREATE_GITHUB_REPOS);
+  db.exec(CREATE_AI_MEMORIES);
 }

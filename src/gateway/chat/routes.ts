@@ -5,9 +5,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import type { ServerDeps } from '../server.js';
 import { applyFilters, type QuickFilter } from '../filters.js';
+import type { MemoryRow } from '../../database/datastore.js';
 
 type SmsMessage = { address: string; body: string; date: number };
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
+
+const MEMORY_LIMIT = 50;
 
 const DEFAULT_MODELS: Record<string, string> = {
   anthropic: 'claude-sonnet-4-6',
@@ -180,10 +183,57 @@ async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]
     },
   });
 
+  // Memory tools — always available
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'save_memory',
+      description: 'Save a fact about the user to persistent memory. Use this proactively when the user shares preferences, context, or ongoing projects. Max 50 memories — if at capacity, use update_memory or delete_memory first.',
+      parameters: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: 'The fact to remember (concise, one sentence)' },
+        },
+        required: ['content'],
+      },
+    },
+  });
+
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'update_memory',
+      description: 'Update an existing memory by ID. Use when a remembered fact has changed.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Memory ID from the system prompt' },
+          content: { type: 'string', description: 'Updated fact' },
+        },
+        required: ['id', 'content'],
+      },
+    },
+  });
+
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'delete_memory',
+      description: 'Delete a memory by ID. Use when a remembered fact is no longer relevant.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Memory ID from the system prompt' },
+        },
+        required: ['id'],
+      },
+    },
+  });
+
   return tools;
 }
 
-function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null): string {
+function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories: MemoryRow[]): string {
   const today = new Date().toISOString().split('T')[0];
   const lines = [
     `You are a personal AI assistant inside PersonalDataHub on the user's Android phone. Today is ${today}.`,
@@ -192,6 +242,13 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null): string {
     '',
     `Connected sources: ${Object.keys(deps.config.sources).join(', ') || 'none'}`,
   ];
+
+  if (memories.length > 0) {
+    lines.push('', 'What you remember about the user:');
+    memories.forEach(m => lines.push(`  [id:${m.id}] ${m.content}`));
+  }
+
+  lines.push('', 'Memory: Use save_memory() to record important facts the user shares (preferences, ongoing projects, personal context). Use update_memory(id) when a fact changes. Use delete_memory(id) for stale facts. Be proactive but concise — one clear sentence per memory.');
 
   if (sms && sms.length > 0) {
     lines.push('', 'Recent SMS messages (newest first):');
@@ -311,6 +368,36 @@ async function executeTool(
       return JSON.stringify({ ok: true, actionId, status: 'pending_review' });
     }
 
+    case 'save_memory': {
+      const content = String(input.content ?? '').trim();
+      if (!content) return JSON.stringify({ error: 'content is required' });
+      const existing = await deps.store.listMemories();
+      if (existing.length >= MEMORY_LIMIT) {
+        return JSON.stringify({ error: `Memory is full (${MEMORY_LIMIT} items). Use update_memory or delete_memory to make room.` });
+      }
+      const memId = `mem_${randomUUID().slice(0, 8)}`;
+      await deps.store.insertMemory(memId, content);
+      await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_memory_saved', source: null, details: JSON.stringify({ id: memId, content }) });
+      return JSON.stringify({ ok: true, id: memId });
+    }
+
+    case 'update_memory': {
+      const id = String(input.id ?? '').trim();
+      const content = String(input.content ?? '').trim();
+      if (!id || !content) return JSON.stringify({ error: 'id and content are required' });
+      await deps.store.updateMemory(id, content);
+      await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_memory_updated', source: null, details: JSON.stringify({ id, content }) });
+      return JSON.stringify({ ok: true });
+    }
+
+    case 'delete_memory': {
+      const id = String(input.id ?? '').trim();
+      if (!id) return JSON.stringify({ error: 'id is required' });
+      await deps.store.deleteMemory(id);
+      await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_memory_deleted', source: null, details: JSON.stringify({ id }) });
+      return JSON.stringify({ ok: true });
+    }
+
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
@@ -324,7 +411,8 @@ async function runAgentLoop(
   const client = getClient(deps);
   const model = getModel(deps);
   const tools = await buildTools(deps);
-  const system = buildSystemPrompt(deps, sms);
+  const memories = await deps.store.listMemories();
+  const system = buildSystemPrompt(deps, sms, memories);
 
   const chatMessages: OpenAI.ChatCompletionMessageParam[] = [
     { role: 'system', content: system },
@@ -431,6 +519,42 @@ export function createChatRoutes(deps: ServerDeps): Hono {
       }
     }
 
+    return c.json({ ok: true });
+  });
+
+  app.get('/api/memories', async (c) => {
+    const memories = await deps.store.listMemories();
+    return c.json({ ok: true, memories });
+  });
+
+  app.post('/api/memories', async (c) => {
+    const body = await c.req.json();
+    const content = typeof body.content === 'string' ? body.content.trim() : '';
+    if (!content) return c.json({ ok: false, error: 'content is required' }, 400);
+    const existing = await deps.store.listMemories();
+    if (existing.length >= MEMORY_LIMIT) {
+      return c.json({ ok: false, error: `Memory is full (${MEMORY_LIMIT} items). Delete some memories first.` }, 400);
+    }
+    const id = `mem_${randomUUID().slice(0, 8)}`;
+    await deps.store.insertMemory(id, content);
+    await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_memory_saved', source: null, details: JSON.stringify({ id, content, savedBy: 'user' }) });
+    return c.json({ ok: true, id });
+  });
+
+  app.patch('/api/memories/:id', async (c) => {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const content = typeof body.content === 'string' ? body.content.trim() : '';
+    if (!content) return c.json({ ok: false, error: 'content is required' }, 400);
+    await deps.store.updateMemory(id, content);
+    await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_memory_updated', source: null, details: JSON.stringify({ id, content, updatedBy: 'user' }) });
+    return c.json({ ok: true });
+  });
+
+  app.delete('/api/memories/:id', async (c) => {
+    const id = c.req.param('id');
+    await deps.store.deleteMemory(id);
+    await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_memory_deleted', source: null, details: JSON.stringify({ id, deletedBy: 'user' }) });
     return c.json({ ok: true });
   });
 

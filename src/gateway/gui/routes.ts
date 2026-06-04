@@ -810,6 +810,9 @@ function getIndexHtml(): string {
         <button id="auth-submit" type="submit" class="btn btn-primary" style="width:100%;padding:10px;font-size:14px">Sign In</button>
       </form>
       <div id="login-error" style="color:var(--destructive);font-size:13px;margin-top:12px;text-align:center"></div>
+      <div style="text-align:center;margin-top:16px;font-size:13px;color:var(--muted)">
+        <a id="auth-toggle" href="#" onclick="toggleAuthMode();return false;" style="color:var(--primary);text-decoration:none">Already have an account? Sign in</a>
+      </div>
     </div>
   </div>
 
@@ -854,6 +857,11 @@ function getIndexHtml(): string {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
           <span class="nav-label">AI Assistant</span>
           <span class="status-dot" id="ai-dot" style="background:var(--muted)"></span>
+        </a>
+        <a class="nav-item" data-tab="memory" onclick="switchTab('memory')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <span class="nav-label">Memory</span>
+          <span class="nav-badge" id="memory-count-badge" style="display:none">0</span>
         </a>
         <div class="nav-group-label">System</div>
         <a class="nav-item" data-tab="settings" onclick="switchTab('settings')">
@@ -903,6 +911,10 @@ function getIndexHtml(): string {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
       <span>AI</span>
     </a>
+    <a data-tab="memory" onclick="switchTab('memory')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      <span>Memory</span>
+    </a>
     <a data-tab="settings" onclick="switchTab('settings')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       <span>Settings</span>
@@ -943,6 +955,7 @@ function getIndexHtml(): string {
       filterTypes: {},
       sms: { messages: null, loading: false, error: null, box: 'inbox' },
       chat: { messages: [], loading: false, error: null, aiAvailable: false, stagedSmsIds: [] },
+      memories: { items: [], loading: false, editingId: null, editContent: '', adding: false, newContent: '', error: null },
     };
     let _saveTimer = null;
 
@@ -1027,6 +1040,98 @@ function getIndexHtml(): string {
       render();
     }
 
+    function loadMemories() {
+      if (state.memories.loading) return;
+      state.memories.loading = true;
+      fetch('/api/memories').then(function(r) { return r.json(); }).then(function(d) {
+        state.memories.loading = false;
+        if (d.ok) { state.memories.items = d.memories; render(); }
+      }).catch(function() { state.memories.loading = false; });
+    }
+    window.loadMemories = loadMemories;
+
+    function deleteMemory(id) {
+      fetch('/api/memories/' + encodeURIComponent(id), { method: 'DELETE' }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) { state.memories.items = state.memories.items.filter(function(m) { return m.id !== id; }); render(); }
+      }).catch(function() {});
+    }
+    window.deleteMemory = deleteMemory;
+
+    function startEditMemory(id) {
+      var m = state.memories.items.find(function(x) { return x.id === id; });
+      if (!m) return;
+      state.memories.editingId = id;
+      state.memories.editContent = m.content;
+      render();
+    }
+    window.startEditMemory = startEditMemory;
+
+    function cancelEditMemory() {
+      state.memories.editingId = null;
+      state.memories.editContent = '';
+      render();
+    }
+    window.cancelEditMemory = cancelEditMemory;
+
+    function saveEditMemory(id) {
+      var content = state.memories.editContent.trim();
+      if (!content) return;
+      fetch('/api/memories/' + encodeURIComponent(id), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: content }),
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          state.memories.items = state.memories.items.map(function(m) {
+            return m.id === id ? Object.assign({}, m, { content: content }) : m;
+          });
+          state.memories.editingId = null;
+          state.memories.editContent = '';
+          render();
+        }
+      }).catch(function() {});
+    }
+    window.saveEditMemory = saveEditMemory;
+
+    function updateMemoryEditContent(val) {
+      state.memories.editContent = val;
+    }
+    window.updateMemoryEditContent = updateMemoryEditContent;
+
+    function toggleAddMemory() {
+      state.memories.adding = !state.memories.adding;
+      state.memories.newContent = '';
+      state.memories.error = null;
+      render();
+    }
+    window.toggleAddMemory = toggleAddMemory;
+
+    function updateNewMemoryContent(val) {
+      state.memories.newContent = val;
+    }
+    window.updateNewMemoryContent = updateNewMemoryContent;
+
+    function submitNewMemory() {
+      var content = state.memories.newContent.trim();
+      if (!content) return;
+      fetch('/api/memories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: content }),
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          loadMemories();
+          state.memories.adding = false;
+          state.memories.newContent = '';
+          state.memories.error = null;
+        } else {
+          state.memories.error = d.error || 'Failed to save';
+          render();
+        }
+      }).catch(function() { state.memories.error = 'Network error'; render(); });
+    }
+    window.submitNewMemory = submitNewMemory;
+
     function render() {
       var focused = document.activeElement;
       var focusId = focused && focused.id ? focused.id : null;
@@ -1040,7 +1145,8 @@ function getIndexHtml(): string {
         case 'google_calendar': content.innerHTML = renderCalendarTab(); break;
         case 'sms': content.innerHTML = renderSmsTab(); loadSmsMessages(); break;
         case 'ai': content.innerHTML = renderAiTab(); break;
-        case 'settings': content.innerHTML = renderSettingsTab(); break;
+        case 'memory': content.innerHTML = renderMemoryTab(); loadMemories(); break;
+        case 'settings': content.innerHTML = renderSettingsTab(); loadMemories(); break;
       }
       // Update sidebar badges and status dots
       var gmailPendingCount = state.staging.filter(function(a) { return a.source === 'gmail' && a.status === 'pending'; }).length;
@@ -1087,6 +1193,13 @@ function getIndexHtml(): string {
       var aiDot = document.getElementById('ai-dot');
       if (aiDot) {
         aiDot.style.background = state.chat.aiAvailable ? 'var(--success)' : 'var(--muted)';
+      }
+      // Memory count badge
+      var memBadge = document.getElementById('memory-count-badge');
+      if (memBadge) {
+        var mc = state.memories.items.length;
+        if (mc) { memBadge.textContent = mc; memBadge.style.display = ''; }
+        else { memBadge.style.display = 'none'; }
       }
 
       if (focusId) {
@@ -1838,6 +1951,78 @@ function getIndexHtml(): string {
     }
     window.rejectSmsAction = rejectSmsAction;
 
+    function renderMemoryTab() {
+      var mem = state.memories;
+      var total = mem.items.length;
+      var html = '<div style="max-width:640px;margin:0 auto;padding:16px">';
+
+      // Header row
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">';
+      html += '<div>';
+      html += '<h2 style="margin:0 0 2px">AI Memory</h2>';
+      html += '<p style="margin:0;font-size:13px;color:var(--muted)">' + total + ' / 50 memories saved</p>';
+      html += '</div>';
+      html += '<button class="btn ' + (mem.adding ? 'btn-ghost' : 'btn-primary') + '" onclick="toggleAddMemory()" style="font-size:13px">' + (mem.adding ? 'Cancel' : '+ Add memory') + '</button>';
+      html += '</div>';
+
+      // Error banner
+      if (mem.error) {
+        html += '<div style="padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;color:#ef4444;font-size:14px;margin-bottom:12px">' + escapeHtml(mem.error) + '</div>';
+      }
+
+      // Add form
+      if (mem.adding) {
+        html += '<div style="background:var(--card-bg);border:1px solid var(--primary);border-radius:10px;padding:14px;margin-bottom:16px">';
+        html += '<p style="margin:0 0 8px;font-size:13px;color:var(--muted)">What should the AI remember?</p>';
+        html += '<textarea id="new-memory-input" onchange="updateNewMemoryContent(this.value)" oninput="updateNewMemoryContent(this.value)" placeholder="e.g. Prefers concise replies. Works in timezone UTC+5:30." style="width:100%;min-height:70px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit">' + escapeHtml(mem.newContent) + '</textarea>';
+        html += '<div style="display:flex;gap:8px;margin-top:8px">';
+        html += '<button class="btn btn-primary" onclick="submitNewMemory()" style="font-size:13px">Save</button>';
+        html += '<button class="btn btn-ghost" onclick="toggleAddMemory()" style="font-size:13px">Cancel</button>';
+        html += '</div>';
+        html += '</div>';
+      }
+
+      // Loading
+      if (mem.loading && !total) {
+        html += '<p style="color:var(--muted);text-align:center;padding:40px 0">Loading…</p>';
+      } else if (!total && !mem.adding) {
+        html += '<div style="text-align:center;padding:60px 20px;color:var(--muted)">';
+        html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;margin-bottom:12px;opacity:0.4"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
+        html += '<p style="margin:0;font-size:15px;font-weight:500">No memories yet</p>';
+        html += '<p style="margin:8px 0 0;font-size:13px">Chat with the AI and it will save facts about you automatically, or add one manually above.</p>';
+        html += '</div>';
+      } else {
+        html += '<div style="display:grid;gap:8px">';
+        mem.items.forEach(function(m) {
+          var isEditing = mem.editingId === m.id;
+          html += '<div style="background:var(--card-bg);border:1px solid ' + (isEditing ? 'var(--primary)' : 'var(--border)') + ';border-radius:10px;padding:12px 14px;transition:border-color 0.15s">';
+          if (isEditing) {
+            html += '<textarea id="edit-memory-' + escapeAttr(m.id) + '" onchange="updateMemoryEditContent(this.value)" oninput="updateMemoryEditContent(this.value)" style="width:100%;min-height:60px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit">' + escapeHtml(mem.editContent) + '</textarea>';
+            html += '<div style="display:flex;gap:8px;margin-top:8px">';
+            html += '<button class="btn btn-primary" onclick="saveEditMemory(\\'' + escapeAttr(m.id) + '\\')" style="font-size:12px;padding:5px 12px">Save</button>';
+            html += '<button class="btn btn-ghost" onclick="cancelEditMemory()" style="font-size:12px;padding:5px 12px">Cancel</button>';
+            html += '</div>';
+          } else {
+            html += '<div style="display:flex;align-items:flex-start;gap:10px">';
+            html += '<p style="flex:1;margin:0;font-size:14px;line-height:1.55;word-break:break-word">' + escapeHtml(m.content) + '</p>';
+            html += '<div style="display:flex;gap:4px;flex-shrink:0;margin-top:1px">';
+            html += '<button onclick="startEditMemory(\\'' + escapeAttr(m.id) + '\\')" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px;font-size:13px;line-height:1">';
+            html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
+            html += '</button>';
+            html += '<button onclick="deleteMemory(\\'' + escapeAttr(m.id) + '\\')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px;font-size:16px;line-height:1">×</button>';
+            html += '</div>';
+            html += '</div>';
+            html += '<p style="margin:4px 0 0;font-size:11px;color:var(--muted)">' + new Date(m.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) + '</p>';
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      html += '</div>';
+      return html;
+    }
+
     function renderAiTab() {
       var chat = state.chat;
       if (!chat.aiAvailable) {
@@ -1845,7 +2030,7 @@ function getIndexHtml(): string {
           '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5" style="margin-bottom:16px"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>' +
           '<h3 style="margin:0 0 8px">AI Assistant not configured</h3>' +
           '<p style="color:var(--muted);font-size:14px;margin:0 0 20px">Add an API key in Settings to get started.</p>' +
-          '<button class="btn btn-primary" onclick="switchTab(\'settings\')">Go to Settings</button>' +
+          '<button class="btn btn-primary" onclick="switchTab(\\'settings\\')">Go to Settings</button>' +
           '</div>';
       }
 
@@ -1911,7 +2096,7 @@ function getIndexHtml(): string {
         '<div style="display:flex;gap:8px">' +
         '<input id="chat-input" type="text" placeholder="Ask about your data…" ' +
         'style="flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:var(--card-bg);color:var(--fg)" ' +
-        'onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();sendChatMessage();}" ' +
+        'onkeydown="if(event.key===\\'Enter\\'&&!event.shiftKey){event.preventDefault();sendChatMessage();}" ' +
         (chat.loading ? 'disabled ' : '') + '/>' +
         '<button class="btn btn-primary" onclick="sendChatMessage()" ' + (chat.loading ? 'disabled ' : '') + 'style="padding:10px 18px">Send</button>' +
         '</div></div></div>';
@@ -2037,6 +2222,10 @@ function getIndexHtml(): string {
               <span style="font-size:13px;color:\${aiConfigured ? 'var(--success)' : 'var(--muted)'}">\${aiConfigured ? '● Connected' : '○ Not configured'}</span>
             </div>
           </div>
+        </div>
+        <div class="card" style="cursor:pointer" onclick="switchTab('memory')">
+          <h2>AI Memory</h2>
+          <p style="font-size:14px;color:var(--muted);margin:0">\${state.memories.items.length} memories saved — <span style="color:var(--primary)">View &amp; manage →</span></p>
         </div>
         <div class="card">
           <h2>Audit Log</h2>
@@ -2592,6 +2781,19 @@ function getIndexHtml(): string {
     // --- Auth: signup vs login form ---
     var isSignup = false;
 
+    function setAuthMode(signup) {
+      isSignup = signup;
+      document.getElementById('login-subtitle').textContent = signup ? 'Create your account' : 'Sign in to continue';
+      document.getElementById('auth-submit').textContent = signup ? 'Create Account' : 'Sign In';
+      document.getElementById('auth-toggle').textContent = signup ? 'Already have an account? Sign in' : 'New here? Create account';
+      document.getElementById('login-error').textContent = '';
+    }
+
+    function toggleAuthMode() {
+      setAuthMode(!isSignup);
+    }
+    window.toggleAuthMode = toggleAuthMode;
+
     function handleAuthSubmit(e) {
       e.preventDefault();
       var email = document.getElementById('auth-email').value;
@@ -2607,7 +2809,7 @@ function getIndexHtml(): string {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email, password: password }),
-      }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
       .then(function(res) {
         btn.disabled = false;
         btn.textContent = isSignup ? 'Create Account' : 'Sign In';
@@ -2615,6 +2817,10 @@ function getIndexHtml(): string {
           document.getElementById('login-screen').style.display = 'none';
           document.getElementById('app').style.display = 'flex';
           fetchData();
+        } else if (res.status === 409) {
+          // Account already exists — switch to sign-in mode automatically
+          setAuthMode(false);
+          errorEl.textContent = 'Account exists. Please sign in with your password.';
         } else {
           errorEl.textContent = res.data.error || 'Authentication failed';
         }
@@ -2636,10 +2842,13 @@ function getIndexHtml(): string {
       } else {
         document.getElementById('login-screen').style.display = 'flex';
         document.getElementById('app').style.display = 'none';
-        isSignup = !data.hasUsers;
-        document.getElementById('login-subtitle').textContent = isSignup ? 'Create your account' : 'Sign in to continue';
-        document.getElementById('auth-submit').textContent = isSignup ? 'Create Account' : 'Sign In';
+        setAuthMode(!data.hasUsers);
       }
+    }).catch(function() {
+      // If status check fails, show login form (safer default than signup)
+      document.getElementById('login-screen').style.display = 'flex';
+      document.getElementById('app').style.display = 'none';
+      setAuthMode(false);
     });
   </script>
 </body>

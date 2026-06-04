@@ -87,6 +87,13 @@ CREATE TABLE IF NOT EXISTS github_repos (
   permissions TEXT NOT NULL DEFAULT '["code","issues","pull_requests"]',
   fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS ai_memories (
+  id TEXT PRIMARY KEY,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 export function createTables(db: ExecDb): void {

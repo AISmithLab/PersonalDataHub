@@ -37,6 +37,7 @@ import type {
   StagingRow,
   FilterRow,
   AuditRow,
+  MemoryRow,
   GitHubRepoRow,
   GitHubRepoInput,
   OAuthStateData,
@@ -45,7 +46,6 @@ import { createTables } from './schema-sqljs.js';
 
 export class SqlJsDataStore implements DataStore {
   private pendingStates = new Map<string, OAuthStateData>();
-  private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   private constructor(
     private readonly db: SqlJsDatabase,
@@ -98,7 +98,7 @@ export class SqlJsDataStore implements DataStore {
 
   private run(sql: string, params: unknown[] = []): void {
     this.db.run(sql, params as (string | number | null | Uint8Array)[]);
-    this.scheduleSave();
+    this.saveSync();
   }
 
   private getOne<T>(sql: string, params: unknown[] = []): T | null {
@@ -128,12 +128,9 @@ export class SqlJsDataStore implements DataStore {
     return new Date().toISOString().replace('T', ' ').substring(0, 19);
   }
 
-  private scheduleSave(): void {
-    if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => {
-      const data = this.db.export();
-      writeFileSync(this.dbPath, Buffer.from(data));
-    }, 500);
+  private saveSync(): void {
+    const data = this.db.export();
+    writeFileSync(this.dbPath, Buffer.from(data));
   }
 
   // --- Sessions ---
@@ -357,5 +354,25 @@ export class SqlJsDataStore implements DataStore {
     if (!data) return null;
     this.pendingStates.delete(state);
     return data;
+  }
+
+  // --- AI Memories ---
+
+  listMemories(): MemoryRow[] {
+    return this.getAll<MemoryRow>('SELECT * FROM ai_memories ORDER BY created_at ASC');
+  }
+
+  insertMemory(id: string, content: string): void {
+    this.run('INSERT INTO ai_memories (id, content, created_at, updated_at) VALUES (?, ?, ?, ?)',
+      [id, content, this.now(), this.now()]);
+  }
+
+  updateMemory(id: string, content: string): void {
+    this.run('UPDATE ai_memories SET content = ?, updated_at = ? WHERE id = ?',
+      [content, this.now(), id]);
+  }
+
+  deleteMemory(id: string): void {
+    this.run('DELETE FROM ai_memories WHERE id = ?', [id]);
   }
 }
