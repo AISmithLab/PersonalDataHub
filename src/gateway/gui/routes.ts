@@ -770,18 +770,30 @@ function getIndexHtml(): string {
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        padding: 10px 4px;
-        font-size: 11px;
+        padding: 12px 8px;
+        font-size: 12px;
         color: var(--muted);
         text-decoration: none;
         cursor: pointer;
-        gap: 4px;
+        gap: 6px;
         border-top: 2px solid transparent;
         transition: all 0.15s;
       }
       #bottom-nav a.active { color: var(--primary); border-top-color: var(--primary); }
-      #bottom-nav a svg { width: 20px; height: 20px; }
+      #bottom-nav a svg { width: 22px; height: 22px; }
       #bottom-nav .nav-badge { font-size: 10px; padding: 1px 5px; }
+
+      /* Chat container — full height minus bottom nav + padding */
+      .chat-container { height: calc(100dvh - 86px); display: flex; flex-direction: column; }
+
+      /* Large source tiles on mobile overview */
+      .source-tile {
+        padding: 20px 18px;
+        min-height: 90px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
 
       /* Increase touch targets */
       .btn { min-height: 44px; padding: 10px 18px; }
@@ -790,9 +802,9 @@ function getIndexHtml(): string {
       .email-row-btn { padding: 16px 12px; }
 
       /* Main content needs bottom padding to avoid bottom nav overlap */
-      .main-content { padding-bottom: 64px; }
+      .main-content { padding-bottom: 80px; }
     }
-    @media (min-width: 769px) { #bottom-nav { display: none; } }
+    @media (min-width: 769px) { #bottom-nav { display: none; } .chat-container { height: calc(100vh - 80px); } }
   </style>
 </head>
 <body>
@@ -883,33 +895,11 @@ function getIndexHtml(): string {
   <nav id="bottom-nav">
     <a data-tab="overview" onclick="switchTab('overview')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-      <span>Overview</span>
-    </a>
-    <a data-tab="gmail" onclick="switchTab('gmail')">
-      <div style="position:relative;display:inline-flex">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-        <span class="nav-badge" id="bn-gmail-badge" style="display:none;position:absolute;top:-6px;right:-8px;min-width:16px">0</span>
-      </div>
-      <span>Gmail</span>
-    </a>
-    <a data-tab="google_calendar" onclick="switchTab('google_calendar')">
-      <div style="position:relative;display:inline-flex">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-        <span class="nav-badge" id="bn-cal-badge" style="display:none;position:absolute;top:-6px;right:-8px;min-width:16px">0</span>
-      </div>
-      <span>Calendar</span>
-    </a>
-    <a data-tab="github" onclick="switchTab('github')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-      <span>GitHub</span>
-    </a>
-    <a data-tab="sms" onclick="switchTab('sms')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.63 3.4 2 2 0 0 1 3.6 1.21h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16.92z"/></svg>
-      <span>SMS</span>
+      <span>Activity</span>
     </a>
     <a data-tab="ai" onclick="switchTab('ai')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-      <span>AI</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>Chat</span>
     </a>
     <a data-tab="memory" onclick="switchTab('memory')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
@@ -917,7 +907,7 @@ function getIndexHtml(): string {
     </a>
     <a data-tab="settings" onclick="switchTab('settings')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      <span>Settings</span>
+      <span>Setting</span>
     </a>
   </nav>
 
@@ -956,6 +946,7 @@ function getIndexHtml(): string {
       sms: { messages: null, loading: false, error: null, box: 'inbox' },
       chat: { messages: [], loading: false, error: null, aiAvailable: false, stagedSmsIds: [] },
       memories: { items: [], loading: false, editingId: null, editContent: '', adding: false, newContent: '', error: null },
+      settingsProvider: 'anthropic',
     };
     let _saveTimer = null;
 
@@ -997,12 +988,12 @@ function getIndexHtml(): string {
             } else {
               state.emailsError = data.error || 'Failed to load emails';
             }
-            render();
+            if (currentTab === 'gmail') render();
           })
           .catch(function(err) {
             state.emailsLoading = false;
             state.emailsError = err.message || 'Network error';
-            render();
+            if (currentTab === 'gmail') render();
           });
       }
 
@@ -1021,12 +1012,12 @@ function getIndexHtml(): string {
             } else {
               state.eventsError = data.error || 'Failed to load events';
             }
-            render();
+            if (currentTab === 'google_calendar') render();
           })
           .catch(function(err) {
             state.eventsLoading = false;
             state.eventsError = err.message || 'Network error';
-            render();
+            if (currentTab === 'google_calendar') render();
           });
       }
       // Check AI configuration status
@@ -1045,7 +1036,14 @@ function getIndexHtml(): string {
       state.memories.loading = true;
       fetch('/api/memories').then(function(r) { return r.json(); }).then(function(d) {
         state.memories.loading = false;
-        if (d.ok) { state.memories.items = d.memories; render(); }
+        if (d.ok) {
+          state.memories.items = d.memories;
+          if (currentTab === 'memory') render();
+          else {
+            var el = document.getElementById('mem-count-display');
+            if (el) el.textContent = d.memories.length + ' memories saved';
+          }
+        }
       }).catch(function() { state.memories.loading = false; });
     }
     window.loadMemories = loadMemories;
@@ -1144,7 +1142,7 @@ function getIndexHtml(): string {
         case 'github': content.innerHTML = renderGitHubTab(); break;
         case 'google_calendar': content.innerHTML = renderCalendarTab(); break;
         case 'sms': content.innerHTML = renderSmsTab(); loadSmsMessages(); break;
-        case 'ai': content.innerHTML = renderAiTab(); break;
+        case 'ai': content.innerHTML = renderAiTab(); var _cm = document.getElementById('chat-messages'); if (_cm) _cm.scrollTop = _cm.scrollHeight; break;
         case 'memory': content.innerHTML = renderMemoryTab(); loadMemories(); break;
         case 'settings': content.innerHTML = renderSettingsTab(); loadMemories(); break;
       }
@@ -1256,59 +1254,71 @@ function getIndexHtml(): string {
         </div>
 
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px">
-          <div class="card" style="cursor:pointer" onclick="switchTab('gmail')">
+          <div class="card source-tile" style="cursor:pointer" onclick="switchTab('sms')">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.63 3.4 2 2 0 0 1 3.6 1.21h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16.92z"/></svg>
+                <span style="font-weight:600;font-size:15px">SMS</span>
+              </div>
+              <span class="status-dot status-dot-connected"></span>
+            </div>
+            <p style="font-size:14px;color:var(--muted);margin-bottom:8px">Messages via Android bridge</p>
+            <div style="display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Open <span style="font-size:14px">&rarr;</span></div>
+          </div>
+
+          <div class="card source-tile" style="cursor:pointer" onclick="switchTab('gmail')">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
               <div style="display:flex;align-items:center;gap:8px">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                <span style="font-weight:600;font-size:14px">Gmail</span>
+                <span style="font-weight:600;font-size:15px">Email</span>
               </div>
               <span class="status-dot \${gmailConnected ? 'status-dot-connected' : 'status-dot-disconnected'}"></span>
             </div>
             \${gmailConnected && gmailAccount && gmailAccount.email ? '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">' + gmailAccount.email + '</p>' : '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">Not connected</p>'}
             <div style="display:flex;align-items:center;justify-content:space-between">
-              <span style="font-size:14px;color:var(--muted)">Filters: <strong class="font-mono" style="color:var(--fg)">\${activeFilterCount} active</strong></span>
+              <span style="font-size:13px;color:var(--muted)">Filters: <strong class="font-mono" style="color:var(--fg)">\${activeFilterCount} active</strong></span>
               \${pendingCount ? '<span class="nav-badge">' + pendingCount + ' pending</span>' : ''}
             </div>
-            <div style="margin-top:12px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
+            <div style="margin-top:10px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
           </div>
 
-          <div class="card" style="cursor:pointer" onclick="switchTab('google_calendar')">
+          <div class="card source-tile" style="cursor:pointer" onclick="switchTab('google_calendar')">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
               <div style="display:flex;align-items:center;gap:8px">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                <span style="font-weight:600;font-size:14px">Calendar</span>
+                <span style="font-weight:600;font-size:15px">Calendar</span>
               </div>
               <span class="status-dot \${calConnected ? 'status-dot-connected' : 'status-dot-disconnected'}"></span>
             </div>
             \${calConnected && calAccount && calAccount.email ? '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">' + calAccount.email + '</p>' : '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">Not connected</p>'}
             <div style="display:flex;align-items:center;justify-content:space-between">
-              <span style="font-size:14px;color:var(--muted)">Filters: <strong class="font-mono" style="color:var(--fg)">\${activeCalFilterCount} active</strong></span>
+              <span style="font-size:13px;color:var(--muted)">Filters: <strong class="font-mono" style="color:var(--fg)">\${activeCalFilterCount} active</strong></span>
             </div>
-            <div style="margin-top:12px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
+            <div style="margin-top:10px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
           </div>
 
-          <div class="card" style="cursor:pointer" onclick="switchTab('github')">
+          <div class="card source-tile" style="cursor:pointer" onclick="switchTab('github')">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
               <div style="display:flex;align-items:center;gap:8px">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-                <span style="font-weight:600;font-size:14px">GitHub</span>
+                <span style="font-weight:600;font-size:15px">GitHub</span>
               </div>
               <span class="status-dot \${ghConnected ? 'status-dot-connected' : 'status-dot-disconnected'}"></span>
             </div>
             \${ghConnected && ghAccount && ghAccount.login ? '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">@' + ghAccount.login + '</p>' : '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">Not connected</p>'}
             <div style="display:flex;align-items:center;justify-content:space-between">
-              <span style="font-size:14px;color:var(--muted)">Repos: <strong class="font-mono" style="color:var(--fg)">\${enabledRepos} selected</strong></span>
+              <span style="font-size:13px;color:var(--muted)">Repos: <strong class="font-mono" style="color:var(--fg)">\${enabledRepos} selected</strong></span>
             </div>
-            <div style="margin-top:12px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
+            <div style="margin-top:10px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
           </div>
 
-          <div class="card" style="cursor:pointer" onclick="switchTab('settings')">
+          <div class="card source-tile" style="cursor:pointer" onclick="switchTab('settings')">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-              <span style="font-weight:600;font-size:14px">Audit Log</span>
+              <span style="font-weight:600;font-size:15px">Audit Log</span>
             </div>
             <span style="font-size:14px;color:var(--muted)"><strong class="font-mono" style="color:var(--fg)">\${state.audit.length}</strong> events recorded</span>
-            <div style="margin-top:12px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">View log <span style="font-size:14px">&rarr;</span></div>
+            <div style="margin-top:10px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">View log <span style="font-size:14px">&rarr;</span></div>
           </div>
         </div>
 
@@ -2082,7 +2092,7 @@ function getIndexHtml(): string {
         ? '<div style="padding:8px 12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;color:var(--destructive);font-size:13px;margin-top:8px">' + escapeHtml(chat.error) + '</div>'
         : '';
 
-      return '<div style="display:flex;flex-direction:column;height:calc(100vh - 80px)">' +
+      return '<div class="chat-container">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)">' +
         '<h2 style="margin:0;display:flex;align-items:center;gap:8px">' +
         '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>' +
@@ -2154,10 +2164,38 @@ function getIndexHtml(): string {
     }
     window.clearChat = clearChat;
 
+    function selectProvider(val) {
+      state.settingsProvider = val;
+      var customUrls = { anthropic: 'https://api.anthropic.com/v1', openai: '', groq: 'https://api.groq.com/openai/v1', google: 'https://generativelanguage.googleapis.com/v1beta/openai/', ollama: 'http://localhost:11434/v1' };
+      var defaultModels = { anthropic: 'claude-sonnet-4-6', openai: 'gpt-4o', groq: 'llama-3.3-70b-versatile', google: 'gemini-2.0-flash', ollama: 'llama3' };
+      var urlEl = document.getElementById('ai-base-url');
+      var modelEl = document.getElementById('ai-model');
+      if (urlEl) urlEl.placeholder = customUrls[val] || 'https://...';
+      if (modelEl && !modelEl.value) modelEl.placeholder = defaultModels[val] || 'model name';
+      // Re-render just the provider pills without clobbering focused inputs
+      var pillsEl = document.getElementById('provider-pills');
+      if (pillsEl) pillsEl.innerHTML = renderProviderPills();
+    }
+    window.selectProvider = selectProvider;
+
+    function renderProviderPills() {
+      var providers = [
+        { value: 'anthropic', label: 'Anthropic' },
+        { value: 'openai', label: 'OpenAI' },
+        { value: 'groq', label: 'Groq' },
+        { value: 'google', label: 'Google' },
+        { value: 'ollama', label: 'Ollama' },
+      ];
+      return providers.map(function(p) {
+        var sel = state.settingsProvider === p.value;
+        return '<button onclick="selectProvider(\\'' + p.value + '\\')" style="padding:9px 16px;border:1px solid ' + (sel ? 'var(--primary)' : 'var(--border)') + ';border-radius:20px;background:' + (sel ? 'rgba(15,160,129,0.1)' : 'var(--card)') + ';color:' + (sel ? 'var(--primary)' : 'var(--fg)') + ';font-size:14px;font-weight:' + (sel ? '600' : '400') + ';cursor:pointer;font-family:inherit;white-space:nowrap">' + p.label + '</button>';
+      }).join('');
+    }
+
     function saveAiKey() {
       var key = document.getElementById('ai-api-key').value.trim();
       var model = document.getElementById('ai-model').value.trim();
-      var provider = document.getElementById('ai-provider').value.trim();
+      var provider = state.settingsProvider;
       var baseUrl = document.getElementById('ai-base-url').value.trim();
       if (!key) { alert('API key is required'); return; }
       fetch('/api/settings/ai-key', {
@@ -2176,15 +2214,7 @@ function getIndexHtml(): string {
     }
     window.saveAiKey = saveAiKey;
 
-    function toggleAiBaseUrl() {
-      var provider = document.getElementById('ai-provider').value;
-      var customUrls = { anthropic: 'https://api.anthropic.com/v1', openai: '', groq: 'https://api.groq.com/openai/v1', google: 'https://generativelanguage.googleapis.com/v1beta/openai/', ollama: 'http://localhost:11434/v1' };
-      var defaultModels = { anthropic: 'claude-sonnet-4-6', openai: 'gpt-4o', groq: 'llama-3.3-70b-versatile', google: 'gemini-2.0-flash', ollama: 'llama3' };
-      var urlEl = document.getElementById('ai-base-url');
-      var modelEl = document.getElementById('ai-model');
-      if (urlEl) urlEl.placeholder = customUrls[provider] || 'https://...';
-      if (modelEl && !modelEl.value) modelEl.placeholder = defaultModels[provider] || 'model name';
-    }
+    function toggleAiBaseUrl() { /* kept for compatibility; logic moved to selectProvider */ }
     window.toggleAiBaseUrl = toggleAiBaseUrl;
 
     function renderSettingsTab() {
@@ -2195,14 +2225,8 @@ function getIndexHtml(): string {
           <p style="font-size:14px;color:var(--muted);margin-bottom:16px">Connect any OpenAI-compatible AI provider.</p>
           <div style="display:grid;gap:12px;max-width:480px">
             <div>
-              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px">Provider</label>
-              <select id="ai-provider" onchange="toggleAiBaseUrl()" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg);color:var(--fg);font-size:14px">
-                <option value="anthropic">Anthropic (Claude)</option>
-                <option value="openai">OpenAI (GPT)</option>
-                <option value="groq">Groq</option>
-                <option value="google">Google (Gemini)</option>
-                <option value="ollama">Ollama (local)</option>
-              </select>
+              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:8px">Provider</label>
+              <div id="provider-pills" style="display:flex;flex-wrap:wrap;gap:8px">\${renderProviderPills()}</div>
             </div>
             <div>
               <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px">API Key</label>
@@ -2225,7 +2249,7 @@ function getIndexHtml(): string {
         </div>
         <div class="card" style="cursor:pointer" onclick="switchTab('memory')">
           <h2>AI Memory</h2>
-          <p style="font-size:14px;color:var(--muted);margin:0">\${state.memories.items.length} memories saved — <span style="color:var(--primary)">View &amp; manage →</span></p>
+          <p id="mem-count-display" style="font-size:14px;color:var(--muted);margin:0">\${state.memories.items.length} memories saved — <span style="color:var(--primary)">View &amp; manage →</span></p>
         </div>
         <div class="card">
           <h2>Audit Log</h2>
@@ -2833,19 +2857,34 @@ function getIndexHtml(): string {
     }
     window.handleAuthSubmit = handleAuthSubmit;
 
-    // Check auth on load
+    // Check auth on load — auto-login for single-device use
     fetch('/api/auth/status').then(function(r) { return r.json(); }).then(function(data) {
       if (data.authenticated) {
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('app').style.display = 'flex';
         fetchData();
       } else {
-        document.getElementById('login-screen').style.display = 'flex';
-        document.getElementById('app').style.display = 'none';
-        setAuthMode(!data.hasUsers);
+        // Auto-create user + session (device is localhost — no credentials needed)
+        fetch('/auth/device-login', { method: 'POST' })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (d.ok) {
+              document.getElementById('login-screen').style.display = 'none';
+              document.getElementById('app').style.display = 'flex';
+              fetchData();
+            } else {
+              document.getElementById('login-screen').style.display = 'flex';
+              document.getElementById('app').style.display = 'none';
+              setAuthMode(!data.hasUsers);
+            }
+          })
+          .catch(function() {
+            document.getElementById('login-screen').style.display = 'flex';
+            document.getElementById('app').style.display = 'none';
+            setAuthMode(false);
+          });
       }
     }).catch(function() {
-      // If status check fails, show login form (safer default than signup)
       document.getElementById('login-screen').style.display = 'flex';
       document.getElementById('app').style.display = 'none';
       setAuthMode(false);
