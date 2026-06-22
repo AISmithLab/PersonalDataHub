@@ -13,7 +13,7 @@
  */
 
 import { join, dirname } from 'node:path';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import { serve } from '@hono/node-server';
@@ -78,7 +78,33 @@ async function main() {
 
   serve({ fetch: app.fetch, port, hostname: '127.0.0.1' }, () => {
     console.log(`[PDH Android] Server running on http://127.0.0.1:${port}`);
+    // Drain any SMS queue files written by SmsReceiver while the server was down
+    drainSmsQueue(dataDir, port);
   });
+}
+
+async function drainSmsQueue(dir: string, port: number) {
+  const queueDir = join(dir, 'sms_queue');
+  if (!existsSync(queueDir)) return;
+  let files: string[];
+  try { files = readdirSync(queueDir).filter(f => f.endsWith('.json')); } catch { return; }
+  for (const file of files) {
+    const filePath = join(queueDir, file);
+    try {
+      const body = readFileSync(filePath, 'utf-8');
+      const res = await fetch(`http://127.0.0.1:${port}/sms/auto-reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      if (res.ok) {
+        unlinkSync(filePath);
+        console.log(`[PDH Android] Drained queued SMS: ${file}`);
+      }
+    } catch (e) {
+      console.warn(`[PDH Android] Failed to drain ${file}:`, e);
+    }
+  }
 }
 
 main().catch((err) => {

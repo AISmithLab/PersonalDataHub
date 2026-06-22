@@ -49,11 +49,16 @@ const deploymentSchema = z.object({
   dynamodb_table: z.string().optional(),
 });
 
+const autoReplySchema = z.object({
+  enabled: z.boolean().default(false),
+});
+
 export const hubConfigSchema = z.object({
   deployment: deploymentSchema.default({ gateway: 'local', database: 'sqlite' }),
   sources: z.record(z.string(), sourceConfigSchema).default({}),
   encryption_key: z.string().optional(),
   ai: aiProviderSchema.optional(),
+  autoReply: autoReplySchema.optional(),
   port: z.number().default(3000),
 });
 

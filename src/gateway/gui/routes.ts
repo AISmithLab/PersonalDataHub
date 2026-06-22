@@ -497,7 +497,7 @@ function getIndexHtml(): string {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>PersonalDataHub</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -524,7 +524,7 @@ function getIndexHtml(): string {
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); font-size: 15px; line-height: 1.6; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); font-size: 15px; line-height: 1.6; padding-top: env(safe-area-inset-top, 0px); }
 
     /* ---- Layout: sidebar + main ---- */
     #app { display: flex; min-height: 100vh; }
@@ -801,8 +801,11 @@ function getIndexHtml(): string {
       .nav-item { padding: 12px 16px; }
       .email-row-btn { padding: 16px 12px; }
 
-      /* Main content needs bottom padding to avoid bottom nav overlap */
-      .main-content { padding-bottom: 80px; }
+      /* Main content needs bottom padding to clear bottom nav + gesture bar */
+      .main-content { padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+
+      /* Chat container: full screen minus top inset, bottom nav, and gesture bar */
+      .chat-container { height: calc(100dvh - 86px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); }
     }
     @media (min-width: 769px) { #bottom-nav { display: none; } .chat-container { height: calc(100vh - 80px); } }
   </style>
@@ -943,10 +946,11 @@ function getIndexHtml(): string {
       eventsLoading: false,
       eventsError: null,
       filterTypes: {},
-      sms: { messages: null, loading: false, error: null, box: 'inbox' },
+      sms: { messages: null, loading: false, error: null, box: 'inbox', contextMenu: null, autoReplying: false },
       chat: { messages: [], loading: false, error: null, aiAvailable: false, stagedSmsIds: [] },
       memories: { items: [], loading: false, editingId: null, editContent: '', adding: false, newContent: '', error: null },
       settingsProvider: 'anthropic',
+      autoReply: { enabled: false, loading: false, testResult: null, testLoading: false },
     };
     let _saveTimer = null;
 
@@ -1025,6 +1029,14 @@ function getIndexHtml(): string {
         if (d.ok) {
           state.chat.aiAvailable = d.configured;
           if (currentTab === 'ai') render();
+        }
+      }).catch(function() { /* non-fatal */ });
+
+      // Check auto-reply status
+      fetch('/api/settings/auto-reply').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          state.autoReply.enabled = d.enabled;
+          if (currentTab === 'settings') render();
         }
       }).catch(function() { /* non-fatal */ });
 
@@ -1835,7 +1847,7 @@ function getIndexHtml(): string {
           var unread = !msg.read;
           var body = msg.body || '';
           var snippet = body.length > 80 ? body.substring(0, 80) + '…' : body;
-          listHtml += '<div class="email-row' + (unread ? '' : '') + '">' +
+          listHtml += '<div class="email-row" data-address="' + escapeAttr(msg.address || '') + '" data-body="' + escapeAttr(body) + '" ontouchstart="smsLongPressStart(this)" ontouchend="smsLongPressEnd()" ontouchmove="smsLongPressEnd()" style="user-select:none;-webkit-user-select:none">' +
             '<div class="email-row-btn" style="display:flex;align-items:flex-start;gap:10px">' +
             (unread ? '<div style="width:6px;height:6px;border-radius:50%;background:var(--primary);flex-shrink:0;margin-top:5px"></div>' : '<div style="width:6px;flex-shrink:0"></div>') +
             '<div style="flex:1;min-width:0">' +
@@ -1846,6 +1858,34 @@ function getIndexHtml(): string {
             '<div class="email-row-snippet">' + escapeHtml(snippet) + '</div>' +
             '</div></div></div>';
         });
+      }
+
+      var cm = sms.contextMenu;
+      var cmHtml = '';
+      if (cm) {
+        var statusHtml = '';
+        if (cm.status === 'thinking') {
+          statusHtml = '<div style="display:flex;align-items:center;gap:10px;padding:14px 0;color:var(--muted);font-size:14px"><div class="spinner"></div>Generating reply…</div>';
+        } else if (cm.status === 'sending') {
+          statusHtml = '<div style="padding:14px 0;font-size:14px"><div style="color:var(--muted);font-size:12px;margin-bottom:6px">Sending:</div><div style="font-style:italic">"' + escapeHtml(cm.reply || '') + '"</div></div>';
+        } else if (cm.status === 'sent') {
+          statusHtml = '<div style="padding:14px 0;color:var(--success,#22c55e);font-size:14px">✓ Reply sent</div>';
+        } else if (cm.status === 'error') {
+          statusHtml = '<div style="padding:14px 0;color:var(--danger,#ef4444);font-size:13px">' + escapeHtml(cm.error || 'Error') + '</div>';
+        }
+        var isDone = cm.status === 'sent' || cm.status === 'error';
+        cmHtml = '<div style="position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.45);display:flex;align-items:flex-end" onclick="hideSmsContextMenu()">' +
+          '<div style="width:100%;background:var(--card-bg);border-radius:20px 20px 0 0;padding:20px;padding-bottom:calc(20px + env(safe-area-inset-bottom,0px))" onclick="event.stopPropagation()">' +
+          '<div style="width:36px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px"></div>' +
+          '<div style="font-weight:600;font-size:15px;margin-bottom:2px">' + escapeHtml(cm.address) + '</div>' +
+          '<div style="font-size:13px;color:var(--muted);margin-bottom:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml((cm.body || '').slice(0, 60)) + '</div>' +
+          statusHtml +
+          (!cm.status || cm.status === 'error' ? '<button class="btn btn-primary" style="width:100%;margin-bottom:10px" onclick="manualAutoReply()">' +
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
+            'Reply automatically</button>' : '') +
+          (isDone ? '<button class="btn btn-outline" style="width:100%" onclick="hideSmsContextMenu()">Close</button>' :
+            '<button class="btn btn-outline" style="width:100%" onclick="hideSmsContextMenu()">Cancel</button>') +
+          '</div></div>';
       }
 
       return \`
@@ -1865,6 +1905,7 @@ function getIndexHtml(): string {
           </div>
           \${listHtml}
         </div>
+        \${cmHtml}
       \`;
     }
 
@@ -1949,6 +1990,71 @@ function getIndexHtml(): string {
       window.AndroidSms.sendMessage(cbId, to, body);
     }
     window.sendSmsAction = sendSmsAction;
+
+    // Long-press context menu for SMS messages
+    var _smsLongPressTimer = null;
+    function smsLongPressStart(el) {
+      var address = el.getAttribute('data-address');
+      var body = el.getAttribute('data-body');
+      _smsLongPressTimer = setTimeout(function() {
+        _smsLongPressTimer = null;
+        // Haptic feedback if available
+        if (navigator.vibrate) navigator.vibrate(40);
+        state.sms.contextMenu = { address: address, body: body, status: null };
+        render();
+      }, 600);
+    }
+    function smsLongPressEnd() {
+      if (_smsLongPressTimer) { clearTimeout(_smsLongPressTimer); _smsLongPressTimer = null; }
+    }
+    function hideSmsContextMenu() {
+      state.sms.contextMenu = null;
+      state.sms.autoReplying = false;
+      render();
+    }
+    async function manualAutoReply() {
+      var cm = state.sms.contextMenu;
+      if (!cm || state.sms.autoReplying) return;
+      if (!window.AndroidSms) { alert('SMS is only available on Android.'); return; }
+      state.sms.autoReplying = true;
+      state.sms.contextMenu = Object.assign({}, cm, { status: 'thinking' });
+      render();
+      try {
+        var res = await fetch('/api/sms/manual-reply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: cm.address, body: cm.body }),
+        });
+        var d = await res.json();
+        if (!d.ok || !d.reply) {
+          state.sms.contextMenu = Object.assign({}, cm, { status: 'error', error: d.error || 'No reply generated' });
+          state.sms.autoReplying = false;
+          render();
+          return;
+        }
+        state.sms.contextMenu = Object.assign({}, cm, { status: 'sending', reply: d.reply });
+        render();
+        var cbId = 'manual_' + Date.now();
+        window._smsSendCbs[cbId] = function(error) {
+          if (error && error !== 'null') {
+            state.sms.contextMenu = Object.assign({}, state.sms.contextMenu, { status: 'error', error: 'Send failed: ' + error });
+          } else {
+            state.sms.contextMenu = Object.assign({}, state.sms.contextMenu, { status: 'sent' });
+          }
+          state.sms.autoReplying = false;
+          render();
+        };
+        window.AndroidSms.sendMessage(cbId, cm.address, d.reply);
+      } catch(e) {
+        state.sms.contextMenu = Object.assign({}, cm, { status: 'error', error: e.message || 'Network error' });
+        state.sms.autoReplying = false;
+        render();
+      }
+    }
+    window.smsLongPressStart = smsLongPressStart;
+    window.smsLongPressEnd = smsLongPressEnd;
+    window.hideSmsContextMenu = hideSmsContextMenu;
+    window.manualAutoReply = manualAutoReply;
 
     async function rejectSmsAction(actionId) {
       await fetch('/api/staging/' + actionId + '/resolve', {
@@ -2214,6 +2320,61 @@ function getIndexHtml(): string {
     }
     window.saveAiKey = saveAiKey;
 
+    async function setAutoReply(enabled) {
+      if (state.autoReply.loading) return;
+      state.autoReply.loading = true;
+      render();
+      try {
+        var res = await fetch('/api/settings/auto-reply', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: enabled })
+        });
+        var d = await res.json();
+        if (d.ok) {
+          state.autoReply.enabled = d.enabled;
+          // Request RECEIVE_SMS permission when enabling on Android
+          if (enabled && window.AndroidSms) {
+            var reqId = 'rcvsms_' + Date.now();
+            window.AndroidSms.getMessages(reqId, 'inbox', 1); // triggers permission request for SMS group
+          }
+        }
+      } catch(e) { /* non-fatal */ }
+      state.autoReply.loading = false;
+      render();
+    }
+    window.setAutoReply = setAutoReply;
+
+    async function testAutoReply() {
+      if (state.autoReply.testLoading) return;
+      state.autoReply.testLoading = true;
+      state.autoReply.testResult = null;
+      render();
+      try {
+        var fakeFrom = '+1555' + Math.floor(1000000 + Math.random() * 9000000);
+        var res = await fetch('/sms/auto-reply', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: fakeFrom, body: 'Hey, are you free later?' })
+        });
+        var d = await res.json();
+        if (!d.ok) {
+          state.autoReply.testResult = { ok: false, msg: d.error || 'Server error' };
+        } else if (!d.enabled) {
+          state.autoReply.testResult = { ok: false, msg: 'Toggle is OFF — enable it above first' };
+        } else if (d.skipped) {
+          state.autoReply.testResult = { ok: false, msg: 'Skipped: ' + (d.reason || 'unknown reason') };
+        } else if (d.reply) {
+          state.autoReply.testResult = { ok: true, msg: 'AI replied: "' + d.reply + '"' };
+        } else {
+          state.autoReply.testResult = { ok: false, msg: 'No reply generated' };
+        }
+      } catch(e) {
+        state.autoReply.testResult = { ok: false, msg: 'Network error: ' + (e.message || e) };
+      }
+      state.autoReply.testLoading = false;
+      render();
+    }
+    window.testAutoReply = testAutoReply;
+
     function toggleAiBaseUrl() { /* kept for compatibility; logic moved to selectProvider */ }
     window.toggleAiBaseUrl = toggleAiBaseUrl;
 
@@ -2245,6 +2406,26 @@ function getIndexHtml(): string {
               <span id="ai-flash" style="font-size:13px;color:var(--success);opacity:0;transition:opacity 0.3s">Saved</span>
               <span style="font-size:13px;color:\${aiConfigured ? 'var(--success)' : 'var(--muted)'}">\${aiConfigured ? '● Connected' : '○ Not configured'}</span>
             </div>
+          </div>
+        </div>
+        <div class="card">
+          <h2>SMS Auto-Reply</h2>
+          <p style="font-size:14px;color:var(--muted);margin-bottom:16px">AI automatically replies to incoming SMS while the app is running.</p>
+          <div style="display:flex;align-items:center;gap:14px">
+            <label style="position:relative;display:inline-block;width:44px;height:24px;margin:0;cursor:\${state.autoReply.loading ? 'wait' : 'pointer'}">
+              <input type="checkbox" \${state.autoReply.enabled ? 'checked' : ''} onchange="setAutoReply(this.checked)" \${state.autoReply.loading ? 'disabled' : ''} style="opacity:0;width:0;height:0">
+              <span style="position:absolute;inset:0;background:\${state.autoReply.enabled ? 'var(--primary)' : '#ccc'};border-radius:12px;transition:background 0.2s"></span>
+              <span style="position:absolute;left:\${state.autoReply.enabled ? '22px' : '2px'};top:2px;width:20px;height:20px;background:#fff;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.2)"></span>
+            </label>
+            <span style="font-size:14px;color:\${state.autoReply.enabled ? 'var(--fg)' : 'var(--muted)'}">
+              \${state.autoReply.enabled ? 'Enabled — AI will reply to incoming SMS' : 'Disabled'}
+            </span>
+          </div>
+          \${state.autoReply.enabled ? '<p style="font-size:12px;color:var(--muted);margin:10px 0 0">Replies within ~5 seconds. Short codes and repeat senders (within 1 hour) are skipped. Check Audit Log for history.</p>' : ''}
+          \${!state.chat.aiAvailable && state.autoReply.enabled ? '<p style="font-size:12px;color:var(--warning,#f59e0b);margin:8px 0 0">AI key required — configure it above first.</p>' : ''}
+          <div style="margin-top:14px;display:flex;align-items:center;gap:12px">
+            <button class="btn" onclick="testAutoReply()" \${state.autoReply.testLoading ? 'disabled' : ''} style="font-size:13px;padding:7px 14px">\${state.autoReply.testLoading ? 'Testing...' : 'Test auto-reply'}</button>
+            \${state.autoReply.testResult ? '<span style="font-size:13px;color:' + (state.autoReply.testResult.ok ? 'var(--success)' : 'var(--danger,#ef4444)') + '">' + escapeHtml(state.autoReply.testResult.msg) + '</span>' : ''}
           </div>
         </div>
         <div class="card" style="cursor:pointer" onclick="switchTab('memory')">
@@ -2856,6 +3037,24 @@ function getIndexHtml(): string {
       return false;
     }
     window.handleAuthSubmit = handleAuthSubmit;
+
+    // Poll for pending auto-replies (generated by SmsReceiver → server) and send via AndroidSms
+    setInterval(async function() {
+      if (!state.autoReply.enabled || !window.AndroidSms) return;
+      try {
+        var res = await fetch('/api/sms/pending-replies');
+        var d = await res.json();
+        if (!d.ok || !d.replies || !d.replies.length) return;
+        d.replies.forEach(function(r) {
+          var cbId = 'autoreply_' + r.id;
+          window._smsSendCbs[cbId] = function(error) {
+            if (error) console.warn('[auto-reply] send error:', error);
+            fetch('/api/sms/pending-replies/' + r.id, { method: 'DELETE' }).catch(function() {});
+          };
+          window.AndroidSms.sendMessage(cbId, r.to, r.body);
+        });
+      } catch(e) { /* non-fatal */ }
+    }, 3000);
 
     // Check auth on load — auto-login for single-device use
     fetch('/api/auth/status').then(function(r) { return r.json(); }).then(function(data) {

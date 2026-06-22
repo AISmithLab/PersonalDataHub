@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.READ_SMS" />
     <!-- SEND_SMS is required for AI-assisted replies (runtime permission, requested on first use) -->
     <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- RECEIVE_SMS is required for the auto-reply feature (same permission group as READ_SMS) -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
 
     <application
         android:allowBackup="true"
@@ -49,6 +51,14 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Auto-reply: receives incoming SMS and calls the local Node.js server -->
+        <receiver android:name=".SmsReceiver"
+            android:exported="true">
+            <intent-filter android:priority="0">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
+            </intent-filter>
+        </receiver>
 
     </application>
 

@@ -29,6 +29,13 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
 
 const MAX_TOOL_ROUNDS = 5;
 
+// Rate limiting: one auto-reply per sender per hour (in-memory, resets on server restart)
+const autoReplyRateLimit = new Map<string, number>();
+const AUTO_REPLY_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+
+// Pending auto-replies waiting to be picked up and sent by the WebView (expires after 60s)
+const pendingAutoReplies = new Map<string, { to: string; body: string; createdAt: number }>();
+
 function parseCookie(cookieHeader: string, name: string): string | null {
   const match = cookieHeader.match(new RegExp('(?:^|;)\\s*' + name + '=([^;]*)'));
   return match ? decodeURIComponent(match[1]) : null;
@@ -575,6 +582,190 @@ export function createChatRoutes(deps: ServerDeps): Hono {
       console.error('[chat] error:', message);
       return c.json({ ok: false, error: message }, 500);
     }
+  });
+
+  // Auto-reply toggle — session-protected
+  app.get('/api/settings/auto-reply', async (c) => {
+    return c.json({ ok: true, enabled: deps.config.autoReply?.enabled ?? false });
+  });
+
+  app.post('/api/settings/auto-reply', async (c) => {
+    const body = await c.req.json();
+    const enabled = Boolean(body.enabled);
+    if (!deps.config.autoReply) {
+      (deps.config as Record<string, unknown>).autoReply = { enabled };
+    } else {
+      deps.config.autoReply.enabled = enabled;
+    }
+    const configPath = process.env.PDH_CONFIG_PATH;
+    if (configPath) {
+      try {
+        const parsed = parseYaml(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+        parsed.autoReply = { enabled };
+        writeFileSync(configPath, stringifyYaml(parsed), 'utf-8');
+      } catch (e) {
+        console.warn('[chat] autoReply persist failed (in-memory update succeeded):', e);
+      }
+    }
+    return c.json({ ok: true, enabled });
+  });
+
+  // Auto-reply execute — called by Android SmsReceiver.
+  // Uses /sms/ prefix (not /api/) to bypass session middleware; safe because server only binds to 127.0.0.1.
+  app.post('/sms/auto-reply', async (c) => {
+    if (!deps.config.autoReply?.enabled) {
+      return c.json({ ok: true, enabled: false });
+    }
+    if (!deps.config.ai?.api_key) {
+      return c.json({ ok: false, error: 'AI not configured' });
+    }
+
+    const body = await c.req.json();
+    const from: string = body.from ?? '';
+    const smsBody: string = body.body ?? '';
+    if (!from || !smsBody) {
+      return c.json({ ok: false, error: 'from and body required' }, 400);
+    }
+
+    // Log every incoming request so the Audit Log shows what address was received
+    await deps.store.insertAuditEntry({
+      timestamp: new Date().toISOString(),
+      event: 'sms_received',
+      source: 'sms',
+      details: JSON.stringify({ from, body: smsBody.slice(0, 100) }),
+    });
+
+    // Skip purely numeric short codes (< 5 digits, no letters)
+    const hasAlpha = /[a-zA-Z]/.test(from);
+    const digits = from.replace(/\D/g, '');
+    if (!hasAlpha && digits.length < 5) {
+      return c.json({ ok: true, enabled: true, skipped: true, reason: 'short_code' });
+    }
+
+    // Rate limit: one reply per sender per hour
+    const now = Date.now();
+    const lastReply = autoReplyRateLimit.get(from);
+    if (lastReply !== undefined && now - lastReply < AUTO_REPLY_COOLDOWN_MS) {
+      return c.json({ ok: true, enabled: true, skipped: true, reason: 'rate_limited' });
+    }
+
+    try {
+      const client = getClient(deps);
+      const model = getModel(deps);
+      const memories = await deps.store.listMemories();
+      const today = new Date().toISOString().split('T')[0];
+
+      const systemLines = [
+        `You are an AI SMS auto-reply assistant on the user's Android phone. Today is ${today}.`,
+        'Reply concisely and naturally to the incoming SMS. Match the tone — casual for personal contacts, professional for business.',
+        'Keep replies short: 1-2 sentences. Do not identify yourself as AI unless asked.',
+        'Reply with just the message text — no quotes, no labels, no preamble.',
+      ];
+      if (memories.length > 0) {
+        systemLines.push('', 'Context about the user:');
+        memories.forEach(m => systemLines.push(`  ${m.content}`));
+      }
+
+      const response = await client.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: systemLines.join('\n') },
+          { role: 'user', content: `Incoming SMS from ${from}: "${smsBody}"` },
+        ],
+        max_tokens: 200,
+      });
+
+      const reply = response.choices[0]?.message?.content?.trim() ?? '';
+      if (!reply) {
+        return c.json({ ok: false, error: 'No reply generated' });
+      }
+
+      autoReplyRateLimit.set(from, now);
+
+      // Store pending reply — WebView picks it up via /api/sms/pending-replies and sends via AndroidSms
+      const replyId = `ar_${randomUUID().slice(0, 8)}`;
+      pendingAutoReplies.set(replyId, { to: from, body: reply, createdAt: now });
+
+      await deps.store.insertAuditEntry({
+        timestamp: new Date().toISOString(),
+        event: 'sms_auto_reply',
+        source: 'sms',
+        details: JSON.stringify({ from, incomingBody: smsBody, reply }),
+      });
+
+      return c.json({ ok: true, enabled: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      console.error('[auto-reply] error:', message);
+      return c.json({ ok: false, error: message }, 500);
+    }
+  });
+
+  // Manual one-tap reply from the SMS tab (session-protected, bypasses auto-reply toggle)
+  app.post('/api/sms/manual-reply', async (c) => {
+    if (!deps.config.ai?.api_key) {
+      return c.json({ ok: false, error: 'AI not configured — add an API key in Settings.' }, 400);
+    }
+    const body = await c.req.json();
+    const from: string = body.from ?? '';
+    const smsBody: string = body.body ?? '';
+    if (!from || !smsBody) {
+      return c.json({ ok: false, error: 'from and body required' }, 400);
+    }
+    try {
+      const client = getClient(deps);
+      const model = getModel(deps);
+      const memories = await deps.store.listMemories();
+      const today = new Date().toISOString().split('T')[0];
+      const systemLines = [
+        `You are an AI SMS reply assistant on the user's Android phone. Today is ${today}.`,
+        'Write a concise, natural reply to the incoming SMS. Match the tone of the conversation.',
+        'Keep it short: 1-3 sentences. Reply with just the message text — no quotes, no labels.',
+      ];
+      if (memories.length > 0) {
+        systemLines.push('', 'Context about the user:');
+        memories.forEach(m => systemLines.push(`  ${m.content}`));
+      }
+      const response = await client.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: systemLines.join('\n') },
+          { role: 'user', content: `Incoming SMS from ${from}: "${smsBody}"` },
+        ],
+        max_tokens: 200,
+      });
+      const reply = response.choices[0]?.message?.content?.trim() ?? '';
+      if (!reply) return c.json({ ok: false, error: 'No reply generated' });
+      await deps.store.insertAuditEntry({
+        timestamp: new Date().toISOString(),
+        event: 'sms_manual_reply',
+        source: 'sms',
+        details: JSON.stringify({ from, incomingBody: smsBody, reply }),
+      });
+      return c.json({ ok: true, reply });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return c.json({ ok: false, error: message }, 500);
+    }
+  });
+
+  // WebView polls this to pick up pending auto-replies and send them via AndroidSms
+  app.get('/api/sms/pending-replies', async (c) => {
+    const cutoff = Date.now() - 60_000;
+    const replies: Array<{ id: string; to: string; body: string }> = [];
+    for (const [id, r] of pendingAutoReplies) {
+      if (r.createdAt < cutoff) {
+        pendingAutoReplies.delete(id);
+      } else {
+        replies.push({ id, to: r.to, body: r.body });
+      }
+    }
+    return c.json({ ok: true, replies });
+  });
+
+  app.delete('/api/sms/pending-replies/:id', async (c) => {
+    pendingAutoReplies.delete(c.req.param('id'));
+    return c.json({ ok: true });
   });
 
   return app;
