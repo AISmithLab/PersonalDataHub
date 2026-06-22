@@ -4,23 +4,29 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.provider.Telephony;
+import android.telephony.SmsManager;
 import android.telephony.SmsMessage;
 import android.util.Log;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
+import org.json.JSONObject;
+
 public class SmsReceiver extends BroadcastReceiver {
     private static final String TAG = "SmsReceiver";
     private static final String SERVER_URL = "http://127.0.0.1:3000/sms/auto-reply";
-    // goAsync() gives ~10s; keep HTTP budget tight
-    private static final int CONNECT_TIMEOUT_MS = 2000;
-    private static final int READ_TIMEOUT_MS = 5000;
+    // goAsync() gives ~10s total; loopback connect is ~0ms so most budget goes to AI read.
+    // AI API calls can take 3-8s on cellular — use 8s read timeout to avoid spurious timeouts.
+    private static final int CONNECT_TIMEOUT_MS = 1000;
+    private static final int READ_TIMEOUT_MS = 8000;
     // Queue directory mirrors Node.js dataDir: getFilesDir()/pdh-data/sms_queue/
     private static final String QUEUE_SUBDIR = "pdh-data/sms_queue";
 
@@ -71,8 +77,8 @@ public class SmsReceiver extends BroadcastReceiver {
         // 1. Write to queue file FIRST — survives even if the server is not running
         File queueFile = writeQueue(context, json);
 
-        // 2. Try to notify the running server (it will generate the AI reply and
-        //    store a pending reply; WebView picks it up and sends via AndroidSms)
+        // 2. Call the server to generate the AI reply; send it directly from here
+        //    so the reply goes out even when the app WebView is not in the foreground.
         try {
             byte[] data = json.getBytes(StandardCharsets.UTF_8);
             URL url = new URL(SERVER_URL);
@@ -82,15 +88,46 @@ public class SmsReceiver extends BroadcastReceiver {
             conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
             conn.setReadTimeout(READ_TIMEOUT_MS);
             conn.setDoOutput(true);
+            conn.setDoInput(true);
             try (OutputStream os = conn.getOutputStream()) { os.write(data); }
             int code = conn.getResponseCode();
-            conn.disconnect();
             Log.d(TAG, "Server responded HTTP " + code + " for: " + from);
-            // Server handled it — remove the queue file so startup drain skips it
-            if (code == 200 && queueFile != null) queueFile.delete();
+
+            if (code == 200) {
+                // Read response body and extract the AI-generated reply text
+                StringBuilder sb = new StringBuilder();
+                try (InputStream is = conn.getInputStream();
+                     BufferedReader reader = new BufferedReader(
+                             new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) sb.append(line);
+                }
+                JSONObject resp = new JSONObject(sb.toString());
+                String reply = resp.optString("reply", null);
+                if (reply != null && !reply.isEmpty()) {
+                    sendSmsReply(from, reply);
+                }
+                if (queueFile != null) queueFile.delete();
+            }
+            conn.disconnect();
         } catch (Exception e) {
             // Server not running — queue file stays on disk for startup drain
             Log.w(TAG, "Server unreachable, queued for next startup: " + e.getMessage());
+        }
+    }
+
+    private void sendSmsReply(String to, String body) {
+        try {
+            SmsManager smsManager = SmsManager.getDefault();
+            java.util.ArrayList<String> parts = smsManager.divideMessage(body);
+            if (parts.size() == 1) {
+                smsManager.sendTextMessage(to, null, body, null, null);
+            } else {
+                smsManager.sendMultipartTextMessage(to, null, parts, null, null);
+            }
+            Log.d(TAG, "Auto-reply sent to: " + to);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to send auto-reply SMS: " + e.getMessage(), e);
         }
     }
 

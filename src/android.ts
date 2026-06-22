@@ -92,7 +92,7 @@ async function drainSmsQueue(dir: string, port: number) {
     const filePath = join(queueDir, file);
     try {
       const body = readFileSync(filePath, 'utf-8');
-      const res = await fetch(`http://127.0.0.1:${port}/sms/auto-reply`, {
+      const res = await fetch(`http://127.0.0.1:${port}/sms/auto-reply?drain=true`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body,

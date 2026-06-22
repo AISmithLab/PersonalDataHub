@@ -29,11 +29,9 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
 
 const MAX_TOOL_ROUNDS = 5;
 
-// Rate limiting: one auto-reply per sender per hour (in-memory, resets on server restart)
-const autoReplyRateLimit = new Map<string, number>();
-const AUTO_REPLY_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 
-// Pending auto-replies waiting to be picked up and sent by the WebView (expires after 60s)
+// Pending auto-replies for the drain path: when Node.js starts after the app was killed,
+// it replays queued SMS via ?drain=true, stores them here, and the WebView picks them up.
 const pendingAutoReplies = new Map<string, { to: string; body: string; createdAt: number }>();
 
 function parseCookie(cookieHeader: string, name: string): string | null {
@@ -642,13 +640,6 @@ export function createChatRoutes(deps: ServerDeps): Hono {
       return c.json({ ok: true, enabled: true, skipped: true, reason: 'short_code' });
     }
 
-    // Rate limit: one reply per sender per hour
-    const now = Date.now();
-    const lastReply = autoReplyRateLimit.get(from);
-    if (lastReply !== undefined && now - lastReply < AUTO_REPLY_COOLDOWN_MS) {
-      return c.json({ ok: true, enabled: true, skipped: true, reason: 'rate_limited' });
-    }
-
     try {
       const client = getClient(deps);
       const model = getModel(deps);
@@ -680,12 +671,6 @@ export function createChatRoutes(deps: ServerDeps): Hono {
         return c.json({ ok: false, error: 'No reply generated' });
       }
 
-      autoReplyRateLimit.set(from, now);
-
-      // Store pending reply — WebView picks it up via /api/sms/pending-replies and sends via AndroidSms
-      const replyId = `ar_${randomUUID().slice(0, 8)}`;
-      pendingAutoReplies.set(replyId, { to: from, body: reply, createdAt: now });
-
       await deps.store.insertAuditEntry({
         timestamp: new Date().toISOString(),
         event: 'sms_auto_reply',
@@ -693,7 +678,18 @@ export function createChatRoutes(deps: ServerDeps): Hono {
         details: JSON.stringify({ from, incomingBody: smsBody, reply }),
       });
 
-      return c.json({ ok: true, enabled: true });
+      // For the drain path (?drain=true): android.ts replays queued SMS when Node.js
+      // restarts after the app was killed. Store in pendingAutoReplies so the WebView
+      // can pick it up and send via AndroidSms (Node.js has no direct SmsManager access).
+      // For the live path (SmsReceiver calling directly): return the reply in the response
+      // so SmsReceiver can send it immediately via SmsManager without needing the WebView.
+      const isDrain = c.req.query('drain') === 'true';
+      if (isDrain) {
+        const replyId = `ar_${randomUUID().slice(0, 8)}`;
+        pendingAutoReplies.set(replyId, { to: from, body: reply, createdAt: Date.now() });
+      }
+
+      return c.json({ ok: true, enabled: true, reply });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       console.error('[auto-reply] error:', message);
@@ -749,7 +745,8 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     }
   });
 
-  // WebView polls this to pick up pending auto-replies and send them via AndroidSms
+  // WebView polls this to pick up drain-path pending replies and send them via AndroidSms.
+  // Only populated when ?drain=true is used (by android.ts drainSmsQueue).
   app.get('/api/sms/pending-replies', async (c) => {
     const cutoff = Date.now() - 60_000;
     const replies: Array<{ id: string; to: string; body: string }> = [];
