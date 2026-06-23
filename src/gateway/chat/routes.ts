@@ -9,6 +9,7 @@ import type { MemoryRow } from '../../database/datastore.js';
 
 type SmsMessage = { address: string; body: string; date: number };
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
+type SmsHistoryEntry = { address: string; body: string; date: number; type: number };
 
 const MEMORY_LIMIT = 50;
 
@@ -468,6 +469,273 @@ async function runAgentLoop(
   };
 }
 
+async function buildAutoReplyTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]> {
+  const tools: OpenAI.ChatCompletionTool[] = [];
+
+  if (await deps.tokenManager.hasToken('gmail')) {
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'read_emails',
+        description: 'Read emails from Gmail.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Gmail search query (e.g. "is:unread from:alice")' },
+            limit: { type: 'number', description: 'Max results (default 20)' },
+          },
+        },
+      },
+    });
+  }
+
+  if (await deps.tokenManager.hasToken('google_calendar')) {
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'read_calendar_events',
+        description: 'Read events from Google Calendar.',
+        parameters: {
+          type: 'object',
+          properties: {
+            after: { type: 'string', description: 'ISO timestamp — only events after this time' },
+            limit: { type: 'number', description: 'Max results (default 20)' },
+          },
+        },
+      },
+    });
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_calendar_event',
+        description: 'Create a Google Calendar event immediately — no approval required.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Event title' },
+            start: { type: 'string', description: 'ISO start time' },
+            end: { type: 'string', description: 'ISO end time' },
+            body: { type: 'string', description: 'Event description (optional)' },
+            location: { type: 'string', description: 'Event location (optional)' },
+          },
+          required: ['title', 'start', 'end'],
+        },
+      },
+    });
+  }
+
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'save_memory',
+      description: 'Save a fact about the user or contact to persistent memory.',
+      parameters: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: 'The fact to remember (concise, one sentence)' },
+        },
+        required: ['content'],
+      },
+    },
+  });
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'update_memory',
+      description: 'Update an existing memory by ID.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Memory ID from the system prompt' },
+          content: { type: 'string', description: 'Updated fact' },
+        },
+        required: ['id', 'content'],
+      },
+    },
+  });
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'delete_memory',
+      description: 'Delete a memory by ID.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Memory ID from the system prompt' },
+        },
+        required: ['id'],
+      },
+    },
+  });
+
+  return tools;
+}
+
+async function executeAutoReplyTool(
+  deps: ServerDeps,
+  name: string,
+  input: Record<string, unknown>,
+): Promise<string> {
+  switch (name) {
+    case 'read_emails': {
+      const connector = deps.connectorRegistry.get('gmail');
+      if (!connector) return JSON.stringify({ error: 'Gmail not connected' });
+      const boundary = deps.config.sources['gmail']?.boundary ?? {};
+      const params: Record<string, unknown> = {};
+      if (input.query) params.query = input.query;
+      if (input.limit) params.limit = input.limit;
+      const rows = await connector.fetch(boundary, Object.keys(params).length ? params : undefined);
+      const filters = (await deps.store.getEnabledFiltersBySource('gmail')) as import('../filters.js').QuickFilter[];
+      return JSON.stringify(applyFilters(rows, filters).slice(0, Number(input.limit ?? 20)).map(r => {
+        const d = r.data as Record<string, unknown>;
+        const rawBody = typeof d.body === 'string' ? d.body : '';
+        const clean = rawBody.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().slice(0, 300);
+        return { id: r.source_item_id, subject: d.title, from: d.author_email || d.author_name, snippet: d.snippet || clean, date: r.timestamp };
+      }));
+    }
+
+    case 'read_calendar_events': {
+      const connector = deps.connectorRegistry.get('google_calendar');
+      if (!connector) return JSON.stringify({ error: 'Google Calendar not connected' });
+      const boundary = deps.config.sources['google_calendar']?.boundary ?? {};
+      const params: Record<string, unknown> = {};
+      if (input.after) params.after = input.after;
+      if (input.limit) params.limit = input.limit;
+      const rows = await connector.fetch(boundary, Object.keys(params).length ? params : undefined);
+      const filters = (await deps.store.getEnabledFiltersBySource('google_calendar')) as import('../filters.js').QuickFilter[];
+      return JSON.stringify(applyFilters(rows, filters).slice(0, Number(input.limit ?? 20)).map(r => {
+        const d = r.data as Record<string, unknown>;
+        return { id: r.source_item_id, title: d.title, start: d.start, end: d.end, location: d.location, date: r.timestamp };
+      }));
+    }
+
+    case 'create_calendar_event': {
+      const connector = deps.connectorRegistry.get('google_calendar');
+      if (!connector) return JSON.stringify({ error: 'Google Calendar not connected' });
+      const result = await connector.executeAction('create_event', input);
+      if (result.success) {
+        await deps.store.insertAuditEntry({
+          timestamp: new Date().toISOString(),
+          event: 'calendar_event_created',
+          source: 'google_calendar',
+          details: JSON.stringify({ title: input.title, start: input.start, end: input.end, createdBy: 'auto_reply' }),
+        });
+      }
+      return JSON.stringify(result);
+    }
+
+    case 'save_memory': {
+      const content = String(input.content ?? '').trim();
+      if (!content) return JSON.stringify({ error: 'content is required' });
+      const existing = await deps.store.listMemories();
+      if (existing.length >= MEMORY_LIMIT) {
+        return JSON.stringify({ error: `Memory is full (${MEMORY_LIMIT} items). Use update_memory or delete_memory first.` });
+      }
+      const memId = `mem_${randomUUID().slice(0, 8)}`;
+      await deps.store.insertMemory(memId, content);
+      return JSON.stringify({ ok: true, id: memId });
+    }
+
+    case 'update_memory': {
+      const id = String(input.id ?? '').trim();
+      const content = String(input.content ?? '').trim();
+      if (!id || !content) return JSON.stringify({ error: 'id and content are required' });
+      await deps.store.updateMemory(id, content);
+      return JSON.stringify({ ok: true });
+    }
+
+    case 'delete_memory': {
+      const id = String(input.id ?? '').trim();
+      if (!id) return JSON.stringify({ error: 'id is required' });
+      await deps.store.deleteMemory(id);
+      return JSON.stringify({ ok: true });
+    }
+
+    default:
+      return JSON.stringify({ error: `Unknown tool: ${name}` });
+  }
+}
+
+async function runAutoReplyLoop(
+  deps: ServerDeps,
+  from: string,
+  smsBody: string,
+  history: SmsHistoryEntry[],
+  maxRounds: number,
+): Promise<string> {
+  const client = getClient(deps);
+  const model = getModel(deps);
+  const tools = await buildAutoReplyTools(deps);
+  const memories = await deps.store.listMemories();
+  const today = new Date().toISOString().split('T')[0];
+
+  const systemLines = [
+    `You are an AI SMS auto-reply assistant on the user's Android phone. Today is ${today}.`,
+    '',
+    'Reply concisely via SMS (1-3 sentences). Do not identify yourself as AI unless asked.',
+    'Reply with just the message text — no quotes, no labels, no preamble.',
+    '',
+    'Use your tools proactively:',
+    '- Check the calendar before replying to anything time/scheduling related',
+    '- Check email for relevant threads if the context is unclear',
+    '- Create calendar events directly if the sender proposes a specific time or meeting',
+    '- Save new facts about this contact to memory if they share something relevant',
+  ];
+
+  if (memories.length > 0) {
+    systemLines.push('', 'What you remember about the user:');
+    memories.forEach(m => systemLines.push(`  [id:${m.id}] ${m.content}`));
+  }
+
+  if (history.length > 0) {
+    systemLines.push('', `Recent SMS conversation with ${from}:`);
+    history.forEach(h => {
+      const d = new Date(h.date).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      const role = h.type === 1 ? from : 'Me';
+      systemLines.push(`  [${d}] ${role}: ${h.body.slice(0, 200)}`);
+    });
+  }
+
+  const chatMessages: OpenAI.ChatCompletionMessageParam[] = [
+    { role: 'system', content: systemLines.join('\n') },
+    { role: 'user', content: `Incoming SMS from ${from}: "${smsBody}"` },
+  ];
+
+  for (let round = 0; round < maxRounds; round++) {
+    const response = await client.chat.completions.create({
+      model,
+      messages: chatMessages,
+      ...(tools.length > 0 ? { tools } : {}),
+      max_tokens: 512,
+    });
+
+    const choice = response.choices[0];
+    if (!choice) break;
+
+    if (choice.finish_reason === 'stop') {
+      return choice.message.content?.trim() ?? '';
+    }
+
+    if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls?.length) {
+      chatMessages.push(choice.message);
+      const results: OpenAI.ChatCompletionToolMessageParam[] = [];
+      for (const tc of choice.message.tool_calls) {
+        if (tc.type !== 'function') continue;
+        let input: Record<string, unknown> = {};
+        try { input = JSON.parse(tc.function.arguments); } catch (_) { /* ignore */ }
+        const result = await executeAutoReplyTool(deps, tc.function.name, input);
+        results.push({ role: 'tool', tool_call_id: tc.id, content: result });
+      }
+      chatMessages.push(...results);
+      continue;
+    }
+
+    return choice.message.content?.trim() ?? '';
+  }
+
+  return '';
+}
+
 export function createChatRoutes(deps: ServerDeps): Hono {
   const app = new Hono();
 
@@ -584,28 +852,36 @@ export function createChatRoutes(deps: ServerDeps): Hono {
 
   // Auto-reply toggle — session-protected
   app.get('/api/settings/auto-reply', async (c) => {
-    return c.json({ ok: true, enabled: deps.config.autoReply?.enabled ?? false });
+    return c.json({
+      ok: true,
+      enabled: deps.config.autoReply?.enabled ?? false,
+      maxToolRounds: deps.config.autoReply?.maxToolRounds ?? 3,
+    });
   });
 
   app.post('/api/settings/auto-reply', async (c) => {
     const body = await c.req.json();
     const enabled = Boolean(body.enabled);
+    const maxToolRounds = typeof body.maxToolRounds === 'number'
+      ? Math.max(1, Math.min(10, Math.round(body.maxToolRounds)))
+      : (deps.config.autoReply?.maxToolRounds ?? 3);
     if (!deps.config.autoReply) {
-      (deps.config as Record<string, unknown>).autoReply = { enabled };
+      (deps.config as Record<string, unknown>).autoReply = { enabled, maxToolRounds };
     } else {
       deps.config.autoReply.enabled = enabled;
+      (deps.config.autoReply as Record<string, unknown>).maxToolRounds = maxToolRounds;
     }
     const configPath = process.env.PDH_CONFIG_PATH;
     if (configPath) {
       try {
         const parsed = parseYaml(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
-        parsed.autoReply = { enabled };
+        parsed.autoReply = { enabled, maxToolRounds };
         writeFileSync(configPath, stringifyYaml(parsed), 'utf-8');
       } catch (e) {
         console.warn('[chat] autoReply persist failed (in-memory update succeeded):', e);
       }
     }
-    return c.json({ ok: true, enabled });
+    return c.json({ ok: true, enabled, maxToolRounds });
   });
 
   // Auto-reply execute — called by Android SmsReceiver.
@@ -621,6 +897,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     const body = await c.req.json();
     const from: string = body.from ?? '';
     const smsBody: string = body.body ?? '';
+    const history: SmsHistoryEntry[] = Array.isArray(body.history) ? body.history : [];
     if (!from || !smsBody) {
       return c.json({ ok: false, error: 'from and body required' }, 400);
     }
@@ -641,32 +918,8 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     }
 
     try {
-      const client = getClient(deps);
-      const model = getModel(deps);
-      const memories = await deps.store.listMemories();
-      const today = new Date().toISOString().split('T')[0];
-
-      const systemLines = [
-        `You are an AI SMS auto-reply assistant on the user's Android phone. Today is ${today}.`,
-        'Reply concisely and naturally to the incoming SMS. Match the tone — casual for personal contacts, professional for business.',
-        'Keep replies short: 1-2 sentences. Do not identify yourself as AI unless asked.',
-        'Reply with just the message text — no quotes, no labels, no preamble.',
-      ];
-      if (memories.length > 0) {
-        systemLines.push('', 'Context about the user:');
-        memories.forEach(m => systemLines.push(`  ${m.content}`));
-      }
-
-      const response = await client.chat.completions.create({
-        model,
-        messages: [
-          { role: 'system', content: systemLines.join('\n') },
-          { role: 'user', content: `Incoming SMS from ${from}: "${smsBody}"` },
-        ],
-        max_tokens: 200,
-      });
-
-      const reply = response.choices[0]?.message?.content?.trim() ?? '';
+      const maxRounds = deps.config.autoReply?.maxToolRounds ?? 3;
+      const reply = await runAutoReplyLoop(deps, from, smsBody, history, maxRounds);
       if (!reply) {
         return c.json({ ok: false, error: 'No reply generated' });
       }

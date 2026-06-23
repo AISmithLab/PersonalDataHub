@@ -51,6 +51,7 @@ const deploymentSchema = z.object({
 
 const autoReplySchema = z.object({
   enabled: z.boolean().default(false),
+  maxToolRounds: z.number().int().min(1).max(10).default(3),
 });
 
 export const hubConfigSchema = z.object({

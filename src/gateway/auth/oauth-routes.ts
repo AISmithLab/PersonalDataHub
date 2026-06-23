@@ -34,6 +34,85 @@ export function getBaseUrl(config: HubConfigParsed): string {
   return `http://127.0.0.1:${port}`;
 }
 
+/**
+ * Serve an HTML page that does the OAuth token exchange in the browser.
+ *
+ * nodejs-mobile cannot make outbound HTTPS calls (DNS/network unavailable from
+ * its thread context). The system browser that handled Google/GitHub auth CAN
+ * reach external servers, so we hand the exchange off to it:
+ *   1. Browser fetches tokens from the provider.
+ *   2. Browser POSTs tokens to our local store-tokens endpoint (same-origin, no CORS).
+ *   3. Browser navigates to the pdh:// deep link, which Android routes back to the app.
+ */
+function buildExchangePage(opts: {
+  tokenUrl: string;
+  tokenBody: Record<string, string>;
+  tokenHeaders?: Record<string, string>;
+  userinfoUrl?: string;
+  storeUrl: string;
+  successScheme: string;
+  baseUrl: string;
+}): string {
+  const errorRedirect = `${opts.baseUrl}/?oauth_error=`;
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Signing in…</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;
+justify-content:center;min-height:100vh;margin:0;background:#0f1117;color:#e2e8f0;
+text-align:center;padding:24px;box-sizing:border-box}
+p{font-size:16px;line-height:1.5}
+</style>
+</head>
+<body>
+<p id="msg">Completing sign-in&hellip;</p>
+<script>
+(async function(){
+  var msg=document.getElementById('msg');
+  try{
+    var tokenResp=await fetch(${JSON.stringify(opts.tokenUrl)},{
+      method:'POST',
+      headers:Object.assign({'Content-Type':'application/x-www-form-urlencoded'},${JSON.stringify(opts.tokenHeaders ?? {})}),
+      body:new URLSearchParams(${JSON.stringify(opts.tokenBody)}).toString()
+    });
+    var tokens=await tokenResp.json();
+    if(tokens.error) throw new Error(tokens.error_description||tokens.error);
+
+    var userinfo={};
+    if(${JSON.stringify(opts.userinfoUrl??'')} && tokens.access_token){
+      try{
+        var uiResp=await fetch(${JSON.stringify(opts.userinfoUrl??'')},{
+          headers:{Authorization:'Bearer '+tokens.access_token}
+        });
+        userinfo=await uiResp.json();
+      }catch(e){}
+    }
+
+    var storeResp=await fetch(${JSON.stringify(opts.storeUrl)},{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tokens:tokens,userinfo:userinfo})
+    });
+    var stored=await storeResp.json();
+    if(!stored.ok) throw new Error(stored.error||'Failed to store tokens');
+
+    msg.textContent='Sign-in complete! Returning to app…';
+    window.location.href=${JSON.stringify(opts.successScheme)};
+  }catch(e){
+    msg.textContent='Error: '+e.message+'. Returning to app…';
+    setTimeout(function(){
+      window.location.href=${JSON.stringify(errorRedirect)}+encodeURIComponent(e.message);
+    },2000);
+  }
+})();
+</script>
+</body>
+</html>`;
+}
+
 export function createOAuthRoutes(deps: OAuthDeps): Hono {
   const app = new Hono();
   const auditLog = new AuditLog(deps.store);
@@ -76,100 +155,92 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
     return c.redirect(authUrl);
   });
 
+  // Callback: validate CSRF state, then serve an HTML page that does the token
+  // exchange in the browser (nodejs-mobile cannot make outbound HTTPS calls).
   app.get('/gmail/callback', async (c) => {
     const code = c.req.query('code');
     const state = c.req.query('state');
     const error = c.req.query('error');
 
-    if (error) {
-      return c.redirect(`/?oauth_error=${encodeURIComponent(error)}`);
-    }
+    if (error) return c.redirect(`/?oauth_error=${encodeURIComponent(error)}`);
+    if (!code || !state) return c.redirect('/?oauth_error=missing_code_or_state');
 
-    if (!code || !state) {
-      return c.redirect('/?oauth_error=missing_code_or_state');
-    }
-
-    // Validate CSRF state
     const pending = await deps.store.getAndDeleteOAuthState(state);
     if (!pending || pending.source !== 'gmail') {
       return c.redirect('/?oauth_error=invalid_state');
     }
-    const { codeVerifier } = pending;
+
+    const { clientId, clientSecret } = getGmailCredentials(deps.config);
+    const baseUrl = getBaseUrl(deps.config);
+
+    return c.html(buildExchangePage({
+      tokenUrl: 'https://oauth2.googleapis.com/token',
+      tokenBody: {
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: `${baseUrl}/oauth/gmail/callback`,
+        grant_type: 'authorization_code',
+        code_verifier: pending.codeVerifier,
+      },
+      userinfoUrl: 'https://www.googleapis.com/oauth2/v2/userinfo',
+      storeUrl: `${baseUrl}/oauth/gmail/store-tokens`,
+      successScheme: 'pdh://oauth?success=gmail',
+      baseUrl,
+    }));
+  });
+
+  // Receives tokens from the browser-side exchange and stores them server-side.
+  // Reachable from the system browser because it navigates to http://127.0.0.1:3000
+  // (same origin as store-tokens), so no CORS headers needed.
+  app.post('/gmail/store-tokens', async (c) => {
+    const body = await c.req.json() as { tokens: Record<string, unknown>; userinfo: Record<string, unknown> };
+    const { tokens, userinfo } = body;
+
+    if (!tokens?.access_token) {
+      return c.json({ ok: false, error: 'No access_token in payload' }, 400);
+    }
 
     const { clientId, clientSecret } = getGmailCredentials(deps.config);
 
-    const oauth2Client = new google.auth.OAuth2(
-      clientId,
-      clientSecret,
-      `${getBaseUrl(deps.config)}/oauth/gmail/callback`,
-    );
-
-    try {
-      // Exchange code for tokens (with PKCE code_verifier)
-      const { tokens } = await oauth2Client.getToken({ code, codeVerifier });
-      console.log('Gmail OAuth tokens received:', {
-        has_access_token: !!tokens.access_token,
-        has_refresh_token: !!tokens.refresh_token,
-        token_type: tokens.token_type,
-        expiry_date: tokens.expiry_date,
-      });
-
-      // Fetch account info
-      oauth2Client.setCredentials(tokens);
-      let userInfo: { data: { email?: string | null; name?: string | null; picture?: string | null } } = { data: {} };
-      try {
-        const oauth2Api = google.oauth2({ version: 'v2', auth: oauth2Client });
-        userInfo = await oauth2Api.userinfo.get();
-      } catch (infoErr) {
-        console.warn('Failed to fetch userinfo (non-fatal):', (infoErr as Error).message);
-      }
-
-      const expiresAt = tokens.expiry_date
-        ? new Date(tokens.expiry_date).toISOString()
+    const expiresAt = tokens.expires_in
+      ? new Date(Date.now() + Number(tokens.expires_in) * 1000).toISOString()
+      : tokens.expiry_date
+        ? new Date(Number(tokens.expiry_date)).toISOString()
         : undefined;
 
-      // Store tokens encrypted
-      await deps.tokenManager.storeToken('gmail', {
-        access_token: tokens.access_token!,
-        refresh_token: tokens.refresh_token ?? undefined,
-        token_type: tokens.token_type ?? 'Bearer',
-        expires_at: expiresAt,
-        scopes: GMAIL_SCOPES.join(' '),
-        account_info: {
-          email: userInfo.data.email,
-          name: userInfo.data.name,
-          picture: userInfo.data.picture,
-        },
-      });
+    await deps.tokenManager.storeToken('gmail', {
+      access_token: String(tokens.access_token),
+      refresh_token: tokens.refresh_token ? String(tokens.refresh_token) : undefined,
+      token_type: tokens.token_type ? String(tokens.token_type) : 'Bearer',
+      expires_at: expiresAt,
+      scopes: GMAIL_SCOPES.join(' '),
+      account_info: {
+        email: userinfo?.email ? String(userinfo.email) : undefined,
+        name: userinfo?.name ? String(userinfo.name) : undefined,
+        picture: userinfo?.picture ? String(userinfo.picture) : undefined,
+      },
+    });
 
-      // Re-create GmailConnector with live tokens
-      const connector = new GmailConnector({
-        clientId,
-        clientSecret,
-        accessToken: tokens.access_token!,
-        refreshToken: tokens.refresh_token ?? undefined,
-      });
-      deps.connectorRegistry.set('gmail', connector);
+    const connector = new GmailConnector({
+      clientId,
+      clientSecret,
+      accessToken: String(tokens.access_token),
+      refreshToken: tokens.refresh_token ? String(tokens.refresh_token) : undefined,
+    });
+    deps.connectorRegistry.set('gmail', connector);
 
-      // Wire up token refresh event so refreshed tokens get persisted
-      connector.getAuth().on('tokens', async (newTokens) => {
-        if (newTokens.access_token) {
-          const newExpiry = newTokens.expiry_date
-            ? new Date(newTokens.expiry_date).toISOString()
-            : undefined;
-          await deps.tokenManager.updateAccessToken('gmail', newTokens.access_token, newExpiry);
-        }
-      });
+    connector.getAuth().on('tokens', async (newTokens) => {
+      if (newTokens.access_token) {
+        const newExpiry = newTokens.expiry_date
+          ? new Date(newTokens.expiry_date).toISOString()
+          : undefined;
+        await deps.tokenManager.updateAccessToken('gmail', newTokens.access_token, newExpiry);
+      }
+    });
 
-      await auditLog.insert('oauth_connected', 'gmail', {
-        email: userInfo.data.email,
-      });
-
-      return c.redirect('/?oauth_success=gmail');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'unknown_error';
-      return c.redirect(`/?oauth_error=${encodeURIComponent(message)}`);
-    }
+    await auditLog.insert('oauth_connected', 'gmail', { email: userinfo?.email });
+    return c.json({ ok: true });
   });
 
   app.post('/gmail/disconnect', async (c) => {
@@ -222,68 +293,76 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
     const state = c.req.query('state');
     const error = c.req.query('error');
 
-    if (error) {
-      return c.redirect(`/?oauth_error=${encodeURIComponent(error)}`);
-    }
-
-    if (!code || !state) {
-      return c.redirect('/?oauth_error=missing_code_or_state');
-    }
+    if (error) return c.redirect(`/?oauth_error=${encodeURIComponent(error)}`);
+    if (!code || !state) return c.redirect('/?oauth_error=missing_code_or_state');
 
     const pending = await deps.store.getAndDeleteOAuthState(state);
     if (!pending || pending.source !== 'google_calendar') {
       return c.redirect('/?oauth_error=invalid_state');
     }
-    const { codeVerifier } = pending;
+
+    const { clientId, clientSecret } = getCalendarCredentials(deps.config);
+    const baseUrl = getBaseUrl(deps.config);
+
+    return c.html(buildExchangePage({
+      tokenUrl: 'https://oauth2.googleapis.com/token',
+      tokenBody: {
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: `${baseUrl}/oauth/google_calendar/callback`,
+        grant_type: 'authorization_code',
+        code_verifier: pending.codeVerifier,
+      },
+      storeUrl: `${baseUrl}/oauth/google_calendar/store-tokens`,
+      successScheme: 'pdh://oauth?success=google_calendar',
+      baseUrl,
+    }));
+  });
+
+  app.post('/google_calendar/store-tokens', async (c) => {
+    const body = await c.req.json() as { tokens: Record<string, unknown>; userinfo: Record<string, unknown> };
+    const { tokens } = body;
+
+    if (!tokens?.access_token) {
+      return c.json({ ok: false, error: 'No access_token in payload' }, 400);
+    }
 
     const { clientId, clientSecret } = getCalendarCredentials(deps.config);
 
-    const oauth2Client = new google.auth.OAuth2(
-      clientId,
-      clientSecret,
-      `${getBaseUrl(deps.config)}/oauth/google_calendar/callback`,
-    );
-
-    try {
-      const { tokens } = await oauth2Client.getToken({ code, codeVerifier });
-      oauth2Client.setCredentials(tokens);
-
-      const expiresAt = tokens.expiry_date
-        ? new Date(tokens.expiry_date).toISOString()
+    const expiresAt = tokens.expires_in
+      ? new Date(Date.now() + Number(tokens.expires_in) * 1000).toISOString()
+      : tokens.expiry_date
+        ? new Date(Number(tokens.expiry_date)).toISOString()
         : undefined;
 
-      await deps.tokenManager.storeToken('google_calendar', {
-        access_token: tokens.access_token!,
-        refresh_token: tokens.refresh_token ?? undefined,
-        token_type: tokens.token_type ?? 'Bearer',
-        expires_at: expiresAt,
-        scopes: CALENDAR_SCOPES.join(' '),
-      });
+    await deps.tokenManager.storeToken('google_calendar', {
+      access_token: String(tokens.access_token),
+      refresh_token: tokens.refresh_token ? String(tokens.refresh_token) : undefined,
+      token_type: tokens.token_type ? String(tokens.token_type) : 'Bearer',
+      expires_at: expiresAt,
+      scopes: CALENDAR_SCOPES.join(' '),
+    });
 
-      const connector = new GoogleCalendarConnector({
-        clientId,
-        clientSecret,
-        accessToken: tokens.access_token!,
-        refreshToken: tokens.refresh_token ?? undefined,
-      });
-      deps.connectorRegistry.set('google_calendar', connector);
+    const connector = new GoogleCalendarConnector({
+      clientId,
+      clientSecret,
+      accessToken: String(tokens.access_token),
+      refreshToken: tokens.refresh_token ? String(tokens.refresh_token) : undefined,
+    });
+    deps.connectorRegistry.set('google_calendar', connector);
 
-      connector.getAuth().on('tokens', async (newTokens) => {
-        if (newTokens.access_token) {
-          const newExpiry = newTokens.expiry_date
-            ? new Date(newTokens.expiry_date).toISOString()
-            : undefined;
-          await deps.tokenManager.updateAccessToken('google_calendar', newTokens.access_token, newExpiry);
-        }
-      });
+    connector.getAuth().on('tokens', async (newTokens) => {
+      if (newTokens.access_token) {
+        const newExpiry = newTokens.expiry_date
+          ? new Date(newTokens.expiry_date).toISOString()
+          : undefined;
+        await deps.tokenManager.updateAccessToken('google_calendar', newTokens.access_token, newExpiry);
+      }
+    });
 
-      await auditLog.insert('oauth_connected', 'google_calendar', {});
-
-      return c.redirect('/?oauth_success=google_calendar');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'unknown_error';
-      return c.redirect(`/?oauth_error=${encodeURIComponent(message)}`);
-    }
+    await auditLog.insert('oauth_connected', 'google_calendar', {});
+    return c.json({ ok: true });
   });
 
   app.post('/google_calendar/disconnect', async (c) => {
@@ -328,107 +407,72 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
     const state = c.req.query('state');
     const error = c.req.query('error');
 
-    if (error) {
-      return c.redirect(`/?oauth_error=${encodeURIComponent(error)}`);
-    }
-
-    if (!code || !state) {
-      return c.redirect('/?oauth_error=missing_code_or_state');
-    }
+    if (error) return c.redirect(`/?oauth_error=${encodeURIComponent(error)}`);
+    if (!code || !state) return c.redirect('/?oauth_error=missing_code_or_state');
 
     const pending = await deps.store.getAndDeleteOAuthState(state);
     if (!pending || pending.source !== 'github') {
       return c.redirect('/?oauth_error=invalid_state');
     }
-    const { codeVerifier } = pending;
+
+    const { clientId, clientSecret } = getGitHubCredentials(deps.config);
+    const baseUrl = getBaseUrl(deps.config);
+
+    return c.html(buildExchangePage({
+      tokenUrl: 'https://github.com/login/oauth/access_token',
+      tokenBody: {
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        code_verifier: pending.codeVerifier,
+      },
+      tokenHeaders: { Accept: 'application/json' },
+      userinfoUrl: 'https://api.github.com/user',
+      storeUrl: `${baseUrl}/oauth/github/store-tokens`,
+      successScheme: 'pdh://oauth?success=github',
+      baseUrl,
+    }));
+  });
+
+  app.post('/github/store-tokens', async (c) => {
+    const body = await c.req.json() as { tokens: Record<string, unknown>; userinfo: Record<string, unknown> };
+    const { tokens, userinfo } = body;
+
+    if (!tokens?.access_token) {
+      return c.json({ ok: false, error: tokens?.error_description ?? tokens?.error ?? 'No access_token' }, 400);
+    }
 
     const githubConfig = deps.config.sources.github;
     const { clientId, clientSecret } = getGitHubCredentials(deps.config);
 
-    try {
-      // Exchange code for token (with PKCE code_verifier)
-      const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({
-          client_id: clientId,
-          client_secret: clientSecret,
-          code,
-          code_verifier: codeVerifier,
-        }),
-      });
+    const expiresAt = tokens.expires_in
+      ? new Date(Date.now() + Number(tokens.expires_in) * 1000).toISOString()
+      : undefined;
 
-      const tokenData = (await tokenRes.json()) as {
-        access_token?: string;
-        token_type?: string;
-        scope?: string;
-        expires_in?: number;
-        refresh_token?: string;
-        refresh_token_expires_in?: number;
-        error?: string;
-        error_description?: string;
-      };
+    await deps.tokenManager.storeToken('github', {
+      access_token: String(tokens.access_token),
+      refresh_token: tokens.refresh_token ? String(tokens.refresh_token) : undefined,
+      token_type: tokens.token_type ? String(tokens.token_type) : 'Bearer',
+      expires_at: expiresAt,
+      scopes: tokens.scope ? String(tokens.scope) : '',
+      account_info: {
+        login: userinfo?.login ? String(userinfo.login) : undefined,
+        name: userinfo?.name ? String(userinfo.name) : undefined,
+        avatar_url: userinfo?.avatar_url ? String(userinfo.avatar_url) : undefined,
+        html_url: userinfo?.html_url ? String(userinfo.html_url) : undefined,
+      },
+    });
 
-      if (tokenData.error || !tokenData.access_token) {
-        const errMsg = tokenData.error_description || tokenData.error || 'token_exchange_failed';
-        return c.redirect(`/?oauth_error=${encodeURIComponent(errMsg)}`);
-      }
+    const allowedRepos = githubConfig?.boundary.repos ?? [];
+    const connector = new GitHubConnector({
+      ownerToken: String(tokens.access_token),
+      agentUsername: githubConfig?.agent_identity?.github_username ?? '',
+      allowedRepos,
+    });
+    deps.connectorRegistry.set('github', connector);
 
-      // Fetch user info
-      const userRes = await fetch('https://api.github.com/user', {
-        headers: {
-          Authorization: `Bearer ${tokenData.access_token}`,
-          Accept: 'application/vnd.github+json',
-          'User-Agent': 'PersonalDataHub/0.1.0',
-        },
-      });
-
-      const userData = (await userRes.json()) as {
-        login?: string;
-        avatar_url?: string;
-        name?: string;
-        html_url?: string;
-      };
-
-      const expiresAt = tokenData.expires_in
-        ? new Date(Date.now() + tokenData.expires_in * 1000).toISOString()
-        : undefined;
-
-      await deps.tokenManager.storeToken('github', {
-        access_token: tokenData.access_token,
-        refresh_token: tokenData.refresh_token,
-        token_type: tokenData.token_type ?? 'Bearer',
-        expires_at: expiresAt,
-        scopes: tokenData.scope ?? '',
-        account_info: {
-          login: userData.login,
-          name: userData.name,
-          avatar_url: userData.avatar_url,
-          html_url: userData.html_url,
-        },
-      });
-
-      // Re-create GitHubConnector with the OAuth token
-      const allowedRepos = githubConfig?.boundary.repos ?? [];
-      const connector = new GitHubConnector({
-        ownerToken: tokenData.access_token,
-        agentUsername: githubConfig?.agent_identity?.github_username ?? '',
-        allowedRepos,
-      });
-      deps.connectorRegistry.set('github', connector);
-
-      await auditLog.insert('oauth_connected', 'github', {
-        login: userData.login,
-      });
-
-      return c.redirect('/?oauth_success=github');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'unknown_error';
-      return c.redirect(`/?oauth_error=${encodeURIComponent(message)}`);
-    }
+    await auditLog.insert('oauth_connected', 'github', { login: userinfo?.login });
+    return c.json({ ok: true });
   });
 
   app.post('/github/disconnect', async (c) => {

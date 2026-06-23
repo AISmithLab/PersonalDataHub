@@ -14,9 +14,50 @@
 
 import { join, dirname } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
+import dns from 'node:dns';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import { serve } from '@hono/node-server';
+
+// nodejs-mobile on Android: the OS resolver (getaddrinfo) used by dns.lookup() doesn't
+// inherit the system DNS config, so all outbound HTTPS calls fail with ENOTFOUND.
+// dns.setServers() only affects dns.resolve*() — NOT dns.lookup() — so we also patch
+// dns.lookup to route through dns.resolve4, which does respect setServers().
+dns.setDefaultResultOrder('ipv4first');
+dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
+
+// Probe: confirm dns.resolve4 works from this thread context before patching dns.lookup.
+dns.resolve4('oauth2.googleapis.com', (err, addrs) => {
+  if (err) {
+    console.error('[PDH dns probe] FAIL — c-ares cannot reach DNS servers:', err.code);
+  } else {
+    console.log('[PDH dns probe] OK — oauth2.googleapis.com =>', addrs[0]);
+  }
+});
+
+const _lookup = dns.lookup.bind(dns);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(dns as any).lookup = (hostname: string, optionsOrCb: any, cb?: any) => {
+  const callback = typeof optionsOrCb === 'function' ? optionsOrCb : cb;
+  const options = typeof optionsOrCb === 'object' ? optionsOrCb : {};
+  dns.resolve4(hostname, (err, addresses) => {
+    if (!err && addresses.length > 0) {
+      if (options.all) {
+        callback(null, addresses.map((a: string) => ({ address: a, family: 4 })));
+      } else {
+        callback(null, addresses[0], 4);
+      }
+    } else {
+      _lookup(hostname, optionsOrCb, cb);
+    }
+  });
+};
+
+// Injected at compile time by scripts/bundle-android.js via esbuild --define
+declare const __GMAIL_CLIENT_ID__: string;
+declare const __GMAIL_CLIENT_SECRET__: string;
+declare const __CAL_CLIENT_ID__: string;
+declare const __CAL_CLIENT_SECRET__: string;
 
 // Signal to app.ts to use the sql.js DataStore
 process.env.PDH_MOBILE = 'true';
@@ -45,7 +86,8 @@ process.env.PDH_DB_PATH = join(dataDir, 'pdh.db');
 const configPath = process.env.PDH_CONFIG_PATH ?? join(dataDir, 'hub-config.yaml');
 process.env.PDH_CONFIG_PATH = configPath;
 
-// Bootstrap a default config if none exists yet
+// Bootstrap a minimal config if none exists yet — credentials are never written to disk,
+// they are injected into the in-memory config object below.
 if (!existsSync(configPath)) {
   const encKey = process.env.PDH_ENCRYPTION_KEY ?? crypto.randomUUID();
   const defaultConfig = `# PersonalDataHub — auto-generated mobile config
@@ -73,6 +115,20 @@ const port = Number(process.env.PORT ?? 3000);
 async function main() {
   const { loadConfig } = await import('./config/loader.js');
   const config = await loadConfig(configPath);
+
+  // Inject OAuth credentials from compile-time constants — they never touch the on-device YAML.
+  if (__GMAIL_CLIENT_ID__) {
+    config.sources.gmail ??= { enabled: true, boundary: {} };
+    (config.sources.gmail as Record<string, unknown>).owner_auth = {
+      type: 'oauth2', clientId: __GMAIL_CLIENT_ID__, clientSecret: __GMAIL_CLIENT_SECRET__,
+    };
+  }
+  if (__CAL_CLIENT_ID__) {
+    config.sources.google_calendar ??= { enabled: true, boundary: {} };
+    (config.sources.google_calendar as Record<string, unknown>).owner_auth = {
+      type: 'oauth2', clientId: __CAL_CLIENT_ID__, clientSecret: __CAL_CLIENT_SECRET__,
+    };
+  }
 
   const { app } = await createApp(config);
 

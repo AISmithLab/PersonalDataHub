@@ -950,7 +950,7 @@ function getIndexHtml(): string {
       chat: { messages: [], loading: false, error: null, aiAvailable: false, stagedSmsIds: [] },
       memories: { items: [], loading: false, editingId: null, editContent: '', adding: false, newContent: '', error: null },
       settingsProvider: 'anthropic',
-      autoReply: { enabled: false, loading: false, testResult: null, testLoading: false },
+      autoReply: { enabled: false, maxToolRounds: 3, loading: false, testResult: null, testLoading: false },
     };
     let _saveTimer = null;
 
@@ -1036,6 +1036,7 @@ function getIndexHtml(): string {
       fetch('/api/settings/auto-reply').then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
           state.autoReply.enabled = d.enabled;
+          if (typeof d.maxToolRounds === 'number') state.autoReply.maxToolRounds = d.maxToolRounds;
           if (currentTab === 'settings') render();
         }
       }).catch(function() { /* non-fatal */ });
@@ -2344,6 +2345,19 @@ function getIndexHtml(): string {
     }
     window.setAutoReply = setAutoReply;
 
+    async function saveMaxToolRounds(value) {
+      var n = parseInt(value, 10);
+      if (isNaN(n) || n < 1 || n > 10) return;
+      state.autoReply.maxToolRounds = n;
+      try {
+        await fetch('/api/settings/auto-reply', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: state.autoReply.enabled, maxToolRounds: n })
+        });
+      } catch(e) { /* non-fatal */ }
+    }
+    window.saveMaxToolRounds = saveMaxToolRounds;
+
     async function testAutoReply() {
       if (state.autoReply.testLoading) return;
       state.autoReply.testLoading = true;
@@ -2421,8 +2435,13 @@ function getIndexHtml(): string {
               \${state.autoReply.enabled ? 'Enabled — AI will reply to incoming SMS' : 'Disabled'}
             </span>
           </div>
-          \${state.autoReply.enabled ? '<p style="font-size:12px;color:var(--muted);margin:10px 0 0">Replies within ~5 seconds. Short codes and repeat senders (within 1 hour) are skipped. Check Audit Log for history.</p>' : ''}
+          \${state.autoReply.enabled ? '<p style="font-size:12px;color:var(--muted);margin:10px 0 0">Replies within ~5 seconds while the app is running. Checks SMS history, Calendar, and Email before replying. Short codes are skipped. Check Audit Log for history.</p>' : ''}
           \${!state.chat.aiAvailable && state.autoReply.enabled ? '<p style="font-size:12px;color:var(--warning,#f59e0b);margin:8px 0 0">AI key required — configure it above first.</p>' : ''}
+          <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
+            <label style="font-size:13px;color:var(--muted)">Context depth (tool rounds):</label>
+            <input type="number" min="1" max="10" value="\${state.autoReply.maxToolRounds}" onchange="saveMaxToolRounds(this.value)" style="width:56px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);color:var(--fg)">
+            <span style="font-size:12px;color:var(--muted)">(1 = fast, 3 = balanced, 5+ = thorough)</span>
+          </div>
           <div style="margin-top:14px;display:flex;align-items:center;gap:12px">
             <button class="btn" onclick="testAutoReply()" \${state.autoReply.testLoading ? 'disabled' : ''} style="font-size:13px;padding:7px 14px">\${state.autoReply.testLoading ? 'Testing...' : 'Test auto-reply'}</button>
             \${state.autoReply.testResult ? '<span style="font-size:13px;color:' + (state.autoReply.testResult.ok ? 'var(--success)' : 'var(--danger,#ef4444)') + '">' + escapeHtml(state.autoReply.testResult.msg) + '</span>' : ''}
@@ -2968,13 +2987,13 @@ function getIndexHtml(): string {
     window.renderCalendarFilterCards = renderCalendarFilterCards;
     window.sendAction = sendAction;
 
-    // Handle OAuth redirect results
+    // Handle OAuth redirect results (web / query-param path)
     (function handleOAuthResult() {
       var params = new URLSearchParams(window.location.search);
       var success = params.get('oauth_success');
       var error = params.get('oauth_error');
       if (success) {
-        switchTab(success);
+        fetchData().then(function() { switchTab(success); });
         window.history.replaceState({}, '', '/');
       }
       if (error) {
@@ -2982,6 +3001,27 @@ function getIndexHtml(): string {
         window.history.replaceState({}, '', '/');
       }
     })();
+
+    // Handle OAuth deep-link callbacks on Android (pdh://oauth?success=<source>).
+    // The browser-side token exchange page redirects here after storing tokens,
+    // which triggers the Android intent filter and fires appUrlOpen in Capacitor.
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
+      window.Capacitor.Plugins.App.addListener('appUrlOpen', function(event) {
+        try {
+          var url = new URL(event.url);
+          if (url.hostname === 'oauth') {
+            var success = url.searchParams.get('success');
+            var error = url.searchParams.get('error');
+            if (success) {
+              fetchData().then(function() { switchTab(success); });
+            }
+            if (error) {
+              alert('OAuth error: ' + error);
+            }
+          }
+        } catch(e) {}
+      });
+    }
 
     // --- Auth: signup vs login form ---
     var isSignup = false;
@@ -3075,10 +3115,15 @@ function getIndexHtml(): string {
         for (var i = 0; i < newMsgs.length; i++) {
           var msg = newMsgs[i];
           try {
+            // Collect last 10 messages in this conversation for context
+            var history = messages
+              .filter(function(m) { return m.address === msg.address; })
+              .sort(function(a, b) { return a.date - b.date; })
+              .slice(-10);
             var res = await fetch('/sms/auto-reply', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ from: msg.address, body: msg.body }),
+              body: JSON.stringify({ from: msg.address, body: msg.body, history: history }),
             });
             var d = await res.json();
             if (d.ok && d.enabled && d.reply) {
@@ -3091,7 +3136,7 @@ function getIndexHtml(): string {
           } catch(e) { /* non-fatal */ }
         }
       };
-      window.AndroidSms.getMessages(reqId, 'inbox', 10);
+      window.AndroidSms.getMessages(reqId, 'inbox', 50);
     }, 5000);
 
     // Check auth on load — auto-login for single-device use
