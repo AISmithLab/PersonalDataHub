@@ -80,6 +80,7 @@ if (!process.env.SQLJS_WASM_PATH) {
 // Fall back to process.cwd()/pdh-data for desktop/CI runs.
 const dataDir = process.env.PDH_DATA_DIR ?? join(_dir, '..', '..', 'pdh-data');
 if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
+process.env.PDH_DATA_DIR = dataDir;
 
 process.env.PDH_DB_PATH = join(dataDir, 'pdh.db');
 

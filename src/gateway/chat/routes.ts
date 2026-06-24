@@ -1,15 +1,18 @@
 import { Hono } from 'hono';
 import OpenAI from 'openai';
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import type { ServerDeps } from '../server.js';
 import { applyFilters, type QuickFilter } from '../filters.js';
 import type { MemoryRow } from '../../database/datastore.js';
+import { runCode } from '../code-runner/runner.js';
 
 type SmsMessage = { address: string; body: string; date: number };
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
 type SmsHistoryEntry = { address: string; body: string; date: number; type: number };
+type ToolOutput = { name: string; input: Record<string, unknown>; output: string };
 
 const MEMORY_LIMIT = 50;
 
@@ -236,6 +239,31 @@ async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]
     },
   });
 
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'run_code',
+      description: `Execute JavaScript on this device's Node.js runtime. Use for computations, file I/O, network requests, or data processing.
+Globals available: fetch, require (fs, path, crypto, etc.), Buffer, URL, URLSearchParams, setTimeout, AbortController, __dataDir (app data directory path).
+Top-level await is supported. Each call starts with a fresh context — write files to __dataDir to persist data between calls.
+Use console.log() to emit output; return values are not captured.`,
+      parameters: {
+        type: 'object',
+        properties: {
+          code: {
+            type: 'string',
+            description: 'JavaScript code to execute. Use console.log() to produce visible output.',
+          },
+          description: {
+            type: 'string',
+            description: 'One-line description of what this code does (logged to audit trail).',
+          },
+        },
+        required: ['code'],
+      },
+    },
+  });
+
   return tools;
 }
 
@@ -255,6 +283,7 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
   }
 
   lines.push('', 'Memory: Use save_memory() to record important facts the user shares (preferences, ongoing projects, personal context). Use update_memory(id) when a fact changes. Use delete_memory(id) for stale facts. Be proactive but concise — one clear sentence per memory.');
+  lines.push('', 'Code execution: Use run_code() to run JavaScript on this device. Supports top-level await, fetch, require (fs, path, etc.), Buffer, and __dataDir (path to app data). Use console.log() to emit output — return values are ignored. Each call is a fresh context; write files at __dataDir to persist data between calls.');
 
   if (sms && sms.length > 0) {
     lines.push('', 'Recent SMS messages (newest first):');
@@ -404,6 +433,30 @@ async function executeTool(
       return JSON.stringify({ ok: true });
     }
 
+    case 'run_code': {
+      const code = String(input.code ?? '').trim();
+      if (!code) return JSON.stringify({ error: 'code is required' });
+      const dataDir = process.env.PDH_DATA_DIR ?? join(process.cwd(), 'pdh-data');
+      const result = await runCode(code, dataDir);
+      await deps.store.insertAuditEntry({
+        timestamp: new Date().toISOString(),
+        event: 'code_executed',
+        source: null,
+        details: JSON.stringify({
+          description: String(input.description ?? ''),
+          code: code.slice(0, 500),
+          duration_ms: result.duration,
+          error: result.error ?? null,
+        }),
+      });
+      return JSON.stringify({
+        output: result.output || '(no output)',
+        ...(result.error ? { error: result.error } : {}),
+        duration_ms: result.duration,
+        ...(result.truncated ? { note: 'Output truncated at 10 KB' } : {}),
+      });
+    }
+
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
@@ -413,7 +466,7 @@ async function runAgentLoop(
   deps: ServerDeps,
   messages: ChatMessage[],
   sms: SmsMessage[] | null,
-): Promise<{ reply: string; toolsUsed: string[]; stagedActionIds: string[] }> {
+): Promise<{ reply: string; toolsUsed: string[]; stagedActionIds: string[]; toolOutputs: ToolOutput[] }> {
   const client = getClient(deps);
   const model = getModel(deps);
   const tools = await buildTools(deps);
@@ -427,6 +480,7 @@ async function runAgentLoop(
 
   const toolsUsed: string[] = [];
   const stagedActionIds: string[] = [];
+  const toolOutputs: ToolOutput[] = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const response = await client.chat.completions.create({
@@ -440,7 +494,7 @@ async function runAgentLoop(
     if (!choice) break;
 
     if (choice.finish_reason === 'stop') {
-      return { reply: choice.message.content ?? '', toolsUsed, stagedActionIds };
+      return { reply: choice.message.content ?? '', toolsUsed, stagedActionIds, toolOutputs };
     }
 
     if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls?.length) {
@@ -452,6 +506,7 @@ async function runAgentLoop(
         let input: Record<string, unknown> = {};
         try { input = JSON.parse(tc.function.arguments); } catch (_) { /* ignore */ }
         const result = await executeTool(deps, tc.function.name, input, stagedActionIds);
+        toolOutputs.push({ name: tc.function.name, input, output: result });
         results.push({ role: 'tool', tool_call_id: tc.id, content: result });
       }
       chatMessages.push(...results);
@@ -459,13 +514,14 @@ async function runAgentLoop(
     }
 
     // length, content_filter, or other — return whatever text we have
-    return { reply: choice.message.content ?? 'Response was cut short.', toolsUsed, stagedActionIds };
+    return { reply: choice.message.content ?? 'Response was cut short.', toolsUsed, stagedActionIds, toolOutputs };
   }
 
   return {
     reply: 'Reached the maximum number of tool calls. Please try a simpler request.',
     toolsUsed,
     stagedActionIds,
+    toolOutputs,
   };
 }
 
@@ -842,10 +898,32 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     }
     try {
       const result = await runAgentLoop(deps, messages as ChatMessage[], sms ?? null);
-      return c.json({ ok: true, ...result });
+      return c.json({ ok: true, reply: result.reply, toolsUsed: result.toolsUsed, stagedActionIds: result.stagedActionIds, toolOutputs: result.toolOutputs });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       console.error('[chat] error:', message);
+      return c.json({ ok: false, error: message }, 500);
+    }
+  });
+
+  // Direct code execution — user-triggered (e.g. "Run" button on a code block in the chat UI).
+  // This is NOT the agent's path; the agent uses run_code as a tool via executeTool().
+  app.post('/api/code/run', async (c) => {
+    const body = await c.req.json();
+    const code = typeof body.code === 'string' ? body.code.trim() : '';
+    if (!code) return c.json({ ok: false, error: 'code is required' }, 400);
+    const dataDir = process.env.PDH_DATA_DIR ?? join(process.cwd(), 'pdh-data');
+    try {
+      const result = await runCode(code, dataDir);
+      await deps.store.insertAuditEntry({
+        timestamp: new Date().toISOString(),
+        event: 'code_executed',
+        source: null,
+        details: JSON.stringify({ description: 'user-run', code: code.slice(0, 500), duration_ms: result.duration, error: result.error ?? null }),
+      });
+      return c.json({ ok: true, output: result.output, error: result.error, duration_ms: result.duration, truncated: result.truncated });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
       return c.json({ ok: false, error: message }, 500);
     }
   });

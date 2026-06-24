@@ -126,7 +126,7 @@ public class SmsReceiver extends BroadcastReceiver {
                 smsManager.sendMultipartTextMessage(to, null, parts, null, null);
             }
             Log.d(TAG, "Auto-reply sent to: " + to);
-        } catch (Exception e) {
+        } catch (Exception e) {gg
             Log.e(TAG, "Failed to send auto-reply SMS: " + e.getMessage(), e);
         }
     }
