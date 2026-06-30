@@ -233,6 +233,39 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
     return c.json({ ok: true });
   });
 
+  // --- Agent Skills endpoints ---
+
+  app.get('/api/skills', async (c) => {
+    const skills = await deps.store.listSkills();
+    return c.json({ ok: true, skills });
+  });
+
+  app.post('/api/skills', async (c) => {
+    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string };
+    if (!body.name?.trim()) return c.json({ ok: false, error: 'name is required' }, 400);
+    const id = `skill_${randomUUID().slice(0, 12)}`;
+    await deps.store.insertSkill({ id, name: body.name.trim(), instructions: body.instructions ?? '', trigger_event: body.trigger_event ?? 'sms_received', enabled: 0 });
+    return c.json({ ok: true, id });
+  });
+
+  app.put('/api/skills/:id', async (c) => {
+    const id = c.req.param('id');
+    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; activate?: boolean };
+    if (body.activate) {
+      const skill = (await deps.store.listSkills()).find(s => s.id === id);
+      if (skill) await deps.store.activateSkill(id, body.trigger_event ?? skill.trigger_event);
+    } else {
+      await deps.store.updateSkill(id, { name: body.name, instructions: body.instructions, trigger_event: body.trigger_event });
+    }
+    return c.json({ ok: true });
+  });
+
+  app.delete('/api/skills/:id', async (c) => {
+    const id = c.req.param('id');
+    await deps.store.deleteSkill(id);
+    return c.json({ ok: true });
+  });
+
   // --- GitHub repo discovery endpoints ---
 
   // Fetch all repos from GitHub API, upsert into DB, return with selection state
@@ -841,44 +874,20 @@ function getIndexHtml(): string {
         <div class="sidebar-subtitle">Access control for AI agents</div>
       </div>
       <nav class="sidebar-nav" id="sidebar-nav">
-        <div class="nav-group-label">Overview</div>
-        <a class="nav-item active" data-tab="overview" onclick="switchTab('overview')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          <span class="nav-label">Overview</span>
-        </a>
-        <div class="nav-group-label">Data Sources</div>
-        <a class="nav-item" data-tab="gmail" onclick="switchTab('gmail')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-          <span class="nav-label">Gmail</span>
-          <span class="status-dot status-dot-disconnected" id="gmail-dot"></span>
-          <span class="nav-badge" id="gmail-badge" style="display:none">0</span>
-        </a>
-        <a class="nav-item" data-tab="github" onclick="switchTab('github')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-          <span class="nav-label">GitHub</span>
-          <span class="status-dot status-dot-disconnected" id="github-dot"></span>
-        </a>
-        <a class="nav-item" data-tab="google_calendar" onclick="switchTab('google_calendar')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-          <span class="nav-label">Calendar</span>
-          <span class="status-dot status-dot-disconnected" id="calendar-dot"></span>
-          <span class="nav-badge" id="calendar-badge" style="display:none">0</span>
-        </a>        <a class="nav-item disabled">
+        <a class="nav-item active" data-tab="ai" onclick="switchTab('ai')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          <span class="nav-label">Slack</span>
-          <span class="nav-badge-muted">soon</span>
-        </a>
-        <a class="nav-item" data-tab="ai" onclick="switchTab('ai')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-          <span class="nav-label">AI Assistant</span>
+          <span class="nav-label">Chat</span>
           <span class="status-dot" id="ai-dot" style="background:var(--muted)"></span>
+        </a>
+        <a class="nav-item" data-tab="skill" onclick="switchTab('skill')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          <span class="nav-label">Skill</span>
         </a>
         <a class="nav-item" data-tab="memory" onclick="switchTab('memory')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
           <span class="nav-label">Memory</span>
           <span class="nav-badge" id="memory-count-badge" style="display:none">0</span>
         </a>
-        <div class="nav-group-label">System</div>
         <a class="nav-item" data-tab="settings" onclick="switchTab('settings')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           <span class="nav-label">Settings</span>
@@ -896,13 +905,13 @@ function getIndexHtml(): string {
 
   <!-- Bottom navigation (visible only on mobile via CSS media query) -->
   <nav id="bottom-nav">
-    <a data-tab="overview" onclick="switchTab('overview')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-      <span>Activity</span>
-    </a>
-    <a data-tab="ai" onclick="switchTab('ai')">
+    <a data-tab="ai" onclick="switchTab('ai')" class="active">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       <span>Chat</span>
+    </a>
+    <a data-tab="skill" onclick="switchTab('skill')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      <span>Skill</span>
     </a>
     <a data-tab="memory" onclick="switchTab('memory')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
@@ -910,12 +919,12 @@ function getIndexHtml(): string {
     </a>
     <a data-tab="settings" onclick="switchTab('settings')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      <span>Setting</span>
+      <span>Settings</span>
     </a>
   </nav>
 
   <script>
-    let currentTab = 'overview';
+    let currentTab = 'ai';
     var ALL_FIELDS = ['Subject', 'Body', 'Sender', 'Recipients', 'Labels', 'Attachments', 'Snippet'];
     var DEMO_EMAILS = [
       { id:'e1', from:'alice@company.com', to:'owner@gmail.com', subject:'Q1 Planning Meeting', snippet:'Can we reschedule Thursday\\'s meeting to 2pm?', body:'Hi,\\n\\nCan we reschedule Thursday\\'s meeting to 2pm? I have a conflict with the original time.\\n\\nThanks,\\nAlice', date:'2025-02-22T09:15:00Z', labels:['Inbox'], hasAttachment:false },
@@ -949,8 +958,10 @@ function getIndexHtml(): string {
       sms: { messages: null, loading: false, error: null, box: 'inbox', contextMenu: null, autoReplying: false },
       chat: { messages: [], loading: false, error: null, aiAvailable: false, stagedSmsIds: [], codeBlocks: {} },
       memories: { items: [], loading: false, editingId: null, editContent: '', adding: false, newContent: '', error: null },
+      skills: { items: [], loading: false, editingId: null, editContent: { name: '', instructions: '', trigger_event: 'sms_received' }, adding: false, newName: '', newInstructions: '', newTrigger: 'sms_received', error: null },
       settingsProvider: 'anthropic',
       autoReply: { enabled: false, maxToolRounds: 3, loading: false, testResult: null, testLoading: false },
+      settingsSection: 'ai',
     };
     let _saveTimer = null;
 
@@ -1041,8 +1052,26 @@ function getIndexHtml(): string {
         }
       }).catch(function() { /* non-fatal */ });
 
+      // Load skills
+      fetch('/api/skills').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          state.skills.items = d.skills;
+          if (currentTab === 'skill') render();
+        }
+      }).catch(function() { /* non-fatal */ });
+
       render();
     }
+
+    function loadSkills() {
+      if (state.skills.loading) return;
+      state.skills.loading = true;
+      fetch('/api/skills').then(function(r) { return r.json(); }).then(function(d) {
+        state.skills.loading = false;
+        if (d.ok) { state.skills.items = d.skills; if (currentTab === 'skill') render(); }
+      }).catch(function() { state.skills.loading = false; });
+    }
+    window.loadSkills = loadSkills;
 
     function loadMemories() {
       if (state.memories.loading) return;
@@ -1156,6 +1185,7 @@ function getIndexHtml(): string {
         case 'google_calendar': content.innerHTML = renderCalendarTab(); break;
         case 'sms': content.innerHTML = renderSmsTab(); loadSmsMessages(); break;
         case 'ai': content.innerHTML = renderAiTab(); var _cm = document.getElementById('chat-messages'); if (_cm) _cm.scrollTop = _cm.scrollHeight; break;
+        case 'skill': content.innerHTML = renderSkillTab(); loadSkills(); break;
         case 'memory': content.innerHTML = renderMemoryTab(); loadMemories(); break;
         case 'settings': content.innerHTML = renderSettingsTab(); loadMemories(); break;
       }
@@ -2300,8 +2330,8 @@ function getIndexHtml(): string {
       return '<div class="chat-container">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)">' +
         '<h2 style="margin:0;display:flex;align-items:center;gap:8px">' +
-        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>' +
-        'AI Assistant</h2>' +
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
+        'Chat</h2>' +
         '<button class="btn btn-outline btn-sm" onclick="clearChat()">Clear</button>' +
         '</div>' +
         '<div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px 20px">' +
@@ -2313,9 +2343,43 @@ function getIndexHtml(): string {
         'style="flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:var(--card-bg);color:var(--fg)" ' +
         'onkeydown="if(event.key===\\'Enter\\'&&!event.shiftKey){event.preventDefault();sendChatMessage();}" ' +
         (chat.loading ? 'disabled ' : '') + '/>' +
+        '<button id="voice-btn" title="Voice input" onclick="toggleVoiceInput()" style="padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card-bg);color:var(--muted);cursor:pointer;font-size:16px;display:flex;align-items:center">' +
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>' +
+        '</button>' +
         '<button class="btn btn-primary" onclick="sendChatMessage()" ' + (chat.loading ? 'disabled ' : '') + 'style="padding:10px 18px">Send</button>' +
         '</div></div></div>';
     }
+
+    var _voiceRecognition = null;
+    function toggleVoiceInput() {
+      var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) { alert('Voice input is not supported in this browser.'); return; }
+      if (_voiceRecognition) {
+        _voiceRecognition.stop();
+        _voiceRecognition = null;
+        var btn = document.getElementById('voice-btn');
+        if (btn) btn.style.color = 'var(--muted)';
+        return;
+      }
+      var rec = new SpeechRecognition();
+      rec.lang = 'en-US';
+      rec.interimResults = false;
+      rec.maxAlternatives = 1;
+      _voiceRecognition = rec;
+      var btn = document.getElementById('voice-btn');
+      if (btn) btn.style.color = 'var(--primary)';
+      rec.onresult = function(e) {
+        var transcript = e.results[0][0].transcript;
+        var input = document.getElementById('chat-input');
+        if (input) { input.value = (input.value ? input.value + ' ' : '') + transcript; input.focus(); }
+        _voiceRecognition = null;
+        if (btn) btn.style.color = 'var(--muted)';
+      };
+      rec.onerror = function() { _voiceRecognition = null; if (btn) btn.style.color = 'var(--muted)'; };
+      rec.onend = function() { _voiceRecognition = null; if (btn) btn.style.color = 'var(--muted)'; };
+      rec.start();
+    }
+    window.toggleVoiceInput = toggleVoiceInput;
 
     async function sendChatMessage() {
       var input = document.getElementById('chat-input');
@@ -2491,6 +2555,156 @@ function getIndexHtml(): string {
     function toggleAiBaseUrl() { /* kept for compatibility; logic moved to selectProvider */ }
     window.toggleAiBaseUrl = toggleAiBaseUrl;
 
+    var SKILL_TRIGGERS = [
+      { key: 'sms_received', label: 'SMS Received' },
+    ];
+
+    function renderSkillCard(s) {
+      var sk = state.skills;
+      var isEditing = sk.editingId === s.id;
+      var safeId = escapeAttr(s.id);
+      var isActive = !!s.enabled;
+      var borderColor = isEditing ? 'var(--primary)' : isActive ? 'rgba(15,160,129,0.4)' : 'var(--border)';
+      var html = '<div style="background:var(--card-bg);border:1px solid ' + borderColor + ';border-radius:10px;padding:14px;transition:border-color 0.15s">';
+      if (isEditing) {
+        var triggerOptions = SKILL_TRIGGERS.map(function(t) {
+          return '<option value="' + t.key + '"' + (sk.editContent.trigger_event === t.key ? ' selected' : '') + '>' + t.label + '</option>';
+        }).join('');
+        html += '<div style="display:grid;gap:10px">';
+        html += '<div style="display:flex;gap:8px">';
+        html += '<input id="edit-skill-name-' + safeId + '" value="' + escapeAttr(s.name) + '" oninput="state.skills.editContent.name=this.value" placeholder="Skill name" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;box-sizing:border-box">';
+        html += '<select id="edit-skill-trigger-' + safeId + '" onchange="state.skills.editContent.trigger_event=this.value" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:13px">' + triggerOptions + '</select>';
+        html += '</div>';
+        html += '<textarea id="edit-skill-instructions-' + safeId + '" oninput="state.skills.editContent.instructions=this.value" placeholder="Describe what the AI should do when this trigger fires…" style="width:100%;min-height:120px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">' + escapeHtml(s.instructions) + '</textarea>';
+        html += '</div><div style="display:flex;gap:8px;margin-top:10px">';
+        html += '<button class="btn btn-primary" onclick="saveEditSkill(\\'' + safeId + '\\')" style="font-size:13px">Save</button>';
+        html += '<button class="btn btn-ghost" onclick="cancelEditSkill()" style="font-size:13px">Cancel</button>';
+        html += '</div>';
+      } else {
+        // Header row: name + trigger badge + action buttons
+        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">';
+        html += '<span style="font-size:14px;font-weight:600;flex:1">' + escapeHtml(s.name) + '</span>';
+        html += '<span style="font-size:11px;background:' + (isActive ? 'rgba(15,160,129,0.12)' : 'rgba(90,107,122,0.1)') + ';color:' + (isActive ? 'var(--primary)' : 'var(--muted)') + ';padding:2px 8px;border-radius:9999px;white-space:nowrap">' + (SKILL_TRIGGERS.find(function(t){return t.key===s.trigger_event;})||{label:s.trigger_event}).label + '</span>';
+        if (isActive) html += '<span style="font-size:11px;background:rgba(15,160,129,0.12);color:var(--primary);padding:2px 8px;border-radius:9999px">active</span>';
+        html += '<button onclick="startEditSkill(\\'' + safeId + '\\')" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px">';
+        html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>';
+        html += '<button onclick="deleteSkill(\\'' + safeId + '\\')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px;font-size:16px;line-height:1">×</button>';
+        html += '</div>';
+        // Instructions preview
+        html += '<p style="margin:0 0 12px;font-size:13px;color:var(--fg);white-space:pre-wrap;word-break:break-word;line-height:1.6">' + escapeHtml(s.instructions) + '</p>';
+        // Activate button
+        if (!isActive) {
+          html += '<button onclick="activateSkill(\\'' + safeId + '\\',\\'' + escapeAttr(s.trigger_event) + '\\')" class="btn btn-outline btn-sm" style="font-size:12px">Set as active</button>';
+        }
+      }
+      html += '</div>';
+      return html;
+    }
+
+    function renderSkillTab() {
+      var sk = state.skills;
+      var html = '<div style="max-width:680px;margin:0 auto;padding:16px">';
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">';
+      html += '<div><h2 style="margin:0 0 4px">Skills</h2>';
+      html += '<p style="margin:0;font-size:13px;color:var(--muted)">One active skill per trigger. Injected into the AI prompt when that event fires.</p></div>';
+      html += '<button class="btn ' + (sk.adding ? 'btn-ghost' : 'btn-primary') + '" onclick="toggleAddSkill()" style="font-size:13px">' + (sk.adding ? 'Cancel' : '+ New skill') + '</button>';
+      html += '</div>';
+      if (sk.error) {
+        html += '<div style="padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;color:#ef4444;font-size:14px;margin-bottom:12px">' + escapeHtml(sk.error) + '</div>';
+      }
+      if (sk.adding) {
+        var triggerOpts = SKILL_TRIGGERS.map(function(t) { return '<option value="' + t.key + '">' + t.label + '</option>'; }).join('');
+        html += '<div style="background:var(--card-bg);border:1px solid var(--primary);border-radius:10px;padding:14px;margin-bottom:16px">';
+        html += '<div style="display:grid;gap:10px">';
+        html += '<div style="display:flex;gap:8px">';
+        html += '<input id="new-skill-name" placeholder="Skill name" oninput="state.skills.newName=this.value" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;box-sizing:border-box">';
+        html += '<select id="new-skill-trigger" onchange="state.skills.newTrigger=this.value" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:13px">' + triggerOpts + '</select>';
+        html += '</div>';
+        html += '<textarea id="new-skill-instructions" placeholder="Describe what the AI should do when this trigger fires — context to check, reply style, behavioral rules, anything." oninput="state.skills.newInstructions=this.value" style="width:100%;min-height:120px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5"></textarea>';
+        html += '</div><div style="display:flex;gap:8px;margin-top:10px">';
+        html += '<button class="btn btn-primary" onclick="submitNewSkill()" style="font-size:13px">Save</button>';
+        html += '<button class="btn btn-ghost" onclick="toggleAddSkill()" style="font-size:13px">Cancel</button>';
+        html += '</div></div>';
+      }
+      if (sk.loading && !sk.items.length) {
+        html += '<p style="color:var(--muted);text-align:center;padding:40px 0">Loading…</p>';
+      } else if (!sk.items.length && !sk.adding) {
+        html += '<div style="text-align:center;padding:60px 20px;color:var(--muted)">';
+        html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;margin-bottom:12px;opacity:0.4"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+        html += '<p style="margin:0;font-size:15px;font-weight:500">No skills yet</p>';
+        html += '<p style="margin:8px 0 0;font-size:13px">Create a skill to guide the AI\\'s behavior when a trigger fires.</p>';
+        html += '</div>';
+      } else {
+        html += '<div style="display:grid;gap:10px">';
+        sk.items.forEach(function(s) { html += renderSkillCard(s); });
+        html += '</div>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    function toggleAddSkill() {
+      state.skills.adding = !state.skills.adding;
+      state.skills.newName = ''; state.skills.newInstructions = ''; state.skills.newTrigger = 'sms_received';
+      render();
+    }
+    window.toggleAddSkill = toggleAddSkill;
+
+    async function submitNewSkill() {
+      var name = state.skills.newName.trim();
+      if (!name) { alert('Skill name is required'); return; }
+      var trigger = state.skills.newTrigger || 'sms_received';
+      var instructions = state.skills.newInstructions || '';
+      try {
+        var r = await fetch('/api/skills', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, instructions: instructions, trigger_event: trigger }) });
+        var d = await r.json();
+        if (d.ok) { state.skills.adding = false; state.skills.newName = ''; state.skills.newInstructions = ''; await loadSkillsAsync(); }
+        else { state.skills.error = d.error || 'Failed to save'; render(); }
+      } catch(e) { state.skills.error = e.message; render(); }
+    }
+    window.submitNewSkill = submitNewSkill;
+
+    async function loadSkillsAsync() {
+      var d = await fetch('/api/skills').then(function(r) { return r.json(); });
+      if (d.ok) { state.skills.items = d.skills; render(); }
+    }
+
+    function startEditSkill(id) {
+      var skill = state.skills.items.find(function(s) { return s.id === id; });
+      if (!skill) return;
+      state.skills.editingId = id;
+      state.skills.editContent = { name: skill.name, instructions: skill.instructions, trigger_event: skill.trigger_event };
+      render();
+    }
+    window.startEditSkill = startEditSkill;
+
+    function cancelEditSkill() { state.skills.editingId = null; render(); }
+    window.cancelEditSkill = cancelEditSkill;
+
+    async function saveEditSkill(id) {
+      var c = state.skills.editContent;
+      try {
+        var r = await fetch('/api/skills/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: c.name, instructions: c.instructions, trigger_event: c.trigger_event }) });
+        var d = await r.json();
+        if (d.ok) { state.skills.editingId = null; await loadSkillsAsync(); }
+        else { state.skills.error = d.error || 'Failed to save'; render(); }
+      } catch(e) { state.skills.error = e.message; render(); }
+    }
+    window.saveEditSkill = saveEditSkill;
+
+    async function activateSkill(id, trigger_event) {
+      await fetch('/api/skills/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activate: true, trigger_event: trigger_event }) });
+      await loadSkillsAsync();
+    }
+    window.activateSkill = activateSkill;
+
+    async function deleteSkill(id) {
+      if (!confirm('Delete this skill?')) return;
+      await fetch('/api/skills/' + id, { method: 'DELETE' });
+      await loadSkillsAsync();
+    }
+    window.deleteSkill = deleteSkill;
+
     function renderSettingsTab() {
       var aiConfigured = state.chat.aiAvailable;
       return \`
@@ -2546,12 +2760,30 @@ function getIndexHtml(): string {
             \${state.autoReply.testResult ? '<span style="font-size:13px;color:' + (state.autoReply.testResult.ok ? 'var(--success)' : 'var(--danger,#ef4444)') + '">' + escapeHtml(state.autoReply.testResult.msg) + '</span>' : ''}
           </div>
         </div>
-        <div class="card" style="cursor:pointer" onclick="switchTab('memory')">
-          <h2>AI Memory</h2>
-          <p id="mem-count-display" style="font-size:14px;color:var(--muted);margin:0">\${state.memories.items.length} memories saved — <span style="color:var(--primary)">View &amp; manage →</span></p>
+        <div class="card">
+          <h2>Integrations</h2>
+          <p style="font-size:14px;color:var(--muted);margin-bottom:16px">Connect services to give the AI access to your data.</p>
+          <div style="display:grid;gap:10px">
+            \${state.sources.filter(s => ['gmail','google_calendar','github'].includes(s.name)).map(s => {
+              var icons = { gmail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>', google_calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>', github: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>' };
+              var labels = { gmail: 'Gmail', google_calendar: 'Calendar', github: 'GitHub' };
+              var tabNames = { gmail: 'gmail', google_calendar: 'google_calendar', github: 'github' };
+              var icon = icons[s.name] || '';
+              var label = labels[s.name] || s.name;
+              var accountLine = (s.accountInfo && s.accountInfo.email) ? (' — ' + escapeHtml(s.accountInfo.email)) : '';
+              return '<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--border);border-radius:9px;background:var(--card-bg)">' +
+                icon +
+                '<div style="flex:1;min-width:0"><p style="margin:0;font-size:14px;font-weight:500">' + label + '</p>' +
+                '<p style="margin:2px 0 0;font-size:12px;color:' + (s.connected ? 'var(--success)' : 'var(--muted)') + '">' + (s.connected ? ('Connected' + accountLine) : 'Not connected') + '</p></div>' +
+                (s.connected
+                  ? '<button class="btn btn-sm btn-outline" onclick="switchTab(\\'' + tabNames[s.name] + '\\')" style="font-size:12px;flex-shrink:0">Manage →</button>'
+                  : '<a href="/oauth/' + s.name + '/start" class="btn btn-sm btn-primary" style="font-size:12px;text-decoration:none;flex-shrink:0">Connect</a>') +
+                '</div>';
+            }).join('')}
+          </div>
         </div>
         <div class="card">
-          <h2>Audit Log</h2>
+          <h2>Activity Log</h2>
           \${state.audit.length ? '<table><tr><th>Time</th><th>Event</th><th>Source</th><th>Details</th><th>Response</th></tr>' +
             state.audit.map(e => {
               const d = typeof e.details === 'string' ? JSON.parse(e.details) : e.details;
@@ -2563,7 +2795,7 @@ function getIndexHtml(): string {
                 : '-';
               return '<tr><td style="font-size:14px">' + new Date(e.timestamp).toLocaleString() + '</td><td>' + e.event + '</td><td>' + (e.source || '-') + '</td><td style="font-size:14px;max-width:300px;overflow-wrap:break-word;word-break:break-word">' + JSON.stringify(detailsCopy).slice(0,200) + (JSON.stringify(detailsCopy).length > 200 ? '...' : '') + '</td><td>' + respCell + '</td></tr>';
             }).join('') +
-            '</table>' : '<p class="empty">No audit entries.</p>'}
+            '</table>' : '<p class="empty">No activity yet.</p>'}
         </div>
       \`;
     }

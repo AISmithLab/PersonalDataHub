@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import type { ServerDeps } from '../server.js';
 import { applyFilters, type QuickFilter } from '../filters.js';
-import type { MemoryRow } from '../../database/datastore.js';
+import type { MemoryRow, SkillRow } from '../../database/datastore.js';
 import { runCode } from '../code-runner/runner.js';
 
 type SmsMessage = { address: string; body: string; date: number };
@@ -242,6 +242,49 @@ async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]
   tools.push({
     type: 'function',
     function: {
+      name: 'list_skills',
+      description: 'List all agent skills. Returns each skill\'s id, name, description, rules, and enabled status.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  });
+
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'save_skill',
+      description: 'Create or update an agent skill. Each trigger_event can have one active skill at a time. Pass id to update an existing skill, omit id to create a new one. Activating a skill automatically deactivates any other skill with the same trigger.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Skill ID to update (omit to create new)' },
+          name: { type: 'string', description: 'Short name for this skill' },
+          instructions: { type: 'string', description: 'Full behavior instructions as plain text. Can include what context to check, reply style, and behavioral rules.' },
+          trigger_event: { type: 'string', description: 'When this skill fires. Currently supported: sms_received' },
+          activate: { type: 'boolean', description: 'If true, make this skill the active one for its trigger (default false)' },
+        },
+        required: ['name', 'instructions', 'trigger_event'],
+      },
+    },
+  });
+
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'delete_skill',
+      description: 'Delete an agent skill by ID.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Skill ID to delete' },
+        },
+        required: ['id'],
+      },
+    },
+  });
+
+  tools.push({
+    type: 'function',
+    function: {
       name: 'run_code',
       description: `Execute JavaScript on this device's Node.js runtime. Use for computations, file I/O, network requests, or data processing.
 Globals available: fetch, require (fs, path, crypto, etc.), Buffer, URL, URLSearchParams, setTimeout, AbortController, __dataDir (app data directory path).
@@ -283,6 +326,7 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
   }
 
   lines.push('', 'Memory: Use save_memory() to record important facts the user shares (preferences, ongoing projects, personal context). Use update_memory(id) when a fact changes. Use delete_memory(id) for stale facts. Be proactive but concise — one clear sentence per memory.');
+  lines.push('', 'Skills: Use list_skills() to see agent skills (one active per trigger). Use save_skill(name, instructions, trigger_event, activate?) to create/update a skill — set activate=true to make it the active one for that trigger, which deactivates any other. Use delete_skill(id) to remove one. Currently supported trigger: sms_received.');
   lines.push('', 'Code execution: Use run_code() to run JavaScript on this device. Supports top-level await, fetch, require (fs, path, etc.), Buffer, and __dataDir (path to app data). Use console.log() to emit output — return values are ignored. Each call is a fresh context; write files at __dataDir to persist data between calls.');
 
   if (sms && sms.length > 0) {
@@ -430,6 +474,39 @@ async function executeTool(
       if (!id) return JSON.stringify({ error: 'id is required' });
       await deps.store.deleteMemory(id);
       await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_memory_deleted', source: null, details: JSON.stringify({ id }) });
+      return JSON.stringify({ ok: true });
+    }
+
+    case 'list_skills': {
+      const skills = await deps.store.listSkills();
+      return JSON.stringify({ ok: true, skills });
+    }
+
+    case 'save_skill': {
+      const name = String(input.name ?? '').trim();
+      const instructions = String(input.instructions ?? '').trim();
+      const trigger_event = String(input.trigger_event ?? 'sms_received').trim();
+      const activate = Boolean(input.activate);
+      if (!name || !instructions) return JSON.stringify({ error: 'name and instructions are required' });
+      const existingId = String(input.id ?? '').trim();
+      if (existingId) {
+        await deps.store.updateSkill(existingId, { name, instructions, trigger_event });
+        if (activate) await deps.store.activateSkill(existingId, trigger_event);
+        await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_skill_updated', source: null, details: JSON.stringify({ id: existingId, name, trigger_event, activate }) });
+        return JSON.stringify({ ok: true, id: existingId });
+      }
+      const skillId = `skill_${randomUUID().slice(0, 12)}`;
+      await deps.store.insertSkill({ id: skillId, name, instructions, trigger_event, enabled: 0 });
+      if (activate) await deps.store.activateSkill(skillId, trigger_event);
+      await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_skill_created', source: null, details: JSON.stringify({ id: skillId, name, trigger_event, activate }) });
+      return JSON.stringify({ ok: true, id: skillId });
+    }
+
+    case 'delete_skill': {
+      const id = String(input.id ?? '').trim();
+      if (!id) return JSON.stringify({ error: 'id is required' });
+      await deps.store.deleteSkill(id);
+      await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_skill_deleted', source: null, details: JSON.stringify({ id }) });
       return JSON.stringify({ ok: true });
     }
 
@@ -723,20 +800,27 @@ async function runAutoReplyLoop(
   const model = getModel(deps);
   const tools = await buildAutoReplyTools(deps);
   const memories = await deps.store.listMemories();
+  const skills = await deps.store.listSkills();
   const today = new Date().toISOString().split('T')[0];
 
   const systemLines = [
     `You are an AI SMS auto-reply assistant on the user's Android phone. Today is ${today}.`,
     '',
-    'Reply concisely via SMS (1-3 sentences). Do not identify yourself as AI unless asked.',
     'Reply with just the message text — no quotes, no labels, no preamble.',
     '',
-    'Use your tools proactively:',
-    '- Check the calendar before replying to anything time/scheduling related',
-    '- Check email for relevant threads if the context is unclear',
-    '- Create calendar events directly if the sender proposes a specific time or meeting',
-    '- Save new facts about this contact to memory if they share something relevant',
+    '--- Tools available ---',
+    '- read_calendar_events: check upcoming events and availability',
+    '- read_emails: scan recent email threads for context',
+    '- create_calendar_event: create a new event (requires explicit time from sender)',
+    '- read_sms_thread: review conversation history with this contact',
+    '- save_memory / update_memory / delete_memory: persist facts about contacts',
   ];
+
+  // Inject the active skill for this trigger — one enabled skill per trigger_event
+  const activeSkill = skills.find(s => s.trigger_event === 'sms_received' && s.enabled);
+  if (activeSkill) {
+    systemLines.push('', '--- Behavior instructions ---', activeSkill.instructions);
+  }
 
   if (memories.length > 0) {
     systemLines.push('', 'What you remember about the user:');

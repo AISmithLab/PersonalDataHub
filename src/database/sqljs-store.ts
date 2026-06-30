@@ -38,6 +38,7 @@ import type {
   FilterRow,
   AuditRow,
   MemoryRow,
+  SkillRow,
   GitHubRepoRow,
   GitHubRepoInput,
   OAuthStateData,
@@ -374,5 +375,38 @@ export class SqlJsDataStore implements DataStore {
 
   deleteMemory(id: string): void {
     this.run('DELETE FROM ai_memories WHERE id = ?', [id]);
+  }
+
+  // --- Agent Skills ---
+
+  listSkills(): SkillRow[] {
+    return this.getAll<SkillRow>('SELECT * FROM agent_skills ORDER BY trigger_event ASC, created_at ASC');
+  }
+
+  insertSkill(skill: { id: string; name: string; instructions: string; trigger_event: string; enabled?: number }): void {
+    this.run('INSERT INTO agent_skills (id, name, instructions, trigger_event, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [skill.id, skill.name, skill.instructions, skill.trigger_event, skill.enabled ?? 0, this.now(), this.now()]);
+  }
+
+  updateSkill(id: string, fields: { name?: string; instructions?: string; trigger_event?: string; enabled?: number }): void {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    if (fields.name !== undefined) { sets.push('name = ?'); vals.push(fields.name); }
+    if (fields.instructions !== undefined) { sets.push('instructions = ?'); vals.push(fields.instructions); }
+    if (fields.trigger_event !== undefined) { sets.push('trigger_event = ?'); vals.push(fields.trigger_event); }
+    if (fields.enabled !== undefined) { sets.push('enabled = ?'); vals.push(fields.enabled); }
+    if (sets.length === 0) return;
+    sets.push('updated_at = ?');
+    vals.push(this.now());
+    this.run(`UPDATE agent_skills SET ${sets.join(', ')} WHERE id = ?`, [...vals, id]);
+  }
+
+  activateSkill(id: string, trigger_event: string): void {
+    this.run('UPDATE agent_skills SET enabled = 0, updated_at = ? WHERE trigger_event = ? AND id != ?', [this.now(), trigger_event, id]);
+    this.run('UPDATE agent_skills SET enabled = 1, updated_at = ? WHERE id = ?', [this.now(), id]);
+  }
+
+  deleteSkill(id: string): void {
+    this.run('DELETE FROM agent_skills WHERE id = ?', [id]);
   }
 }
