@@ -50,6 +50,23 @@ export interface AuditRow {
   details: string;
 }
 
+export interface MemoryRow {
+  id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SkillRow {
+  id: string;
+  name: string;
+  instructions: string;
+  trigger_event: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface GitHubRepoRow {
   full_name: string;
   owner: string;
@@ -148,4 +165,17 @@ export interface DataStore {
   // --- OAuth State (CSRF) ---
   setOAuthState(state: string, data: OAuthStateData): MaybePromise<void>;
   getAndDeleteOAuthState(state: string): MaybePromise<OAuthStateData | null>;
+
+  // --- AI Memories ---
+  listMemories(): MaybePromise<MemoryRow[]>;
+  insertMemory(id: string, content: string): MaybePromise<void>;
+  updateMemory(id: string, content: string): MaybePromise<void>;
+  deleteMemory(id: string): MaybePromise<void>;
+
+  // --- Agent Skills ---
+  listSkills(): MaybePromise<SkillRow[]>;
+  insertSkill(skill: { id: string; name: string; instructions: string; trigger_event: string; enabled?: number }): MaybePromise<void>;
+  updateSkill(id: string, fields: { name?: string; instructions?: string; trigger_event?: string; enabled?: number }): MaybePromise<void>;
+  activateSkill(id: string, trigger_event: string): MaybePromise<void>;
+  deleteSkill(id: string): MaybePromise<void>;
 }

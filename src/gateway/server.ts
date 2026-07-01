@@ -5,6 +5,7 @@ import type { ConnectorRegistry } from './connectors/types.js';
 import type { HubConfigParsed } from '../config/schema.js';
 import type { TokenManager } from './auth/token-manager.js';
 import { createAppApi } from './app-api.js';
+import { createChatRoutes } from './chat/routes.js';
 import { createGuiRoutes } from './gui/routes.js';
 import { createOAuthRoutes } from './auth/oauth-routes.js';
 import { createLoginRoutes } from './auth/login-routes.js';
@@ -19,8 +20,12 @@ export interface ServerDeps {
 export function createServer(deps: ServerDeps): Hono {
   const app = new Hono();
 
-  // Health check
-  app.get('/health', (c) => c.json({ ok: true, version: '0.1.0' }));
+  // Health check — CORS wildcard so the Capacitor WebView (origin: http://localhost)
+  // can poll this endpoint from www/index.html before navigating to the server.
+  app.get('/health', (c) => {
+    c.header('Access-Control-Allow-Origin', '*');
+    return c.json({ ok: true, version: '0.1.0' });
+  });
 
   // Mount App API
   const appApi = createAppApi(deps);
@@ -40,6 +45,10 @@ export function createServer(deps: ServerDeps): Hono {
     store: deps.store,
   });
   app.route('/auth', loginRoutes);
+
+  // Mount chat routes (before GUI so /api/chat* isn't caught by the SPA catch-all)
+  const chatRoutes = createChatRoutes(deps);
+  app.route('/', chatRoutes);
 
   // Mount GUI routes (must be last — catches '/')
   const guiRoutes = createGuiRoutes({

@@ -36,6 +36,8 @@ import type {
   StagingRow,
   FilterRow,
   AuditRow,
+  MemoryRow,
+  SkillRow,
   GitHubRepoRow,
   GitHubRepoInput,
   OAuthStateData,
@@ -550,6 +552,20 @@ export class DynamoDataStore implements DataStore {
       codeVerifier: result.Item.codeVerifier as string,
     };
   }
+
+  // --- AI Memories (not implemented for DynamoDB — Android uses SQLite) ---
+
+  async listMemories(): Promise<MemoryRow[]> { return []; }
+  async insertMemory(_id: string, _content: string): Promise<void> {}
+  async updateMemory(_id: string, _content: string): Promise<void> {}
+  async deleteMemory(_id: string): Promise<void> {}
+
+  // --- Agent Skills (not implemented for DynamoDB) ---
+  async listSkills(): Promise<SkillRow[]> { return []; }
+  async insertSkill(_skill: { id: string; name: string; instructions: string; trigger_event: string; enabled?: number }): Promise<void> {}
+  async updateSkill(_id: string, _fields: { name?: string; instructions?: string; trigger_event?: string; enabled?: number }): Promise<void> {}
+  async activateSkill(_id: string, _trigger_event: string): Promise<void> {}
+  async deleteSkill(_id: string): Promise<void> {}
 
   // --- Helpers ---
 

@@ -30,23 +30,28 @@ const sourceBoundarySchema = z.object({
 
 const sourceConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  owner_auth: ownerAuthSchema,
+  owner_auth: ownerAuthSchema.optional(),
   agent_identity: agentIdentitySchema.optional(),
   boundary: sourceBoundarySchema.default({}),
-
 });
 
 const aiProviderSchema = z.object({
   provider: z.string(),
   api_key: z.string(),
   model: z.string().optional(),
+  base_url: z.string().optional(),
 });
 
 const deploymentSchema = z.object({
   gateway: z.enum(['local', 'serverless']).default('local'),
-  database: z.enum(['sqlite', 'dynamodb']).default('sqlite'),
+  database: z.enum(['sqlite', 'dynamodb', 'sqljs']).default('sqlite'),
   base_url: z.string().optional(),
   dynamodb_table: z.string().optional(),
+});
+
+const autoReplySchema = z.object({
+  enabled: z.boolean().default(false),
+  maxToolRounds: z.number().int().min(1).max(10).default(3),
 });
 
 export const hubConfigSchema = z.object({
@@ -54,6 +59,7 @@ export const hubConfigSchema = z.object({
   sources: z.record(z.string(), sourceConfigSchema).default({}),
   encryption_key: z.string().optional(),
   ai: aiProviderSchema.optional(),
+  autoReply: autoReplySchema.optional(),
   port: z.number().default(3000),
 });
 

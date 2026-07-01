@@ -86,6 +86,25 @@ CREATE TABLE IF NOT EXISTS github_repos (
   fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`;
 
+const CREATE_AI_MEMORIES = `
+CREATE TABLE IF NOT EXISTS ai_memories (
+  id TEXT PRIMARY KEY,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`;
+
+const CREATE_AGENT_SKILLS = `
+CREATE TABLE IF NOT EXISTS agent_skills (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  instructions TEXT NOT NULL DEFAULT '',
+  trigger_event TEXT NOT NULL DEFAULT 'sms_received',
+  enabled INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`;
+
 export function createTables(db: Database.Database): void {
   db.exec(CREATE_USERS);
   db.exec(CREATE_SESSIONS);
@@ -98,4 +117,9 @@ export function createTables(db: Database.Database): void {
   db.exec(CREATE_OAUTH_TOKENS);
   db.exec(CREATE_FILTERS);
   db.exec(CREATE_GITHUB_REPOS);
+  db.exec(CREATE_AI_MEMORIES);
+  db.exec(CREATE_AGENT_SKILLS);
+  // Migrate existing agent_skills tables
+  try { db.exec("ALTER TABLE agent_skills ADD COLUMN instructions TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already exists */ }
+  try { db.exec("ALTER TABLE agent_skills ADD COLUMN trigger_event TEXT NOT NULL DEFAULT 'sms_received'"); } catch (_) { /* already exists */ }
 }

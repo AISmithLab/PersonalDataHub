@@ -233,6 +233,39 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
     return c.json({ ok: true });
   });
 
+  // --- Agent Skills endpoints ---
+
+  app.get('/api/skills', async (c) => {
+    const skills = await deps.store.listSkills();
+    return c.json({ ok: true, skills });
+  });
+
+  app.post('/api/skills', async (c) => {
+    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string };
+    if (!body.name?.trim()) return c.json({ ok: false, error: 'name is required' }, 400);
+    const id = `skill_${randomUUID().slice(0, 12)}`;
+    await deps.store.insertSkill({ id, name: body.name.trim(), instructions: body.instructions ?? '', trigger_event: body.trigger_event ?? 'sms_received', enabled: 0 });
+    return c.json({ ok: true, id });
+  });
+
+  app.put('/api/skills/:id', async (c) => {
+    const id = c.req.param('id');
+    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; activate?: boolean };
+    if (body.activate) {
+      const skill = (await deps.store.listSkills()).find(s => s.id === id);
+      if (skill) await deps.store.activateSkill(id, body.trigger_event ?? skill.trigger_event);
+    } else {
+      await deps.store.updateSkill(id, { name: body.name, instructions: body.instructions, trigger_event: body.trigger_event });
+    }
+    return c.json({ ok: true });
+  });
+
+  app.delete('/api/skills/:id', async (c) => {
+    const id = c.req.param('id');
+    await deps.store.deleteSkill(id);
+    return c.json({ ok: true });
+  });
+
   // --- GitHub repo discovery endpoints ---
 
   // Fetch all repos from GitHub API, upsert into DB, return with selection state
@@ -497,7 +530,7 @@ function getIndexHtml(): string {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>PersonalDataHub</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -524,7 +557,7 @@ function getIndexHtml(): string {
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); font-size: 15px; line-height: 1.6; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); font-size: 15px; line-height: 1.6; padding-top: env(safe-area-inset-top, 0px); }
 
     /* ---- Layout: sidebar + main ---- */
     #app { display: flex; min-height: 100vh; }
@@ -744,6 +777,70 @@ function getIndexHtml(): string {
     @keyframes spin { to { transform: rotate(360deg); } }
     @keyframes flash-save { 0% { opacity: 1; } 100% { opacity: 0; } }
     .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* ---- Mobile / Android layout ---- */
+    @media (max-width: 768px) {
+      :root { --sidebar-width: 0px; }
+      .sidebar { display: none; }
+      .main-content { margin-left: 0; }
+      .content { padding: 16px; }
+      .gmail-grid { grid-template-columns: 1fr; }
+      .gmail-top-row { grid-template-columns: 1fr; }
+
+      /* Bottom navigation replaces sidebar on mobile */
+      #bottom-nav {
+        display: flex;
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        background: var(--sidebar-bg);
+        border-top: 1px solid var(--sidebar-border);
+        z-index: 50;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      #bottom-nav a {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 12px 8px;
+        font-size: 12px;
+        color: var(--muted);
+        text-decoration: none;
+        cursor: pointer;
+        gap: 6px;
+        border-top: 2px solid transparent;
+        transition: all 0.15s;
+      }
+      #bottom-nav a.active { color: var(--primary); border-top-color: var(--primary); }
+      #bottom-nav a svg { width: 22px; height: 22px; }
+      #bottom-nav .nav-badge { font-size: 10px; padding: 1px 5px; }
+
+      /* Chat container — full height minus bottom nav + padding */
+      .chat-container { height: calc(100dvh - 86px); display: flex; flex-direction: column; }
+
+      /* Large source tiles on mobile overview */
+      .source-tile {
+        padding: 20px 18px;
+        min-height: 90px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+
+      /* Increase touch targets */
+      .btn { min-height: 44px; padding: 10px 18px; }
+      .btn-sm { min-height: 36px; }
+      .nav-item { padding: 12px 16px; }
+      .email-row-btn { padding: 16px 12px; }
+
+      /* Main content needs bottom padding to clear bottom nav + gesture bar */
+      .main-content { padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+
+      /* Chat container: full screen minus top inset, bottom nav, and gesture bar */
+      .chat-container { height: calc(100dvh - 86px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); }
+    }
+    @media (min-width: 769px) { #bottom-nav { display: none; } .chat-container { height: calc(100vh - 80px); } }
   </style>
 </head>
 <body>
@@ -761,6 +858,9 @@ function getIndexHtml(): string {
         <button id="auth-submit" type="submit" class="btn btn-primary" style="width:100%;padding:10px;font-size:14px">Sign In</button>
       </form>
       <div id="login-error" style="color:var(--destructive);font-size:13px;margin-top:12px;text-align:center"></div>
+      <div style="text-align:center;margin-top:16px;font-size:13px;color:var(--muted)">
+        <a id="auth-toggle" href="#" onclick="toggleAuthMode();return false;" style="color:var(--primary);text-decoration:none">Already have an account? Sign in</a>
+      </div>
     </div>
   </div>
 
@@ -774,34 +874,20 @@ function getIndexHtml(): string {
         <div class="sidebar-subtitle">Access control for AI agents</div>
       </div>
       <nav class="sidebar-nav" id="sidebar-nav">
-        <div class="nav-group-label">Overview</div>
-        <a class="nav-item active" data-tab="overview" onclick="switchTab('overview')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          <span class="nav-label">Overview</span>
-        </a>
-        <div class="nav-group-label">Data Sources</div>
-        <a class="nav-item" data-tab="gmail" onclick="switchTab('gmail')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-          <span class="nav-label">Gmail</span>
-          <span class="status-dot status-dot-disconnected" id="gmail-dot"></span>
-          <span class="nav-badge" id="gmail-badge" style="display:none">0</span>
-        </a>
-        <a class="nav-item" data-tab="github" onclick="switchTab('github')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-          <span class="nav-label">GitHub</span>
-          <span class="status-dot status-dot-disconnected" id="github-dot"></span>
-        </a>
-        <a class="nav-item" data-tab="google_calendar" onclick="switchTab('google_calendar')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-          <span class="nav-label">Calendar</span>
-          <span class="status-dot status-dot-disconnected" id="calendar-dot"></span>
-          <span class="nav-badge" id="calendar-badge" style="display:none">0</span>
-        </a>        <a class="nav-item disabled">
+        <a class="nav-item active" data-tab="ai" onclick="switchTab('ai')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          <span class="nav-label">Slack</span>
-          <span class="nav-badge-muted">soon</span>
+          <span class="nav-label">Chat</span>
+          <span class="status-dot" id="ai-dot" style="background:var(--muted)"></span>
         </a>
-        <div class="nav-group-label">System</div>
+        <a class="nav-item" data-tab="skill" onclick="switchTab('skill')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          <span class="nav-label">Skill</span>
+        </a>
+        <a class="nav-item" data-tab="memory" onclick="switchTab('memory')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <span class="nav-label">Memory</span>
+          <span class="nav-badge" id="memory-count-badge" style="display:none">0</span>
+        </a>
         <a class="nav-item" data-tab="settings" onclick="switchTab('settings')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           <span class="nav-label">Settings</span>
@@ -817,8 +903,28 @@ function getIndexHtml(): string {
     </div>
   </div>
 
+  <!-- Bottom navigation (visible only on mobile via CSS media query) -->
+  <nav id="bottom-nav">
+    <a data-tab="ai" onclick="switchTab('ai')" class="active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>Chat</span>
+    </a>
+    <a data-tab="skill" onclick="switchTab('skill')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      <span>Skill</span>
+    </a>
+    <a data-tab="memory" onclick="switchTab('memory')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      <span>Memory</span>
+    </a>
+    <a data-tab="settings" onclick="switchTab('settings')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span>Settings</span>
+    </a>
+  </nav>
+
   <script>
-    let currentTab = 'overview';
+    let currentTab = 'ai';
     var ALL_FIELDS = ['Subject', 'Body', 'Sender', 'Recipients', 'Labels', 'Attachments', 'Snippet'];
     var DEMO_EMAILS = [
       { id:'e1', from:'alice@company.com', to:'owner@gmail.com', subject:'Q1 Planning Meeting', snippet:'Can we reschedule Thursday\\'s meeting to 2pm?', body:'Hi,\\n\\nCan we reschedule Thursday\\'s meeting to 2pm? I have a conflict with the original time.\\n\\nThanks,\\nAlice', date:'2025-02-22T09:15:00Z', labels:['Inbox'], hasAttachment:false },
@@ -848,13 +954,21 @@ function getIndexHtml(): string {
       realEvents: null,
       eventsLoading: false,
       eventsError: null,
-      filterTypes: {},    };
+      filterTypes: {},
+      sms: { messages: null, loading: false, error: null, box: 'inbox', contextMenu: null, autoReplying: false },
+      chat: { messages: [], loading: false, error: null, aiAvailable: false, stagedSmsIds: [], codeBlocks: {} },
+      memories: { items: [], loading: false, editingId: null, editContent: '', adding: false, newContent: '', error: null },
+      skills: { items: [], loading: false, editingId: null, editContent: { name: '', instructions: '', trigger_event: 'sms_received' }, adding: false, newName: '', newInstructions: '', newTrigger: 'sms_received', error: null },
+      settingsProvider: 'anthropic',
+      autoReply: { enabled: false, maxToolRounds: 3, loading: false, testResult: null, testLoading: false },
+      settingsSection: 'ai',
+    };
     let _saveTimer = null;
 
-    // Sidebar nav switching
+    // Sidebar + bottom-nav switching
     function switchTab(tab) {
       currentTab = tab;
-      document.querySelectorAll('.nav-item[data-tab]').forEach(function(el) {
+      document.querySelectorAll('.nav-item[data-tab], #bottom-nav a[data-tab]').forEach(function(el) {
         el.classList.toggle('active', el.dataset.tab === tab);
       });
       render();
@@ -889,12 +1003,12 @@ function getIndexHtml(): string {
             } else {
               state.emailsError = data.error || 'Failed to load emails';
             }
-            render();
+            if (currentTab === 'gmail') render();
           })
           .catch(function(err) {
             state.emailsLoading = false;
             state.emailsError = err.message || 'Network error';
-            render();
+            if (currentTab === 'gmail') render();
           });
       }
 
@@ -913,16 +1027,150 @@ function getIndexHtml(): string {
             } else {
               state.eventsError = data.error || 'Failed to load events';
             }
-            render();
+            if (currentTab === 'google_calendar') render();
           })
           .catch(function(err) {
             state.eventsLoading = false;
             state.eventsError = err.message || 'Network error';
-            render();
+            if (currentTab === 'google_calendar') render();
           });
       }
+      // Check AI configuration status
+      fetch('/api/chat/status').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          state.chat.aiAvailable = d.configured;
+          if (currentTab === 'ai') render();
+        }
+      }).catch(function() { /* non-fatal */ });
+
+      // Check auto-reply status
+      fetch('/api/settings/auto-reply').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          state.autoReply.enabled = d.enabled;
+          if (typeof d.maxToolRounds === 'number') state.autoReply.maxToolRounds = d.maxToolRounds;
+          if (currentTab === 'settings') render();
+        }
+      }).catch(function() { /* non-fatal */ });
+
+      // Load skills
+      fetch('/api/skills').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          state.skills.items = d.skills;
+          if (currentTab === 'skill') render();
+        }
+      }).catch(function() { /* non-fatal */ });
+
       render();
     }
+
+    function loadSkills() {
+      if (state.skills.loading) return;
+      state.skills.loading = true;
+      fetch('/api/skills').then(function(r) { return r.json(); }).then(function(d) {
+        state.skills.loading = false;
+        if (d.ok) { state.skills.items = d.skills; if (currentTab === 'skill') render(); }
+      }).catch(function() { state.skills.loading = false; });
+    }
+    window.loadSkills = loadSkills;
+
+    function loadMemories() {
+      if (state.memories.loading) return;
+      state.memories.loading = true;
+      fetch('/api/memories').then(function(r) { return r.json(); }).then(function(d) {
+        state.memories.loading = false;
+        if (d.ok) {
+          state.memories.items = d.memories;
+          if (currentTab === 'memory') render();
+          else {
+            var el = document.getElementById('mem-count-display');
+            if (el) el.textContent = d.memories.length + ' memories saved';
+          }
+        }
+      }).catch(function() { state.memories.loading = false; });
+    }
+    window.loadMemories = loadMemories;
+
+    function deleteMemory(id) {
+      fetch('/api/memories/' + encodeURIComponent(id), { method: 'DELETE' }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) { state.memories.items = state.memories.items.filter(function(m) { return m.id !== id; }); render(); }
+      }).catch(function() {});
+    }
+    window.deleteMemory = deleteMemory;
+
+    function startEditMemory(id) {
+      var m = state.memories.items.find(function(x) { return x.id === id; });
+      if (!m) return;
+      state.memories.editingId = id;
+      state.memories.editContent = m.content;
+      render();
+    }
+    window.startEditMemory = startEditMemory;
+
+    function cancelEditMemory() {
+      state.memories.editingId = null;
+      state.memories.editContent = '';
+      render();
+    }
+    window.cancelEditMemory = cancelEditMemory;
+
+    function saveEditMemory(id) {
+      var content = state.memories.editContent.trim();
+      if (!content) return;
+      fetch('/api/memories/' + encodeURIComponent(id), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: content }),
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          state.memories.items = state.memories.items.map(function(m) {
+            return m.id === id ? Object.assign({}, m, { content: content }) : m;
+          });
+          state.memories.editingId = null;
+          state.memories.editContent = '';
+          render();
+        }
+      }).catch(function() {});
+    }
+    window.saveEditMemory = saveEditMemory;
+
+    function updateMemoryEditContent(val) {
+      state.memories.editContent = val;
+    }
+    window.updateMemoryEditContent = updateMemoryEditContent;
+
+    function toggleAddMemory() {
+      state.memories.adding = !state.memories.adding;
+      state.memories.newContent = '';
+      state.memories.error = null;
+      render();
+    }
+    window.toggleAddMemory = toggleAddMemory;
+
+    function updateNewMemoryContent(val) {
+      state.memories.newContent = val;
+    }
+    window.updateNewMemoryContent = updateNewMemoryContent;
+
+    function submitNewMemory() {
+      var content = state.memories.newContent.trim();
+      if (!content) return;
+      fetch('/api/memories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: content }),
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          loadMemories();
+          state.memories.adding = false;
+          state.memories.newContent = '';
+          state.memories.error = null;
+        } else {
+          state.memories.error = d.error || 'Failed to save';
+          render();
+        }
+      }).catch(function() { state.memories.error = 'Network error'; render(); });
+    }
+    window.submitNewMemory = submitNewMemory;
 
     function render() {
       var focused = document.activeElement;
@@ -935,7 +1183,11 @@ function getIndexHtml(): string {
         case 'gmail': content.innerHTML = renderGmailTab(); break;
         case 'github': content.innerHTML = renderGitHubTab(); break;
         case 'google_calendar': content.innerHTML = renderCalendarTab(); break;
-        case 'settings': content.innerHTML = renderSettingsTab(); break;
+        case 'sms': content.innerHTML = renderSmsTab(); loadSmsMessages(); break;
+        case 'ai': content.innerHTML = renderAiTab(); var _cm = document.getElementById('chat-messages'); if (_cm) _cm.scrollTop = _cm.scrollHeight; break;
+        case 'skill': content.innerHTML = renderSkillTab(); loadSkills(); break;
+        case 'memory': content.innerHTML = renderMemoryTab(); loadMemories(); break;
+        case 'settings': content.innerHTML = renderSettingsTab(); loadMemories(); break;
       }
       // Update sidebar badges and status dots
       var gmailPendingCount = state.staging.filter(function(a) { return a.source === 'gmail' && a.status === 'pending'; }).length;
@@ -944,11 +1196,21 @@ function getIndexHtml(): string {
         if (gmailPendingCount) { gmailBadge.textContent = gmailPendingCount; gmailBadge.style.display = ''; }
         else { gmailBadge.style.display = 'none'; }
       }
+      var bnGmailBadge = document.getElementById('bn-gmail-badge');
+      if (bnGmailBadge) {
+        if (gmailPendingCount) { bnGmailBadge.textContent = gmailPendingCount; bnGmailBadge.style.display = ''; }
+        else { bnGmailBadge.style.display = 'none'; }
+      }
       var calPendingCount = state.staging.filter(function(a) { return a.source === 'google_calendar' && a.status === 'pending'; }).length;
       var calBadge = document.getElementById('calendar-badge');
       if (calBadge) {
         if (calPendingCount) { calBadge.textContent = calPendingCount; calBadge.style.display = ''; }
         else { calBadge.style.display = 'none'; }
+      }
+      var bnCalBadge = document.getElementById('bn-cal-badge');
+      if (bnCalBadge) {
+        if (calPendingCount) { bnCalBadge.textContent = calPendingCount; bnCalBadge.style.display = ''; }
+        else { bnCalBadge.style.display = 'none'; }
       }
       // Gmail status dot
       var gmailSource = state.sources.find(function(s) { return s.name === 'gmail'; });
@@ -967,6 +1229,18 @@ function getIndexHtml(): string {
       var ghDot = document.getElementById('github-dot');
       if (ghDot) {
         ghDot.className = 'status-dot ' + (ghSource && ghSource.connected ? 'status-dot-connected' : 'status-dot-disconnected');
+      }
+      // AI status dot
+      var aiDot = document.getElementById('ai-dot');
+      if (aiDot) {
+        aiDot.style.background = state.chat.aiAvailable ? 'var(--success)' : 'var(--muted)';
+      }
+      // Memory count badge
+      var memBadge = document.getElementById('memory-count-badge');
+      if (memBadge) {
+        var mc = state.memories.items.length;
+        if (mc) { memBadge.textContent = mc; memBadge.style.display = ''; }
+        else { memBadge.style.display = 'none'; }
       }
 
       if (focusId) {
@@ -1023,59 +1297,71 @@ function getIndexHtml(): string {
         </div>
 
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px">
-          <div class="card" style="cursor:pointer" onclick="switchTab('gmail')">
+          <div class="card source-tile" style="cursor:pointer" onclick="switchTab('sms')">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.63 3.4 2 2 0 0 1 3.6 1.21h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16.92z"/></svg>
+                <span style="font-weight:600;font-size:15px">SMS</span>
+              </div>
+              <span class="status-dot status-dot-connected"></span>
+            </div>
+            <p style="font-size:14px;color:var(--muted);margin-bottom:8px">Messages via Android bridge</p>
+            <div style="display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Open <span style="font-size:14px">&rarr;</span></div>
+          </div>
+
+          <div class="card source-tile" style="cursor:pointer" onclick="switchTab('gmail')">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
               <div style="display:flex;align-items:center;gap:8px">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                <span style="font-weight:600;font-size:14px">Gmail</span>
+                <span style="font-weight:600;font-size:15px">Email</span>
               </div>
               <span class="status-dot \${gmailConnected ? 'status-dot-connected' : 'status-dot-disconnected'}"></span>
             </div>
             \${gmailConnected && gmailAccount && gmailAccount.email ? '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">' + gmailAccount.email + '</p>' : '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">Not connected</p>'}
             <div style="display:flex;align-items:center;justify-content:space-between">
-              <span style="font-size:14px;color:var(--muted)">Filters: <strong class="font-mono" style="color:var(--fg)">\${activeFilterCount} active</strong></span>
+              <span style="font-size:13px;color:var(--muted)">Filters: <strong class="font-mono" style="color:var(--fg)">\${activeFilterCount} active</strong></span>
               \${pendingCount ? '<span class="nav-badge">' + pendingCount + ' pending</span>' : ''}
             </div>
-            <div style="margin-top:12px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
+            <div style="margin-top:10px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
           </div>
 
-          <div class="card" style="cursor:pointer" onclick="switchTab('google_calendar')">
+          <div class="card source-tile" style="cursor:pointer" onclick="switchTab('google_calendar')">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
               <div style="display:flex;align-items:center;gap:8px">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                <span style="font-weight:600;font-size:14px">Calendar</span>
+                <span style="font-weight:600;font-size:15px">Calendar</span>
               </div>
               <span class="status-dot \${calConnected ? 'status-dot-connected' : 'status-dot-disconnected'}"></span>
             </div>
             \${calConnected && calAccount && calAccount.email ? '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">' + calAccount.email + '</p>' : '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">Not connected</p>'}
             <div style="display:flex;align-items:center;justify-content:space-between">
-              <span style="font-size:14px;color:var(--muted)">Filters: <strong class="font-mono" style="color:var(--fg)">\${activeCalFilterCount} active</strong></span>
+              <span style="font-size:13px;color:var(--muted)">Filters: <strong class="font-mono" style="color:var(--fg)">\${activeCalFilterCount} active</strong></span>
             </div>
-            <div style="margin-top:12px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
+            <div style="margin-top:10px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
           </div>
 
-          <div class="card" style="cursor:pointer" onclick="switchTab('github')">
+          <div class="card source-tile" style="cursor:pointer" onclick="switchTab('github')">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
               <div style="display:flex;align-items:center;gap:8px">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-                <span style="font-weight:600;font-size:14px">GitHub</span>
+                <span style="font-weight:600;font-size:15px">GitHub</span>
               </div>
               <span class="status-dot \${ghConnected ? 'status-dot-connected' : 'status-dot-disconnected'}"></span>
             </div>
             \${ghConnected && ghAccount && ghAccount.login ? '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">@' + ghAccount.login + '</p>' : '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">Not connected</p>'}
             <div style="display:flex;align-items:center;justify-content:space-between">
-              <span style="font-size:14px;color:var(--muted)">Repos: <strong class="font-mono" style="color:var(--fg)">\${enabledRepos} selected</strong></span>
+              <span style="font-size:13px;color:var(--muted)">Repos: <strong class="font-mono" style="color:var(--fg)">\${enabledRepos} selected</strong></span>
             </div>
-            <div style="margin-top:12px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
+            <div style="margin-top:10px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Configure <span style="font-size:14px">&rarr;</span></div>
           </div>
 
-          <div class="card" style="cursor:pointer" onclick="switchTab('settings')">
+          <div class="card source-tile" style="cursor:pointer" onclick="switchTab('settings')">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-              <span style="font-weight:600;font-size:14px">Audit Log</span>
+              <span style="font-weight:600;font-size:15px">Audit Log</span>
             </div>
             <span style="font-size:14px;color:var(--muted)"><strong class="font-mono" style="color:var(--fg)">\${state.audit.length}</strong> events recorded</span>
-            <div style="margin-top:12px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">View log <span style="font-size:14px">&rarr;</span></div>
+            <div style="margin-top:10px;display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">View log <span style="font-size:14px">&rarr;</span></div>
           </div>
         </div>
 
@@ -1549,10 +1835,955 @@ function getIndexHtml(): string {
       \`;
     }
 
+    function renderSmsTab() {
+      var sms = state.sms;
+      var boxBtnStyle = function(b) {
+        return 'padding:6px 14px;border-radius:6px;border:1px solid;font-size:13px;cursor:pointer;' +
+          (sms.box === b
+            ? 'background:var(--primary);color:#fff;border-color:var(--primary);'
+            : 'background:none;color:var(--muted);border-color:var(--border);');
+      };
+
+      var listHtml = '';
+      if (sms.loading) {
+        listHtml = '<div style="padding:40px;text-align:center"><div class="spinner"></div><p style="margin-top:12px;color:var(--muted);font-size:14px">Loading messages…</p></div>';
+      } else if (sms.error) {
+        if (sms.error === 'PERMISSION_DENIED') {
+          listHtml = '<div style="padding:32px;text-align:center">' +
+            '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5" style="margin-bottom:12px"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.63 3.4 2 2 0 0 1 3.6 1.21h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16.92z"/></svg>' +
+            '<p style="font-size:15px;font-weight:600;margin-bottom:6px">SMS Permission Required</p>' +
+            '<p style="font-size:13px;color:var(--muted);margin-bottom:16px">Grant SMS permission in Android Settings to read messages.</p>' +
+            '<button class="btn btn-primary" onclick="loadSmsMessages(true)">Request Permission</button>' +
+            '</div>';
+        } else if (sms.error === 'NOT_ANDROID') {
+          listHtml = '<div style="padding:32px;text-align:center;color:var(--muted);font-size:14px">SMS reading is only available on Android.</div>';
+        } else {
+          listHtml = '<div style="padding:24px"><div class="status disconnected" style="font-size:13px">Error: ' + escapeHtml(sms.error) + '</div>' +
+            '<button class="btn btn-outline btn-sm" style="margin-top:12px" onclick="loadSmsMessages(true)">Retry</button></div>';
+        }
+      } else if (!sms.messages) {
+        listHtml = '<div style="padding:40px;text-align:center"><div class="spinner"></div></div>';
+      } else if (sms.messages.length === 0) {
+        listHtml = '<div style="padding:32px;text-align:center;color:var(--muted);font-size:14px">No messages in ' + sms.box + '.</div>';
+      } else {
+        sms.messages.forEach(function(msg) {
+          var date = new Date(msg.date);
+          var now = new Date();
+          var diffMs = now - date;
+          var diffH = diffMs / 3600000;
+          var dateStr = diffH < 1 ? Math.round(diffMs / 60000) + 'm ago'
+            : diffH < 24 ? Math.round(diffH) + 'h ago'
+            : diffH < 48 ? 'Yesterday'
+            : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+          var unread = !msg.read;
+          var body = msg.body || '';
+          var snippet = body.length > 80 ? body.substring(0, 80) + '…' : body;
+          listHtml += '<div class="email-row" data-address="' + escapeAttr(msg.address || '') + '" data-body="' + escapeAttr(body) + '" ontouchstart="smsLongPressStart(this)" ontouchend="smsLongPressEnd()" ontouchmove="smsLongPressEnd()" style="user-select:none;-webkit-user-select:none">' +
+            '<div class="email-row-btn" style="display:flex;align-items:flex-start;gap:10px">' +
+            (unread ? '<div style="width:6px;height:6px;border-radius:50%;background:var(--primary);flex-shrink:0;margin-top:5px"></div>' : '<div style="width:6px;flex-shrink:0"></div>') +
+            '<div style="flex:1;min-width:0">' +
+            '<div style="display:flex;justify-content:space-between;align-items:baseline">' +
+            '<span class="email-row-sender">' + escapeHtml(msg.address || 'Unknown') + '</span>' +
+            '<span class="email-row-date">' + escapeHtml(dateStr) + '</span>' +
+            '</div>' +
+            '<div class="email-row-snippet">' + escapeHtml(snippet) + '</div>' +
+            '</div></div></div>';
+        });
+      }
+
+      var cm = sms.contextMenu;
+      var cmHtml = '';
+      if (cm) {
+        var statusHtml = '';
+        if (cm.status === 'thinking') {
+          statusHtml = '<div style="display:flex;align-items:center;gap:10px;padding:14px 0;color:var(--muted);font-size:14px"><div class="spinner"></div>Generating reply…</div>';
+        } else if (cm.status === 'sending') {
+          statusHtml = '<div style="padding:14px 0;font-size:14px"><div style="color:var(--muted);font-size:12px;margin-bottom:6px">Sending:</div><div style="font-style:italic">"' + escapeHtml(cm.reply || '') + '"</div></div>';
+        } else if (cm.status === 'sent') {
+          statusHtml = '<div style="padding:14px 0;color:var(--success,#22c55e);font-size:14px">✓ Reply sent</div>';
+        } else if (cm.status === 'error') {
+          statusHtml = '<div style="padding:14px 0;color:var(--danger,#ef4444);font-size:13px">' + escapeHtml(cm.error || 'Error') + '</div>';
+        }
+        var isDone = cm.status === 'sent' || cm.status === 'error';
+        cmHtml = '<div style="position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.45);display:flex;align-items:flex-end" onclick="hideSmsContextMenu()">' +
+          '<div style="width:100%;background:var(--card-bg);border-radius:20px 20px 0 0;padding:20px;padding-bottom:calc(20px + env(safe-area-inset-bottom,0px))" onclick="event.stopPropagation()">' +
+          '<div style="width:36px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px"></div>' +
+          '<div style="font-weight:600;font-size:15px;margin-bottom:2px">' + escapeHtml(cm.address) + '</div>' +
+          '<div style="font-size:13px;color:var(--muted);margin-bottom:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml((cm.body || '').slice(0, 60)) + '</div>' +
+          statusHtml +
+          (!cm.status || cm.status === 'error' ? '<button class="btn btn-primary" style="width:100%;margin-bottom:10px" onclick="manualAutoReply()">' +
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
+            'Reply automatically</button>' : '') +
+          (isDone ? '<button class="btn btn-outline" style="width:100%" onclick="hideSmsContextMenu()">Close</button>' :
+            '<button class="btn btn-outline" style="width:100%" onclick="hideSmsContextMenu()">Cancel</button>') +
+          '</div></div>';
+      }
+
+      return \`
+        <div class="card" style="padding:0;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:10px">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.63 3.4 2 2 0 0 1 3.6 1.21h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16.92z"/></svg>
+              <h2 style="margin:0">SMS Messages</h2>
+              \${sms.messages ? '<span style="font-size:13px;color:var(--muted)">(' + sms.messages.length + ')</span>' : ''}
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="loadSmsMessages(true)">Refresh</button>
+          </div>
+          <div style="display:flex;gap:6px;padding:12px 20px;border-bottom:1px solid var(--border)">
+            <button style="\${boxBtnStyle('inbox')}" onclick="state.sms.box='inbox';loadSmsMessages(true)">Inbox</button>
+            <button style="\${boxBtnStyle('sent')}" onclick="state.sms.box='sent';loadSmsMessages(true)">Sent</button>
+            <button style="\${boxBtnStyle('all')}" onclick="state.sms.box='all';loadSmsMessages(true)">All</button>
+          </div>
+          \${listHtml}
+        </div>
+        \${cmHtml}
+      \`;
+    }
+
+    // Callback registry for AndroidSms.getMessages() results delivered via
+    // evaluateJavascript from SmsPlugin's JavascriptInterface.
+    window._smsCbs = {};
+    window._smsDeliver = function(callbackId, messages, error) {
+      var cb = window._smsCbs[callbackId];
+      if (cb) { delete window._smsCbs[callbackId]; cb(messages, error); }
+    };
+
+    function loadSmsMessages(force) {
+      if (!force && state.sms.messages !== null) return;
+      if (!force && state.sms.error) return;
+      if (state.sms.loading) return;
+
+      state.sms.loading = true;
+      state.sms.error = null;
+      if (currentTab === 'sms') render();
+
+      if (!window.AndroidSms) {
+        state.sms.loading = false;
+        state.sms.error = 'NOT_ANDROID';
+        if (currentTab === 'sms') render();
+        return;
+      }
+
+      var reqId = Date.now().toString();
+      var timer = setTimeout(function() {
+        delete window._smsCbs[reqId];
+        state.sms.loading = false;
+        state.sms.error = 'Timed out reading SMS — check permission in Android Settings';
+        if (currentTab === 'sms') render();
+      }, 10000);
+
+      window._smsCbs[reqId] = function(messages, error) {
+        clearTimeout(timer);
+        state.sms.loading = false;
+        if (error) {
+          var el = error.toLowerCase();
+          state.sms.error = (el.includes('denied') || el.includes('permission'))
+            ? 'PERMISSION_DENIED' : error;
+        } else {
+          state.sms.messages = messages;
+          state.sms.error = null;
+        }
+        if (currentTab === 'sms') render();
+      };
+
+      window.AndroidSms.getMessages(reqId, state.sms.box, 100);
+    }
+    window.loadSmsMessages = loadSmsMessages;
+
+    // ---- AI chat ----
+
+    // Callback registry for AndroidSms.sendMessage() results
+    window._smsSendCbs = {};
+    window._smsSendDeliver = function(callbackId, error) {
+      var cb = window._smsSendCbs[callbackId];
+      if (cb) { delete window._smsSendCbs[callbackId]; cb(error); }
+    };
+
+    async function sendSmsAction(actionId, to, body) {
+      if (!window.AndroidSms || !window.AndroidSms.sendMessage) {
+        alert('SMS sending is only available on Android.');
+        return;
+      }
+      var cbId = 'smssend_' + Date.now();
+      window._smsSendCbs[cbId] = async function(error) {
+        if (error && error !== 'null') {
+          alert('Failed to send SMS: ' + error);
+          return;
+        }
+        await fetch('/api/staging/' + actionId + '/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decision: 'approve' }),
+        });
+        state.chat.stagedSmsIds = state.chat.stagedSmsIds.filter(function(id) { return id !== actionId; });
+        await fetchData();
+      };
+      window.AndroidSms.sendMessage(cbId, to, body);
+    }
+    window.sendSmsAction = sendSmsAction;
+
+    // Long-press context menu for SMS messages
+    var _smsLongPressTimer = null;
+    function smsLongPressStart(el) {
+      var address = el.getAttribute('data-address');
+      var body = el.getAttribute('data-body');
+      _smsLongPressTimer = setTimeout(function() {
+        _smsLongPressTimer = null;
+        // Haptic feedback if available
+        if (navigator.vibrate) navigator.vibrate(40);
+        state.sms.contextMenu = { address: address, body: body, status: null };
+        render();
+      }, 600);
+    }
+    function smsLongPressEnd() {
+      if (_smsLongPressTimer) { clearTimeout(_smsLongPressTimer); _smsLongPressTimer = null; }
+    }
+    function hideSmsContextMenu() {
+      state.sms.contextMenu = null;
+      state.sms.autoReplying = false;
+      render();
+    }
+    async function manualAutoReply() {
+      var cm = state.sms.contextMenu;
+      if (!cm || state.sms.autoReplying) return;
+      if (!window.AndroidSms) { alert('SMS is only available on Android.'); return; }
+      state.sms.autoReplying = true;
+      state.sms.contextMenu = Object.assign({}, cm, { status: 'thinking' });
+      render();
+      try {
+        var res = await fetch('/api/sms/manual-reply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: cm.address, body: cm.body }),
+        });
+        var d = await res.json();
+        if (!d.ok || !d.reply) {
+          state.sms.contextMenu = Object.assign({}, cm, { status: 'error', error: d.error || 'No reply generated' });
+          state.sms.autoReplying = false;
+          render();
+          return;
+        }
+        state.sms.contextMenu = Object.assign({}, cm, { status: 'sending', reply: d.reply });
+        render();
+        var cbId = 'manual_' + Date.now();
+        window._smsSendCbs[cbId] = function(error) {
+          if (error && error !== 'null') {
+            state.sms.contextMenu = Object.assign({}, state.sms.contextMenu, { status: 'error', error: 'Send failed: ' + error });
+          } else {
+            state.sms.contextMenu = Object.assign({}, state.sms.contextMenu, { status: 'sent' });
+          }
+          state.sms.autoReplying = false;
+          render();
+        };
+        window.AndroidSms.sendMessage(cbId, cm.address, d.reply);
+      } catch(e) {
+        state.sms.contextMenu = Object.assign({}, cm, { status: 'error', error: e.message || 'Network error' });
+        state.sms.autoReplying = false;
+        render();
+      }
+    }
+    window.smsLongPressStart = smsLongPressStart;
+    window.smsLongPressEnd = smsLongPressEnd;
+    window.hideSmsContextMenu = hideSmsContextMenu;
+    window.manualAutoReply = manualAutoReply;
+
+    async function rejectSmsAction(actionId) {
+      await fetch('/api/staging/' + actionId + '/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'reject' }),
+      });
+      state.chat.stagedSmsIds = state.chat.stagedSmsIds.filter(function(id) { return id !== actionId; });
+      await fetchData();
+    }
+    window.rejectSmsAction = rejectSmsAction;
+
+    function renderMemoryTab() {
+      var mem = state.memories;
+      var total = mem.items.length;
+      var html = '<div style="max-width:640px;margin:0 auto;padding:16px">';
+
+      // Header row
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">';
+      html += '<div>';
+      html += '<h2 style="margin:0 0 2px">AI Memory</h2>';
+      html += '<p style="margin:0;font-size:13px;color:var(--muted)">' + total + ' / 50 memories saved</p>';
+      html += '</div>';
+      html += '<button class="btn ' + (mem.adding ? 'btn-ghost' : 'btn-primary') + '" onclick="toggleAddMemory()" style="font-size:13px">' + (mem.adding ? 'Cancel' : '+ Add memory') + '</button>';
+      html += '</div>';
+
+      // Error banner
+      if (mem.error) {
+        html += '<div style="padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;color:#ef4444;font-size:14px;margin-bottom:12px">' + escapeHtml(mem.error) + '</div>';
+      }
+
+      // Add form
+      if (mem.adding) {
+        html += '<div style="background:var(--card-bg);border:1px solid var(--primary);border-radius:10px;padding:14px;margin-bottom:16px">';
+        html += '<p style="margin:0 0 8px;font-size:13px;color:var(--muted)">What should the AI remember?</p>';
+        html += '<textarea id="new-memory-input" onchange="updateNewMemoryContent(this.value)" oninput="updateNewMemoryContent(this.value)" placeholder="e.g. Prefers concise replies. Works in timezone UTC+5:30." style="width:100%;min-height:70px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit">' + escapeHtml(mem.newContent) + '</textarea>';
+        html += '<div style="display:flex;gap:8px;margin-top:8px">';
+        html += '<button class="btn btn-primary" onclick="submitNewMemory()" style="font-size:13px">Save</button>';
+        html += '<button class="btn btn-ghost" onclick="toggleAddMemory()" style="font-size:13px">Cancel</button>';
+        html += '</div>';
+        html += '</div>';
+      }
+
+      // Loading
+      if (mem.loading && !total) {
+        html += '<p style="color:var(--muted);text-align:center;padding:40px 0">Loading…</p>';
+      } else if (!total && !mem.adding) {
+        html += '<div style="text-align:center;padding:60px 20px;color:var(--muted)">';
+        html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;margin-bottom:12px;opacity:0.4"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
+        html += '<p style="margin:0;font-size:15px;font-weight:500">No memories yet</p>';
+        html += '<p style="margin:8px 0 0;font-size:13px">Chat with the AI and it will save facts about you automatically, or add one manually above.</p>';
+        html += '</div>';
+      } else {
+        html += '<div style="display:grid;gap:8px">';
+        mem.items.forEach(function(m) {
+          var isEditing = mem.editingId === m.id;
+          html += '<div style="background:var(--card-bg);border:1px solid ' + (isEditing ? 'var(--primary)' : 'var(--border)') + ';border-radius:10px;padding:12px 14px;transition:border-color 0.15s">';
+          if (isEditing) {
+            html += '<textarea id="edit-memory-' + escapeAttr(m.id) + '" onchange="updateMemoryEditContent(this.value)" oninput="updateMemoryEditContent(this.value)" style="width:100%;min-height:60px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit">' + escapeHtml(mem.editContent) + '</textarea>';
+            html += '<div style="display:flex;gap:8px;margin-top:8px">';
+            html += '<button class="btn btn-primary" onclick="saveEditMemory(\\'' + escapeAttr(m.id) + '\\')" style="font-size:12px;padding:5px 12px">Save</button>';
+            html += '<button class="btn btn-ghost" onclick="cancelEditMemory()" style="font-size:12px;padding:5px 12px">Cancel</button>';
+            html += '</div>';
+          } else {
+            html += '<div style="display:flex;align-items:flex-start;gap:10px">';
+            html += '<p style="flex:1;margin:0;font-size:14px;line-height:1.55;word-break:break-word">' + escapeHtml(m.content) + '</p>';
+            html += '<div style="display:flex;gap:4px;flex-shrink:0;margin-top:1px">';
+            html += '<button onclick="startEditMemory(\\'' + escapeAttr(m.id) + '\\')" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px;font-size:13px;line-height:1">';
+            html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
+            html += '</button>';
+            html += '<button onclick="deleteMemory(\\'' + escapeAttr(m.id) + '\\')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px;font-size:16px;line-height:1">×</button>';
+            html += '</div>';
+            html += '</div>';
+            html += '<p style="margin:4px 0 0;font-size:11px;color:var(--muted)">' + new Date(m.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) + '</p>';
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      html += '</div>';
+      return html;
+    }
+
+    // Render assistant message content: handles fenced code blocks with Run buttons
+    // and collapsible tool-call disclosures for run_code outputs.
+    function renderMessageContent(msg) {
+      var content = msg.content || '';
+      var toolOutputs = msg.toolOutputs || [];
+      var html = '';
+
+      // Split on fenced code blocks (triple-backtick lang newline code triple-backtick)
+      var codeRe = /\`\`\`(\w*)\\n?([\s\S]*?)\`\`\`/g;
+      var lastIndex = 0;
+      var match;
+      while ((match = codeRe.exec(content)) !== null) {
+        // Text before this block
+        if (match.index > lastIndex) {
+          html += '<span style="white-space:pre-wrap;word-break:break-word">' + escapeHtml(content.slice(lastIndex, match.index)) + '</span>';
+        }
+        // Store code under a unique ID so we avoid injecting it into onclick attributes
+        var blockId = 'cb_' + Math.random().toString(36).slice(2, 10);
+        state.chat.codeBlocks[blockId] = match[2];
+        var lang = match[1] || 'js';
+        html += '<div style="margin:6px 0;border-radius:8px;overflow:hidden;border:1px solid rgba(0,0,0,0.12)">';
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 10px;background:rgba(0,0,0,0.06);font-size:11px;color:var(--muted)">';
+        html += '<span style="font-family:JetBrains Mono,monospace">' + escapeHtml(lang) + '</span>';
+        html += '<button class="btn btn-sm" onclick="runCodeBlock(this,\\'' + blockId + '\\')" style="padding:3px 10px;font-size:11px;background:var(--primary);color:#fff;border:none">&#9654; Run</button>';
+        html += '</div>';
+        html += '<pre style="margin:0;padding:10px;background:rgba(0,0,0,0.03);overflow-x:auto;font-family:JetBrains Mono,monospace;font-size:12px;line-height:1.5"><code>' + escapeHtml(match[2]) + '</code></pre>';
+        html += '<div class="code-output-slot" style="display:none"></div>';
+        html += '</div>';
+        lastIndex = codeRe.lastIndex;
+      }
+      // Remaining text after last code block
+      if (lastIndex < content.length) {
+        html += '<span style="white-space:pre-wrap;word-break:break-word">' + escapeHtml(content.slice(lastIndex)) + '</span>';
+      }
+
+      // Collapsed disclosures for run_code tool calls
+      toolOutputs.forEach(function(to) {
+        if (to.name !== 'run_code') return;
+        var parsed = null;
+        try { parsed = JSON.parse(to.output); } catch(_) {}
+        var output = parsed ? (parsed.output || '(no output)') : to.output;
+        var hasError = parsed && parsed.error;
+        var durationMs = parsed && parsed.duration_ms ? parsed.duration_ms + 'ms' : '';
+        var code = to.input && to.input.code ? String(to.input.code) : '';
+        html += '<details style="margin-top:6px">';
+        html += '<summary style="cursor:pointer;font-size:11px;color:var(--muted);padding:3px 0;list-style:none;display:flex;align-items:center;gap:4px">';
+        html += '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>';
+        html += 'Code ran' + (durationMs ? ' &middot; ' + durationMs : '') + (hasError ? ' &middot; error' : '') + '</summary>';
+        if (code) {
+          html += '<pre style="margin:4px 0 0;padding:8px;background:rgba(0,0,0,0.06);border-radius:6px 6px 0 0;overflow-x:auto;font-family:JetBrains Mono,monospace;font-size:12px;line-height:1.5;color:var(--fg)">' + escapeHtml(code) + '</pre>';
+          html += '<pre style="margin:0;padding:8px;background:rgba(0,0,0,0.03);border-radius:0 0 6px 6px;border-top:1px solid rgba(0,0,0,0.08);overflow-x:auto;font-family:JetBrains Mono,monospace;font-size:12px;line-height:1.5;color:' + (hasError ? 'var(--destructive)' : 'var(--muted)') + '">' + escapeHtml(output + (hasError ? '\\n[error] ' + parsed.error : '')) + '</pre>';
+        } else {
+          html += '<pre style="margin:4px 0 0;padding:8px;background:rgba(0,0,0,0.04);border-radius:6px;overflow-x:auto;font-family:JetBrains Mono,monospace;font-size:12px;line-height:1.5;color:' + (hasError ? 'var(--destructive)' : 'var(--fg)') + '">' + escapeHtml(output + (hasError ? '\\n[error] ' + parsed.error : '')) + '</pre>';
+        }
+        html += '</details>';
+      });
+
+      return html;
+    }
+
+    async function runCodeBlock(btn, blockId) {
+      var code = state.chat.codeBlocks[blockId];
+      if (!code) return;
+      // The output slot is the next sibling div after the <pre>
+      var wrapper = btn.closest('[style*="border-radius:8px"]');
+      var slot = wrapper ? wrapper.querySelector('.code-output-slot') : null;
+      if (!slot) return;
+
+      btn.disabled = true;
+      btn.textContent = '...';
+      slot.style.display = 'block';
+      slot.innerHTML = '<div style="padding:6px 10px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px"><span class="spinner" style="display:inline-block;width:10px;height:10px;border-width:1.5px;vertical-align:middle"></span>Running...</div>';
+
+      try {
+        var res = await fetch('/api/code/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: code }),
+        });
+        var d = await res.json();
+        if (d.ok) {
+          var out = d.output || '(no output)';
+          if (d.error) out += '\\n[error] ' + d.error;
+          slot.innerHTML = '<pre style="margin:0;padding:8px 10px;border-top:1px solid rgba(0,0,0,0.08);font-family:JetBrains Mono,monospace;font-size:12px;line-height:1.5;overflow-x:auto;color:' + (d.error ? 'var(--destructive)' : 'var(--fg)') + ';white-space:pre-wrap;word-break:break-word">' + escapeHtml(out) + '</pre>';
+        } else {
+          slot.innerHTML = '<div style="padding:8px 10px;font-size:12px;color:var(--destructive);border-top:1px solid rgba(0,0,0,0.08)">Error: ' + escapeHtml(d.error || 'Unknown error') + '</div>';
+        }
+      } catch(e) {
+        slot.innerHTML = '<div style="padding:8px 10px;font-size:12px;color:var(--destructive);border-top:1px solid rgba(0,0,0,0.08)">Network error: ' + escapeHtml(e.message) + '</div>';
+      }
+      btn.disabled = false;
+      btn.textContent = 'Run';
+    }
+    window.runCodeBlock = runCodeBlock;
+
+    function renderAiTab() {
+      var chat = state.chat;
+      if (!chat.aiAvailable) {
+        return '<div class="card" style="max-width:420px;margin:40px auto;text-align:center;padding:32px">' +
+          '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5" style="margin-bottom:16px"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>' +
+          '<h3 style="margin:0 0 8px">AI Assistant not configured</h3>' +
+          '<p style="color:var(--muted);font-size:14px;margin:0 0 20px">Add an API key in Settings to get started.</p>' +
+          '<button class="btn btn-primary" onclick="switchTab(\\'settings\\')">Go to Settings</button>' +
+          '</div>';
+      }
+
+      // Build pending SMS staged actions for this chat session
+      var smsPending = state.staging.filter(function(a) {
+        return a.source === 'sms' && a.status === 'pending';
+      });
+
+      var messagesHtml = '';
+      if (!chat.messages.length) {
+        messagesHtml = '<div style="text-align:center;color:var(--muted);font-size:14px;padding:40px 20px">' +
+          'Ask me anything about your data — emails, calendar, GitHub, or SMS.' +
+          '</div>';
+      } else {
+        chat.messages.forEach(function(msg) {
+          var isUser = msg.role === 'user';
+          var bubbleContent = isUser
+            ? '<span style="white-space:pre-wrap;word-break:break-word">' + escapeHtml(msg.content) + '</span>'
+            : renderMessageContent(msg);
+          messagesHtml += '<div style="display:flex;justify-content:' + (isUser ? 'flex-end' : 'flex-start') + ';margin-bottom:12px">' +
+            '<div style="max-width:85%;padding:10px 14px;border-radius:' + (isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px') + ';' +
+            'background:' + (isUser ? 'var(--primary)' : 'var(--card-bg)') + ';' +
+            'color:' + (isUser ? '#fff' : 'var(--fg)') + ';' +
+            'border:' + (isUser ? 'none' : '1px solid var(--border)') + ';' +
+            'font-size:14px;line-height:1.5">' +
+            bubbleContent + '</div></div>';
+        });
+      }
+
+      var smsPendingHtml = '';
+      if (smsPending.length) {
+        smsPending.forEach(function(a) {
+          var data = typeof a.action_data === 'string' ? JSON.parse(a.action_data) : a.action_data;
+          var safeId = a.action_id.replace(/'/g, "\\\\'");
+          var safeTo = (data.to || '').replace(/'/g, "\\\\'");
+          var safeBody = (data.body || '').replace(/'/g, "\\\\'");
+          smsPendingHtml += '<div style="margin:8px 0;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--card-bg)">' +
+            '<div style="font-size:12px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Staged SMS</div>' +
+            '<div style="font-size:14px;margin-bottom:4px"><strong>To:</strong> ' + escapeHtml(data.to || '') + '</div>' +
+            '<div style="font-size:14px;margin-bottom:12px;white-space:pre-wrap">' + escapeHtml(data.body || '') + '</div>' +
+            '<div style="display:flex;gap:8px">' +
+            '<button class="btn btn-outline btn-sm" style="color:var(--destructive);border-color:rgba(239,68,68,0.3)" onclick="rejectSmsAction(\\'' + safeId + '\\')">Deny</button>' +
+            '<button class="btn btn-sm" style="background:var(--primary);color:#fff" onclick="sendSmsAction(\\'' + safeId + '\\',\\'' + safeTo + '\\',\\'' + safeBody + '\\')">Send SMS</button>' +
+            '</div></div>';
+        });
+      }
+
+      var loadingHtml = chat.loading
+        ? '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;color:var(--muted);font-size:13px"><div class="spinner" style="width:16px;height:16px;border-width:2px"></div>Thinking…</div>'
+        : '';
+      var errorHtml = chat.error
+        ? '<div style="padding:8px 12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;color:var(--destructive);font-size:13px;margin-top:8px">' + escapeHtml(chat.error) + '</div>'
+        : '';
+
+      return '<div class="chat-container">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)">' +
+        '<h2 style="margin:0;display:flex;align-items:center;gap:8px">' +
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
+        'Chat</h2>' +
+        '<button class="btn btn-outline btn-sm" onclick="clearChat()">Clear</button>' +
+        '</div>' +
+        '<div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px 20px">' +
+        messagesHtml + smsPendingHtml + loadingHtml + errorHtml +
+        '</div>' +
+        '<div style="padding:12px 20px;border-top:1px solid var(--border)">' +
+        '<div style="display:flex;gap:8px">' +
+        '<input id="chat-input" type="text" placeholder="Ask about your data…" ' +
+        'style="flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:var(--card-bg);color:var(--fg)" ' +
+        'onkeydown="if(event.key===\\'Enter\\'&&!event.shiftKey){event.preventDefault();sendChatMessage();}" ' +
+        (chat.loading ? 'disabled ' : '') + '/>' +
+        '<button id="voice-btn" title="Voice input" onclick="toggleVoiceInput()" style="padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card-bg);color:var(--muted);cursor:pointer;font-size:16px;display:flex;align-items:center">' +
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>' +
+        '</button>' +
+        '<button class="btn btn-primary" onclick="sendChatMessage()" ' + (chat.loading ? 'disabled ' : '') + 'style="padding:10px 18px">Send</button>' +
+        '</div></div></div>';
+    }
+
+    var _voiceRecognition = null;
+    function toggleVoiceInput() {
+      var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) { alert('Voice input is not supported in this browser.'); return; }
+      if (_voiceRecognition) {
+        _voiceRecognition.stop();
+        _voiceRecognition = null;
+        var btn = document.getElementById('voice-btn');
+        if (btn) btn.style.color = 'var(--muted)';
+        return;
+      }
+      var rec = new SpeechRecognition();
+      rec.lang = 'en-US';
+      rec.interimResults = false;
+      rec.maxAlternatives = 1;
+      _voiceRecognition = rec;
+      var btn = document.getElementById('voice-btn');
+      if (btn) btn.style.color = 'var(--primary)';
+      rec.onresult = function(e) {
+        var transcript = e.results[0][0].transcript;
+        var input = document.getElementById('chat-input');
+        if (input) { input.value = (input.value ? input.value + ' ' : '') + transcript; input.focus(); }
+        _voiceRecognition = null;
+        if (btn) btn.style.color = 'var(--muted)';
+      };
+      rec.onerror = function() { _voiceRecognition = null; if (btn) btn.style.color = 'var(--muted)'; };
+      rec.onend = function() { _voiceRecognition = null; if (btn) btn.style.color = 'var(--muted)'; };
+      rec.start();
+    }
+    window.toggleVoiceInput = toggleVoiceInput;
+
+    async function sendChatMessage() {
+      var input = document.getElementById('chat-input');
+      if (!input) return;
+      var text = input.value.trim();
+      if (!text || state.chat.loading) return;
+      input.value = '';
+
+      state.chat.messages.push({ role: 'user', content: text });
+      state.chat.loading = true;
+      state.chat.error = null;
+      if (currentTab === 'ai') render();
+
+      var msgs = state.chat.messages.slice(-50);
+      var sms = state.sms.messages;
+
+      try {
+        var res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: msgs, sms: sms }),
+        });
+        var data = await res.json();
+        state.chat.loading = false;
+        if (data.ok) {
+          state.chat.messages.push({ role: 'assistant', content: data.reply, toolOutputs: data.toolOutputs || [] });
+          if (data.stagedActionIds && data.stagedActionIds.length) {
+            state.chat.stagedSmsIds = state.chat.stagedSmsIds.concat(data.stagedActionIds);
+            await fetchData();
+          }
+        } else {
+          state.chat.error = data.error || 'Unknown error';
+        }
+      } catch (err) {
+        state.chat.loading = false;
+        state.chat.error = err.message || 'Network error';
+      }
+      if (currentTab === 'ai') {
+        render();
+        var msgs2 = document.getElementById('chat-messages');
+        if (msgs2) msgs2.scrollTop = msgs2.scrollHeight;
+      }
+    }
+    window.sendChatMessage = sendChatMessage;
+
+    function clearChat() {
+      state.chat.messages = [];
+      state.chat.error = null;
+      state.chat.stagedSmsIds = [];
+      state.chat.codeBlocks = {};
+      if (currentTab === 'ai') render();
+    }
+    window.clearChat = clearChat;
+
+    function selectProvider(val) {
+      state.settingsProvider = val;
+      var customUrls = { anthropic: 'https://api.anthropic.com/v1', openai: '', groq: 'https://api.groq.com/openai/v1', google: 'https://generativelanguage.googleapis.com/v1beta/openai/', ollama: 'http://localhost:11434/v1' };
+      var defaultModels = { anthropic: 'claude-sonnet-4-6', openai: 'gpt-4o', groq: 'llama-3.3-70b-versatile', google: 'gemini-2.0-flash', ollama: 'llama3' };
+      var urlEl = document.getElementById('ai-base-url');
+      var modelEl = document.getElementById('ai-model');
+      if (urlEl) urlEl.placeholder = customUrls[val] || 'https://...';
+      if (modelEl && !modelEl.value) modelEl.placeholder = defaultModels[val] || 'model name';
+      // Re-render just the provider pills without clobbering focused inputs
+      var pillsEl = document.getElementById('provider-pills');
+      if (pillsEl) pillsEl.innerHTML = renderProviderPills();
+    }
+    window.selectProvider = selectProvider;
+
+    function renderProviderPills() {
+      var providers = [
+        { value: 'anthropic', label: 'Anthropic' },
+        { value: 'openai', label: 'OpenAI' },
+        { value: 'groq', label: 'Groq' },
+        { value: 'google', label: 'Google' },
+        { value: 'ollama', label: 'Ollama' },
+      ];
+      return providers.map(function(p) {
+        var sel = state.settingsProvider === p.value;
+        return '<button onclick="selectProvider(\\'' + p.value + '\\')" style="padding:9px 16px;border:1px solid ' + (sel ? 'var(--primary)' : 'var(--border)') + ';border-radius:20px;background:' + (sel ? 'rgba(15,160,129,0.1)' : 'var(--card)') + ';color:' + (sel ? 'var(--primary)' : 'var(--fg)') + ';font-size:14px;font-weight:' + (sel ? '600' : '400') + ';cursor:pointer;font-family:inherit;white-space:nowrap">' + p.label + '</button>';
+      }).join('');
+    }
+
+    function saveAiKey() {
+      var key = document.getElementById('ai-api-key').value.trim();
+      var model = document.getElementById('ai-model').value.trim();
+      var provider = state.settingsProvider;
+      var baseUrl = document.getElementById('ai-base-url').value.trim();
+      if (!key) { alert('API key is required'); return; }
+      fetch('/api/settings/ai-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: key, model: model || undefined, provider: provider || 'anthropic', base_url: baseUrl || undefined }),
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          state.chat.aiAvailable = true;
+          var flash = document.getElementById('ai-flash');
+          if (flash) { flash.style.opacity = '1'; setTimeout(function() { flash.style.opacity = '0'; }, 2000); }
+        } else {
+          alert('Error: ' + (d.error || 'Unknown error'));
+        }
+      }).catch(function() { alert('Network error'); });
+    }
+    window.saveAiKey = saveAiKey;
+
+    async function setAutoReply(enabled) {
+      if (state.autoReply.loading) return;
+      state.autoReply.loading = true;
+      render();
+      try {
+        var res = await fetch('/api/settings/auto-reply', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: enabled })
+        });
+        var d = await res.json();
+        if (d.ok) {
+          state.autoReply.enabled = d.enabled;
+          // Request RECEIVE_SMS permission when enabling on Android
+          if (enabled && window.AndroidSms) {
+            var reqId = 'rcvsms_' + Date.now();
+            window.AndroidSms.getMessages(reqId, 'inbox', 1); // triggers permission request for SMS group
+          }
+        }
+      } catch(e) { /* non-fatal */ }
+      state.autoReply.loading = false;
+      render();
+    }
+    window.setAutoReply = setAutoReply;
+
+    async function saveMaxToolRounds(value) {
+      var n = parseInt(value, 10);
+      if (isNaN(n) || n < 1 || n > 10) return;
+      state.autoReply.maxToolRounds = n;
+      try {
+        await fetch('/api/settings/auto-reply', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: state.autoReply.enabled, maxToolRounds: n })
+        });
+      } catch(e) { /* non-fatal */ }
+    }
+    window.saveMaxToolRounds = saveMaxToolRounds;
+
+    async function testAutoReply() {
+      if (state.autoReply.testLoading) return;
+      state.autoReply.testLoading = true;
+      state.autoReply.testResult = null;
+      render();
+      try {
+        var fakeFrom = '+1555' + Math.floor(1000000 + Math.random() * 9000000);
+        var res = await fetch('/sms/auto-reply', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: fakeFrom, body: 'Hey, are you free later?' })
+        });
+        var d = await res.json();
+        if (!d.ok) {
+          state.autoReply.testResult = { ok: false, msg: d.error || 'Server error' };
+        } else if (!d.enabled) {
+          state.autoReply.testResult = { ok: false, msg: 'Toggle is OFF — enable it above first' };
+        } else if (d.skipped) {
+          state.autoReply.testResult = { ok: false, msg: 'Skipped: ' + (d.reason || 'unknown reason') };
+        } else if (d.reply) {
+          state.autoReply.testResult = { ok: true, msg: 'AI replied: "' + d.reply + '"' };
+        } else {
+          state.autoReply.testResult = { ok: false, msg: 'No reply generated' };
+        }
+      } catch(e) {
+        state.autoReply.testResult = { ok: false, msg: 'Network error: ' + (e.message || e) };
+      }
+      state.autoReply.testLoading = false;
+      render();
+    }
+    window.testAutoReply = testAutoReply;
+
+    function toggleAiBaseUrl() { /* kept for compatibility; logic moved to selectProvider */ }
+    window.toggleAiBaseUrl = toggleAiBaseUrl;
+
+    var SKILL_TRIGGERS = [
+      { key: 'sms_received', label: 'SMS Received' },
+    ];
+
+    function renderSkillCard(s) {
+      var sk = state.skills;
+      var isEditing = sk.editingId === s.id;
+      var safeId = escapeAttr(s.id);
+      var isActive = !!s.enabled;
+      var borderColor = isEditing ? 'var(--primary)' : isActive ? 'rgba(15,160,129,0.4)' : 'var(--border)';
+      var html = '<div style="background:var(--card-bg);border:1px solid ' + borderColor + ';border-radius:10px;padding:14px;transition:border-color 0.15s">';
+      if (isEditing) {
+        var triggerOptions = SKILL_TRIGGERS.map(function(t) {
+          return '<option value="' + t.key + '"' + (sk.editContent.trigger_event === t.key ? ' selected' : '') + '>' + t.label + '</option>';
+        }).join('');
+        html += '<div style="display:grid;gap:10px">';
+        html += '<div style="display:flex;gap:8px">';
+        html += '<input id="edit-skill-name-' + safeId + '" value="' + escapeAttr(s.name) + '" oninput="state.skills.editContent.name=this.value" placeholder="Skill name" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;box-sizing:border-box">';
+        html += '<select id="edit-skill-trigger-' + safeId + '" onchange="state.skills.editContent.trigger_event=this.value" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:13px">' + triggerOptions + '</select>';
+        html += '</div>';
+        html += '<textarea id="edit-skill-instructions-' + safeId + '" oninput="state.skills.editContent.instructions=this.value" placeholder="Describe what the AI should do when this trigger fires…" style="width:100%;min-height:120px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">' + escapeHtml(s.instructions) + '</textarea>';
+        html += '</div><div style="display:flex;gap:8px;margin-top:10px">';
+        html += '<button class="btn btn-primary" onclick="saveEditSkill(\\'' + safeId + '\\')" style="font-size:13px">Save</button>';
+        html += '<button class="btn btn-ghost" onclick="cancelEditSkill()" style="font-size:13px">Cancel</button>';
+        html += '</div>';
+      } else {
+        // Header row: name + trigger badge + action buttons
+        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">';
+        html += '<span style="font-size:14px;font-weight:600;flex:1">' + escapeHtml(s.name) + '</span>';
+        html += '<span style="font-size:11px;background:' + (isActive ? 'rgba(15,160,129,0.12)' : 'rgba(90,107,122,0.1)') + ';color:' + (isActive ? 'var(--primary)' : 'var(--muted)') + ';padding:2px 8px;border-radius:9999px;white-space:nowrap">' + (SKILL_TRIGGERS.find(function(t){return t.key===s.trigger_event;})||{label:s.trigger_event}).label + '</span>';
+        if (isActive) html += '<span style="font-size:11px;background:rgba(15,160,129,0.12);color:var(--primary);padding:2px 8px;border-radius:9999px">active</span>';
+        html += '<button onclick="startEditSkill(\\'' + safeId + '\\')" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px">';
+        html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>';
+        html += '<button onclick="deleteSkill(\\'' + safeId + '\\')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px;font-size:16px;line-height:1">×</button>';
+        html += '</div>';
+        // Instructions preview
+        html += '<p style="margin:0 0 12px;font-size:13px;color:var(--fg);white-space:pre-wrap;word-break:break-word;line-height:1.6">' + escapeHtml(s.instructions) + '</p>';
+        // Activate button
+        if (!isActive) {
+          html += '<button onclick="activateSkill(\\'' + safeId + '\\',\\'' + escapeAttr(s.trigger_event) + '\\')" class="btn btn-outline btn-sm" style="font-size:12px">Set as active</button>';
+        }
+      }
+      html += '</div>';
+      return html;
+    }
+
+    function renderSkillTab() {
+      var sk = state.skills;
+      var html = '<div style="max-width:680px;margin:0 auto;padding:16px">';
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">';
+      html += '<div><h2 style="margin:0 0 4px">Skills</h2>';
+      html += '<p style="margin:0;font-size:13px;color:var(--muted)">One active skill per trigger. Injected into the AI prompt when that event fires.</p></div>';
+      html += '<button class="btn ' + (sk.adding ? 'btn-ghost' : 'btn-primary') + '" onclick="toggleAddSkill()" style="font-size:13px">' + (sk.adding ? 'Cancel' : '+ New skill') + '</button>';
+      html += '</div>';
+      if (sk.error) {
+        html += '<div style="padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;color:#ef4444;font-size:14px;margin-bottom:12px">' + escapeHtml(sk.error) + '</div>';
+      }
+      if (sk.adding) {
+        var triggerOpts = SKILL_TRIGGERS.map(function(t) { return '<option value="' + t.key + '">' + t.label + '</option>'; }).join('');
+        html += '<div style="background:var(--card-bg);border:1px solid var(--primary);border-radius:10px;padding:14px;margin-bottom:16px">';
+        html += '<div style="display:grid;gap:10px">';
+        html += '<div style="display:flex;gap:8px">';
+        html += '<input id="new-skill-name" placeholder="Skill name" oninput="state.skills.newName=this.value" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;box-sizing:border-box">';
+        html += '<select id="new-skill-trigger" onchange="state.skills.newTrigger=this.value" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:13px">' + triggerOpts + '</select>';
+        html += '</div>';
+        html += '<textarea id="new-skill-instructions" placeholder="Describe what the AI should do when this trigger fires — context to check, reply style, behavioral rules, anything." oninput="state.skills.newInstructions=this.value" style="width:100%;min-height:120px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5"></textarea>';
+        html += '</div><div style="display:flex;gap:8px;margin-top:10px">';
+        html += '<button class="btn btn-primary" onclick="submitNewSkill()" style="font-size:13px">Save</button>';
+        html += '<button class="btn btn-ghost" onclick="toggleAddSkill()" style="font-size:13px">Cancel</button>';
+        html += '</div></div>';
+      }
+      if (sk.loading && !sk.items.length) {
+        html += '<p style="color:var(--muted);text-align:center;padding:40px 0">Loading…</p>';
+      } else if (!sk.items.length && !sk.adding) {
+        html += '<div style="text-align:center;padding:60px 20px;color:var(--muted)">';
+        html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;margin-bottom:12px;opacity:0.4"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+        html += '<p style="margin:0;font-size:15px;font-weight:500">No skills yet</p>';
+        html += '<p style="margin:8px 0 0;font-size:13px">Create a skill to guide the AI\\'s behavior when a trigger fires.</p>';
+        html += '</div>';
+      } else {
+        html += '<div style="display:grid;gap:10px">';
+        sk.items.forEach(function(s) { html += renderSkillCard(s); });
+        html += '</div>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    function toggleAddSkill() {
+      state.skills.adding = !state.skills.adding;
+      state.skills.newName = ''; state.skills.newInstructions = ''; state.skills.newTrigger = 'sms_received';
+      render();
+    }
+    window.toggleAddSkill = toggleAddSkill;
+
+    async function submitNewSkill() {
+      var name = state.skills.newName.trim();
+      if (!name) { alert('Skill name is required'); return; }
+      var trigger = state.skills.newTrigger || 'sms_received';
+      var instructions = state.skills.newInstructions || '';
+      try {
+        var r = await fetch('/api/skills', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, instructions: instructions, trigger_event: trigger }) });
+        var d = await r.json();
+        if (d.ok) { state.skills.adding = false; state.skills.newName = ''; state.skills.newInstructions = ''; await loadSkillsAsync(); }
+        else { state.skills.error = d.error || 'Failed to save'; render(); }
+      } catch(e) { state.skills.error = e.message; render(); }
+    }
+    window.submitNewSkill = submitNewSkill;
+
+    async function loadSkillsAsync() {
+      var d = await fetch('/api/skills').then(function(r) { return r.json(); });
+      if (d.ok) { state.skills.items = d.skills; render(); }
+    }
+
+    function startEditSkill(id) {
+      var skill = state.skills.items.find(function(s) { return s.id === id; });
+      if (!skill) return;
+      state.skills.editingId = id;
+      state.skills.editContent = { name: skill.name, instructions: skill.instructions, trigger_event: skill.trigger_event };
+      render();
+    }
+    window.startEditSkill = startEditSkill;
+
+    function cancelEditSkill() { state.skills.editingId = null; render(); }
+    window.cancelEditSkill = cancelEditSkill;
+
+    async function saveEditSkill(id) {
+      var c = state.skills.editContent;
+      try {
+        var r = await fetch('/api/skills/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: c.name, instructions: c.instructions, trigger_event: c.trigger_event }) });
+        var d = await r.json();
+        if (d.ok) { state.skills.editingId = null; await loadSkillsAsync(); }
+        else { state.skills.error = d.error || 'Failed to save'; render(); }
+      } catch(e) { state.skills.error = e.message; render(); }
+    }
+    window.saveEditSkill = saveEditSkill;
+
+    async function activateSkill(id, trigger_event) {
+      await fetch('/api/skills/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activate: true, trigger_event: trigger_event }) });
+      await loadSkillsAsync();
+    }
+    window.activateSkill = activateSkill;
+
+    async function deleteSkill(id) {
+      if (!confirm('Delete this skill?')) return;
+      await fetch('/api/skills/' + id, { method: 'DELETE' });
+      await loadSkillsAsync();
+    }
+    window.deleteSkill = deleteSkill;
+
     function renderSettingsTab() {
+      var aiConfigured = state.chat.aiAvailable;
       return \`
         <div class="card">
-          <h2>Audit Log</h2>
+          <h2>AI Assistant</h2>
+          <p style="font-size:14px;color:var(--muted);margin-bottom:16px">Connect any OpenAI-compatible AI provider.</p>
+          <div style="display:grid;gap:12px;max-width:480px">
+            <div>
+              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:8px">Provider</label>
+              <div id="provider-pills" style="display:flex;flex-wrap:wrap;gap:8px">\${renderProviderPills()}</div>
+            </div>
+            <div>
+              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px">API Key</label>
+              <input type="password" id="ai-api-key" placeholder="sk-ant-..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg);color:var(--fg);font-size:14px;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px">Model <span style="font-weight:400">(optional — uses provider default if blank)</span></label>
+              <input type="text" id="ai-model" placeholder="claude-sonnet-4-6" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg);color:var(--fg);font-size:14px;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px">Base URL <span style="font-weight:400">(optional — uses provider default if blank)</span></label>
+              <input type="text" id="ai-base-url" placeholder="https://api.anthropic.com/v1" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg);color:var(--fg);font-size:14px;box-sizing:border-box">
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <button class="btn btn-primary" onclick="saveAiKey()">Save</button>
+              <span id="ai-flash" style="font-size:13px;color:var(--success);opacity:0;transition:opacity 0.3s">Saved</span>
+              <span style="font-size:13px;color:\${aiConfigured ? 'var(--success)' : 'var(--muted)'}">\${aiConfigured ? '● Connected' : '○ Not configured'}</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <h2>SMS Auto-Reply</h2>
+          <p style="font-size:14px;color:var(--muted);margin-bottom:16px">AI automatically replies to incoming SMS while the app is running.</p>
+          <div style="display:flex;align-items:center;gap:14px">
+            <label style="position:relative;display:inline-block;width:44px;height:24px;margin:0;cursor:\${state.autoReply.loading ? 'wait' : 'pointer'}">
+              <input type="checkbox" \${state.autoReply.enabled ? 'checked' : ''} onchange="setAutoReply(this.checked)" \${state.autoReply.loading ? 'disabled' : ''} style="opacity:0;width:0;height:0">
+              <span style="position:absolute;inset:0;background:\${state.autoReply.enabled ? 'var(--primary)' : '#ccc'};border-radius:12px;transition:background 0.2s"></span>
+              <span style="position:absolute;left:\${state.autoReply.enabled ? '22px' : '2px'};top:2px;width:20px;height:20px;background:#fff;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.2)"></span>
+            </label>
+            <span style="font-size:14px;color:\${state.autoReply.enabled ? 'var(--fg)' : 'var(--muted)'}">
+              \${state.autoReply.enabled ? 'Enabled — AI will reply to incoming SMS' : 'Disabled'}
+            </span>
+          </div>
+          \${state.autoReply.enabled ? '<p style="font-size:12px;color:var(--muted);margin:10px 0 0">Replies within ~5 seconds while the app is running. Checks SMS history, Calendar, and Email before replying. Short codes are skipped. Check Audit Log for history.</p>' : ''}
+          \${!state.chat.aiAvailable && state.autoReply.enabled ? '<p style="font-size:12px;color:var(--warning,#f59e0b);margin:8px 0 0">AI key required — configure it above first.</p>' : ''}
+          <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
+            <label style="font-size:13px;color:var(--muted)">Context depth (tool rounds):</label>
+            <input type="number" min="1" max="10" value="\${state.autoReply.maxToolRounds}" onchange="saveMaxToolRounds(this.value)" style="width:56px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);color:var(--fg)">
+            <span style="font-size:12px;color:var(--muted)">(1 = fast, 3 = balanced, 5+ = thorough)</span>
+          </div>
+          <div style="margin-top:14px;display:flex;align-items:center;gap:12px">
+            <button class="btn" onclick="testAutoReply()" \${state.autoReply.testLoading ? 'disabled' : ''} style="font-size:13px;padding:7px 14px">\${state.autoReply.testLoading ? 'Testing...' : 'Test auto-reply'}</button>
+            \${state.autoReply.testResult ? '<span style="font-size:13px;color:' + (state.autoReply.testResult.ok ? 'var(--success)' : 'var(--danger,#ef4444)') + '">' + escapeHtml(state.autoReply.testResult.msg) + '</span>' : ''}
+          </div>
+        </div>
+        <div class="card">
+          <h2>Integrations</h2>
+          <p style="font-size:14px;color:var(--muted);margin-bottom:16px">Connect services to give the AI access to your data.</p>
+          <div style="display:grid;gap:10px">
+            \${state.sources.filter(s => ['gmail','google_calendar','github'].includes(s.name)).map(s => {
+              var icons = { gmail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>', google_calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>', github: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>' };
+              var labels = { gmail: 'Gmail', google_calendar: 'Calendar', github: 'GitHub' };
+              var tabNames = { gmail: 'gmail', google_calendar: 'google_calendar', github: 'github' };
+              var icon = icons[s.name] || '';
+              var label = labels[s.name] || s.name;
+              var accountLine = (s.accountInfo && s.accountInfo.email) ? (' — ' + escapeHtml(s.accountInfo.email)) : '';
+              return '<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--border);border-radius:9px;background:var(--card-bg)">' +
+                icon +
+                '<div style="flex:1;min-width:0"><p style="margin:0;font-size:14px;font-weight:500">' + label + '</p>' +
+                '<p style="margin:2px 0 0;font-size:12px;color:' + (s.connected ? 'var(--success)' : 'var(--muted)') + '">' + (s.connected ? ('Connected' + accountLine) : 'Not connected') + '</p></div>' +
+                (s.connected
+                  ? '<button class="btn btn-sm btn-outline" onclick="switchTab(\\'' + tabNames[s.name] + '\\')" style="font-size:12px;flex-shrink:0">Manage →</button>'
+                  : '<a href="/oauth/' + s.name + '/start" class="btn btn-sm btn-primary" style="font-size:12px;text-decoration:none;flex-shrink:0">Connect</a>') +
+                '</div>';
+            }).join('')}
+          </div>
+        </div>
+        <div class="card">
+          <h2>Activity Log</h2>
           \${state.audit.length ? '<table><tr><th>Time</th><th>Event</th><th>Source</th><th>Details</th><th>Response</th></tr>' +
             state.audit.map(e => {
               const d = typeof e.details === 'string' ? JSON.parse(e.details) : e.details;
@@ -1564,7 +2795,7 @@ function getIndexHtml(): string {
                 : '-';
               return '<tr><td style="font-size:14px">' + new Date(e.timestamp).toLocaleString() + '</td><td>' + e.event + '</td><td>' + (e.source || '-') + '</td><td style="font-size:14px;max-width:300px;overflow-wrap:break-word;word-break:break-word">' + JSON.stringify(detailsCopy).slice(0,200) + (JSON.stringify(detailsCopy).length > 200 ? '...' : '') + '</td><td>' + respCell + '</td></tr>';
             }).join('') +
-            '</table>' : '<p class="empty">No audit entries.</p>'}
+            '</table>' : '<p class="empty">No activity yet.</p>'}
         </div>
       \`;
     }
@@ -1948,8 +3179,22 @@ function getIndexHtml(): string {
 
       pending.forEach(function(a) {
         var data = typeof a.action_data === 'string' ? JSON.parse(a.action_data) : a.action_data;
-        var label = actionTypeLabel(a.action_type);
         var safe = a.action_id.replace(/'/g, "\\\\'");
+
+        // SMS actions are executed client-side via AndroidSms
+        if (a.source === 'sms' && a.action_type === 'send_sms') {
+          var safeTo = (data.to || '').replace(/'/g, "\\\\'");
+          var safeBody = (data.body || '').replace(/'/g, "\\\\'");
+          html += '<div class="email-card" id="card-' + a.action_id + '">';
+          html += '<div class="email-card-header"><span class="email-card-title">SMS to ' + escapeHtml(data.to || '') + '</span></div>';
+          html += '<div class="email-card-meta"><div class="email-field"><span class="email-field-label">To</span><span>' + escapeHtml(data.to || '') + '</span></div></div>';
+          html += '<div class="email-card-body"><pre class="email-body-display">' + escapeHtml(data.body || '') + '</pre></div>';
+          html += '<div class="email-card-actions">';
+          html += '<button class="btn btn-deny" onclick="rejectSmsAction(\\'' + safe + '\\')">Deny</button>';
+          html += '<button class="btn btn-approve" onclick="sendSmsAction(\\'' + safe + '\\',\\'' + safeTo + '\\',\\'' + safeBody + '\\')">Send SMS</button>';
+          html += '</div></div>';
+          return;
+        }
 
         html += '<div class="email-card" id="card-' + a.action_id + '">';
         html += '<div class="email-card-header"><span class="email-card-title">' + escapeHtml(a.purpose || data.subject || 'Untitled') + '</span></div>';
@@ -2073,13 +3318,13 @@ function getIndexHtml(): string {
     window.renderCalendarFilterCards = renderCalendarFilterCards;
     window.sendAction = sendAction;
 
-    // Handle OAuth redirect results
+    // Handle OAuth redirect results (web / query-param path)
     (function handleOAuthResult() {
       var params = new URLSearchParams(window.location.search);
       var success = params.get('oauth_success');
       var error = params.get('oauth_error');
       if (success) {
-        switchTab(success);
+        fetchData().then(function() { switchTab(success); });
         window.history.replaceState({}, '', '/');
       }
       if (error) {
@@ -2088,8 +3333,42 @@ function getIndexHtml(): string {
       }
     })();
 
+    // Handle OAuth deep-link callbacks on Android (pdh://oauth?success=<source>).
+    // The browser-side token exchange page redirects here after storing tokens,
+    // which triggers the Android intent filter and fires appUrlOpen in Capacitor.
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
+      window.Capacitor.Plugins.App.addListener('appUrlOpen', function(event) {
+        try {
+          var url = new URL(event.url);
+          if (url.hostname === 'oauth') {
+            var success = url.searchParams.get('success');
+            var error = url.searchParams.get('error');
+            if (success) {
+              fetchData().then(function() { switchTab(success); });
+            }
+            if (error) {
+              alert('OAuth error: ' + error);
+            }
+          }
+        } catch(e) {}
+      });
+    }
+
     // --- Auth: signup vs login form ---
     var isSignup = false;
+
+    function setAuthMode(signup) {
+      isSignup = signup;
+      document.getElementById('login-subtitle').textContent = signup ? 'Create your account' : 'Sign in to continue';
+      document.getElementById('auth-submit').textContent = signup ? 'Create Account' : 'Sign In';
+      document.getElementById('auth-toggle').textContent = signup ? 'Already have an account? Sign in' : 'New here? Create account';
+      document.getElementById('login-error').textContent = '';
+    }
+
+    function toggleAuthMode() {
+      setAuthMode(!isSignup);
+    }
+    window.toggleAuthMode = toggleAuthMode;
 
     function handleAuthSubmit(e) {
       e.preventDefault();
@@ -2106,7 +3385,7 @@ function getIndexHtml(): string {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email, password: password }),
-      }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
       .then(function(res) {
         btn.disabled = false;
         btn.textContent = isSignup ? 'Create Account' : 'Sign In';
@@ -2114,6 +3393,10 @@ function getIndexHtml(): string {
           document.getElementById('login-screen').style.display = 'none';
           document.getElementById('app').style.display = 'flex';
           fetchData();
+        } else if (res.status === 409) {
+          // Account already exists — switch to sign-in mode automatically
+          setAuthMode(false);
+          errorEl.textContent = 'Account exists. Please sign in with your password.';
         } else {
           errorEl.textContent = res.data.error || 'Authentication failed';
         }
@@ -2126,19 +3409,98 @@ function getIndexHtml(): string {
     }
     window.handleAuthSubmit = handleAuthSubmit;
 
-    // Check auth on load
+    // Poll for drain-path pending auto-replies: when the app was killed and SMS was queued,
+    // android.ts replays them with ?drain=true and stores in pendingAutoReplies.
+    // This polling picks them up and sends via AndroidSms once the WebView is active.
+    setInterval(async function() {
+      if (!state.autoReply.enabled || !window.AndroidSms) return;
+      try {
+        var res = await fetch('/api/sms/pending-replies');
+        var d = await res.json();
+        if (!d.ok || !d.replies || !d.replies.length) return;
+        d.replies.forEach(function(r) {
+          var cbId = 'autoreply_' + r.id;
+          window._smsSendCbs[cbId] = function(error) {
+            if (error) console.warn('[auto-reply] send error:', error);
+            fetch('/api/sms/pending-replies/' + r.id, { method: 'DELETE' }).catch(function() {});
+          };
+          window.AndroidSms.sendMessage(cbId, r.to, r.body);
+        });
+      } catch(e) { /* non-fatal */ }
+    }, 3000);
+
+    // Primary auto-reply loop: poll inbox every 5s, detect new incoming messages,
+    // call /sms/auto-reply, and send the reply via AndroidSms directly.
+    // This uses the same proven path as manual reply and doesn't depend on SmsReceiver.
+    var _autoReplyLastMs = Date.now(); // only process messages that arrive after startup
+    setInterval(function() {
+      if (!state.autoReply.enabled || !window.AndroidSms || !state.chat.aiAvailable) return;
+      if (!window._smsCbs) window._smsCbs = {};
+      var reqId = 'autocheck_' + Date.now();
+      var checkFrom = _autoReplyLastMs;
+      _autoReplyLastMs = Date.now();
+      window._smsCbs[reqId] = async function(messages, error) {
+        if (error || !Array.isArray(messages)) return;
+        // type 1 = received SMS
+        var newMsgs = messages.filter(function(m) { return m.type == 1 && m.date > checkFrom; });
+        for (var i = 0; i < newMsgs.length; i++) {
+          var msg = newMsgs[i];
+          try {
+            // Collect last 10 messages in this conversation for context
+            var history = messages
+              .filter(function(m) { return m.address === msg.address; })
+              .sort(function(a, b) { return a.date - b.date; })
+              .slice(-10);
+            var res = await fetch('/sms/auto-reply', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ from: msg.address, body: msg.body, history: history }),
+            });
+            var d = await res.json();
+            if (d.ok && d.enabled && d.reply) {
+              var cbId = 'arloop_' + Date.now() + '_' + i;
+              window._smsSendCbs[cbId] = function(err) {
+                if (err) console.warn('[auto-reply] send failed:', err);
+              };
+              window.AndroidSms.sendMessage(cbId, msg.address, d.reply);
+            }
+          } catch(e) { /* non-fatal */ }
+        }
+      };
+      window.AndroidSms.getMessages(reqId, 'inbox', 50);
+    }, 5000);
+
+    // Check auth on load — auto-login for single-device use
     fetch('/api/auth/status').then(function(r) { return r.json(); }).then(function(data) {
       if (data.authenticated) {
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('app').style.display = 'flex';
         fetchData();
       } else {
-        document.getElementById('login-screen').style.display = 'flex';
-        document.getElementById('app').style.display = 'none';
-        isSignup = !data.hasUsers;
-        document.getElementById('login-subtitle').textContent = isSignup ? 'Create your account' : 'Sign in to continue';
-        document.getElementById('auth-submit').textContent = isSignup ? 'Create Account' : 'Sign In';
+        // Auto-create user + session (device is localhost — no credentials needed)
+        fetch('/auth/device-login', { method: 'POST' })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (d.ok) {
+              document.getElementById('login-screen').style.display = 'none';
+              document.getElementById('app').style.display = 'flex';
+              fetchData();
+            } else {
+              document.getElementById('login-screen').style.display = 'flex';
+              document.getElementById('app').style.display = 'none';
+              setAuthMode(!data.hasUsers);
+            }
+          })
+          .catch(function() {
+            document.getElementById('login-screen').style.display = 'flex';
+            document.getElementById('app').style.display = 'none';
+            setAuthMode(false);
+          });
       }
+    }).catch(function() {
+      document.getElementById('login-screen').style.display = 'flex';
+      document.getElementById('app').style.display = 'none';
+      setAuthMode(false);
     });
   </script>
 </body>

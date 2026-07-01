@@ -47,7 +47,22 @@ export function createLoginRoutes(deps: LoginDeps): Hono {
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     await deps.store.createSession(token, expiresAt);
 
-    c.header('Set-Cookie', `pdh_session=${token}; HttpOnly; Path=/; SameSite=Lax`);
+    c.header('Set-Cookie', `pdh_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`);
+    return c.json({ ok: true });
+  });
+
+  // Single-device auto-login: creates a user if none exists and returns a session.
+  // Safe because the server only binds to localhost on the device.
+  app.post('/device-login', async (c) => {
+    const userCount = await deps.store.getUserCount();
+    if (userCount === 0) {
+      const passwordHash = hashSync(randomUUID(), 10);
+      await deps.store.createUser('device@localhost', passwordHash);
+    }
+    const token = randomUUID();
+    const expiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+    await deps.store.createSession(token, expiresAt);
+    c.header('Set-Cookie', `pdh_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=31536000`);
     return c.json({ ok: true });
   });
 
@@ -70,7 +85,7 @@ export function createLoginRoutes(deps: LoginDeps): Hono {
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     await deps.store.createSession(token, expiresAt);
 
-    c.header('Set-Cookie', `pdh_session=${token}; HttpOnly; Path=/; SameSite=Lax`);
+    c.header('Set-Cookie', `pdh_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`);
     return c.json({ ok: true });
   });
 
