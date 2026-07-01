@@ -1,239 +1,239 @@
 # PersonalDataHub — Android Build Guide
 
-This document describes how to build and run the Android app after the port
-implementation (see `ANDROID-PORT-PLAN.md`).
+How to build and run the Android app.
 
-## Architecture recap
+## Architecture
 
-The Android app uses **Capacitor** wrapping the existing Hono web server:
+The Android app uses **React Native** with `nodejs-mobile-react-native` to run the existing Hono backend in a native background thread:
 
 ```
-┌─────────────────────────────────────────────────┐
-│  Android App                                    │
-│  ┌───────────────┐    ┌───────────────────────┐ │
-│  │  Capacitor    │    │  @choreruiz/           │ │
-│  │  WebView      │◄──►│  capacitor-node-js    │ │
-│  │               │    │  (background thread)  │ │
-│  │  Loads        │    │                       │ │
-│  │  localhost:   │    │  src/android.ts       │ │
-│  │  3000         │    │  Hono server          │ │
-│  └───────────────┘    │  sql.js DataStore     │ │
-│                       └───────────────────────┘ │
-└─────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│  Android App                                        │
+│  ┌───────────────────┐   ┌───────────────────────┐  │
+│  │  React Native     │   │  nodejs-mobile-       │  │
+│  │  WebView          │◄──│  react-native         │  │
+│  │                   │   │  (background thread)  │  │
+│  │  Loads            │   │                       │  │
+│  │  127.0.0.1:3000   │   │  src/android.ts       │  │
+│  │                   │   │  Hono server          │  │
+│  └───────────────────┘   │  sql.js DataStore     │  │
+│                          └───────────────────────┘  │
+└─────────────────────────────────────────────────────┘
 ```
 
-The Hono server runs on `127.0.0.1:3000` inside a Node.js Mobile thread.
-The Capacitor WebView points at that address via `capacitor.config.ts → server.url`.
-`better-sqlite3` is replaced by `sql.js` (pure JS + WASM) for ARM compatibility.
+`nodejs-mobile-react-native` bundles Node.js as a native library and starts `android.js` (compiled from `src/android.ts`) in a background thread at app launch. The Hono server runs on `127.0.0.1:3000`. `better-sqlite3` is replaced by `sql.js` (pure JS + WASM) since native modules cannot be loaded inside the Node.js Mobile thread.
+
+The backend is pre-bundled at build time by `scripts/bundle-mobile.cjs` using esbuild; it is placed in `mobile/nodejs-assets/nodejs-project/` which `nodejs-mobile-react-native` copies into the APK.
 
 ---
 
 ## Prerequisites
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Node.js | ≥ 22 | `nvm install 22` |
-| Android Studio | Ladybug+ | [developer.android.com/studio](https://developer.android.com/studio) |
-| Android SDK | API 26+ (Android 8) | Via Android Studio SDK Manager |
-| Java (JDK) | 17 or 21 | `sdk install java 21.0.x-tem` |
+| Tool | Version | Notes |
+|------|---------|-------|
+| Node.js | ≥ 22 | Use nvm: `nvm install 22` |
+| npm | bundled with Node | Used inside `mobile/` |
+| Android Studio | Ladybug (2024.2)+ | [developer.android.com/studio](https://developer.android.com/studio) |
+| Android SDK | API 26+ (Android 8) | Via Android Studio → SDK Manager |
+| JDK | 17 or 21 | Bundled with Android Studio, or `sdk install java 21-tem` |
+| ADB | any | Bundled with Android SDK platform-tools |
 
-Set environment variables:
+Set `ANDROID_HOME` before building (add to your shell profile):
+
 ```bash
+# Linux
 export ANDROID_HOME=$HOME/Android/Sdk
-export PATH=$PATH:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools
+export PATH=$PATH:$ANDROID_HOME/platform-tools
+
+# macOS
+export ANDROID_HOME=$HOME/Library/Android/sdk
+export PATH=$PATH:$ANDROID_HOME/platform-tools
 ```
+
+If `ANDROID_HOME` is not set but the SDK is at the default location, the build scripts will find it automatically.
 
 ---
 
 ## Step 1 — Install dependencies
 
+From the repo root:
+
 ```bash
 npm install
 ```
 
-This installs:
-- `sql.js` — pure-JS SQLite for Android
-- `@capacitor/core`, `@capacitor/cli`, `@capacitor/android` — Capacitor 8
-- `@choreruiz/capacitor-node-js` — Node.js runtime plugin for Capacitor 8
+From the `mobile/` directory:
 
-> **Package note:** The plugin `nodejs-mobile-capacitor` does **not** exist on npm.
-> The correct package for running Node.js inside a Capacitor app is
-> `@choreruiz/capacitor-node-js` (a Capacitor-8-compatible fork of
-> [hampoelz/Capacitor-NodeJS](https://github.com/hampoelz/Capacitor-NodeJS)).
+```bash
+cd mobile && npm install
+```
 
 ---
 
-## Step 2 — Initialize the Android project
+## Step 2 — Build and run
 
 ```bash
-npx cap add android
+cd mobile
+npm run build:android
 ```
 
-This creates the `android/` directory with a standard Android Gradle project.
-Only needs to be run once.
+This does three things in sequence:
+
+1. **`setup:android`** — creates `mobile/android/local.properties` pointing at your Android SDK (skipped if the file already exists)
+2. **`bundle:node`** — compiles `src/android.ts` (and `src/ios.ts`) with esbuild, outputs to `mobile/nodejs-assets/nodejs-project/`, copies the sql.js WASM files
+3. **`react-native run-android`** — starts Metro, builds the APK with Gradle, and deploys to the connected device or emulator
+
+Gradle downloads dependencies on the first run — this takes several minutes. Subsequent builds are faster.
 
 ---
 
-## Step 4 — Configure nodejs-mobile-capacitor
+## Step 3 — Connect a device or emulator
 
-In `android/app/src/main/assets/`, the plugin looks for a `nodejs-project/`
-folder containing the Node.js entry point and its dependencies.
+`react-native run-android` requires either a physical device or a running emulator.
 
-Create the directory and link the compiled entry point:
+**Physical device:** Enable Developer Options and USB Debugging, then connect via USB. Verify with:
 
 ```bash
-mkdir -p android/app/src/main/assets/nodejs-project
+adb devices
 ```
 
-Add to `android/app/src/main/assets/nodejs-project/package.json`:
-```json
-{
-  "name": "pdh-mobile",
-  "version": "1.0.0",
-  "main": "android.js"
+**Emulator:** Open Android Studio → Device Manager → start a virtual device, then run `npm run build:android`.
+
+---
+
+## Rebuild after backend changes
+
+When you edit any TypeScript in `src/`:
+
+```bash
+# From the repo root — rebuilds the desktop CLI
+npm run build
+
+# From mobile/ — re-bundles the Node.js backend for Android and redeploys
+npm run build:android
+```
+
+You do **not** need to rebuild the Node.js bundle for React Native UI changes (`mobile/App.tsx` and friends) — Metro handles those with Fast Refresh.
+
+---
+
+## Run Metro separately (development workflow)
+
+For faster iteration on the React Native UI:
+
+```bash
+# Terminal 1 — start Metro bundler
+cd mobile && npm start
+
+# Terminal 2 — deploy to device (uses running Metro)
+cd mobile && npm run android
+```
+
+This skips the Node.js bundle step. Use `npm run build:android` when you also have backend changes.
+
+---
+
+## Troubleshooting
+
+### `SDK location not found`
+
+The `mobile/android/local.properties` file is missing or `ANDROID_HOME` is not set.
+
+Run the setup script manually:
+
+```bash
+cd mobile && npm run setup:android
+```
+
+Or create the file manually:
+
+```bash
+echo "sdk.dir=$HOME/Android/Sdk" > mobile/android/local.properties   # Linux
+echo "sdk.dir=$HOME/Library/Android/sdk" > mobile/android/local.properties  # macOS
+```
+
+### `INSTALL_FAILED_UPDATE_INCOMPATIBLE`
+
+The device has an existing installation signed with a different debug key. Uninstall it:
+
+```bash
+adb uninstall com.personaldatahub
+```
+
+Then re-run `npm run build:android`.
+
+### `react-native: command not found`
+
+Run `npm install` inside `mobile/` first:
+
+```bash
+cd mobile && npm install
+```
+
+### `better-sqlite3` fails to build (`npm install` in repo root)
+
+`better-sqlite3` requires Node.js ≤ 24 to find prebuilt binaries. On Node.js 26+ it builds from source. If the build fails, upgrade to the latest `better-sqlite3`:
+
+```bash
+npm install better-sqlite3@latest
+```
+
+The `mobile/` app does not use `better-sqlite3` — it uses `sql.js` (pure JS, no native build).
+
+### Metro bundler port conflict
+
+If port 8081 is in use, start Metro on a different port:
+
+```bash
+cd mobile && npm start -- --port 8082
+```
+
+---
+
+## Environment variables (backend thread)
+
+These are set by `src/android.ts` at runtime inside the Node.js Mobile thread:
+
+| Variable | Purpose |
+|----------|---------|
+| `PDH_MOBILE=true` | Selects sql.js DataStore instead of better-sqlite3 |
+| `PDH_DB_PATH` | Path to the on-device SQLite database file |
+| `PDH_DATA_DIR` | Directory for database + config |
+| `PDH_CONFIG_PATH` | Path to `hub-config.yaml` on the device |
+| `PDH_ENCRYPTION_KEY` | Master key for OAuth token encryption |
+| `SQLJS_WASM_PATH` | Path to `sql-wasm.wasm` (auto-set from `__dirname`) |
+
+OAuth credentials (`__GMAIL_CLIENT_ID__`, etc.) are embedded at compile time by `scripts/bundle-mobile.cjs` from `hub-config.yaml`.
+
+---
+
+## Building a release APK
+
+1. Generate a release keystore (one-time):
+
+```bash
+keytool -genkeypair -v -storetype PKCS12 \
+  -keystore mobile/android/app/release.keystore \
+  -alias pdh-release -keyalg RSA -keysize 2048 -validity 10000
+```
+
+2. Add signing config to `mobile/android/app/build.gradle` under `signingConfigs`:
+
+```groovy
+release {
+    storeFile file('release.keystore')
+    storePassword System.getenv('PDH_STORE_PASSWORD')
+    keyAlias 'pdh-release'
+    keyPassword System.getenv('PDH_KEY_PASSWORD')
 }
 ```
 
-After each TypeScript build (`npm run build`), copy the compiled files:
-```bash
-cp dist/android.js android/app/src/main/assets/nodejs-project/
-cp -r node_modules android/app/src/main/assets/nodejs-project/
-```
+3. Update the `release` buildType to use `signingConfigs.release`.
 
-Or add this to your build script.
-
----
-
-## Step 5 — Configure AndroidManifest.xml for OAuth deep links
-
-Edit `android/app/src/main/AndroidManifest.xml` and add inside `<application>`:
-
-```xml
-<!-- OAuth callback deep link: pdh://oauth/callback -->
-<activity
-  android:name="com.getcapacitor.BridgeActivity"
-  android:exported="true">
-  <intent-filter android:autoVerify="true">
-    <action android:name="android.intent.action.VIEW"/>
-    <category android:name="android.intent.category.DEFAULT"/>
-    <category android:name="android.intent.category.BROWSABLE"/>
-    <data android:scheme="pdh" android:host="oauth"/>
-  </intent-filter>
-</activity>
-```
-
-Also add the cleartext network permission (required for localhost HTTP):
-```xml
-<uses-permission android:name="android.permission.INTERNET"/>
-```
-
-And in `<application>`:
-```xml
-android:usesCleartextTraffic="true"
-```
-
----
-
-## Step 6 — Register OAuth redirect URIs
-
-In Google Cloud Console and GitHub OAuth settings, add the custom scheme as an
-additional redirect URI:
-
-- **Gmail / Calendar:** `pdh://oauth/callback`
-- **GitHub:** `pdh://oauth/callback`
-
-Update `src/gateway/auth/oauth-routes.ts` to use this URI when
-`process.env.PDH_MOBILE === 'true'`:
-
-```typescript
-const redirectUri = process.env.PDH_MOBILE === 'true'
-  ? 'pdh://oauth/callback'
-  : `${baseUrl}/oauth/gmail/callback`;
-```
-
----
-
-## Step 7 — Build and deploy
-
-### Build TypeScript
-```bash
-npm run build
-```
-
-### Sync Capacitor (copies www/ and native config)
-```bash
-npm run build:android   # = tsc + npx cap sync android
-```
-
-### Open in Android Studio
-```bash
-npm run android:open    # = npx cap open android
-```
-
-In Android Studio: **Build → Make Project**, then **Run → Run 'app'**
-on a connected device or emulator.
-
-### Direct run (if device is connected via ADB)
-```bash
-npm run android:run     # = npx cap run android
-```
-
----
-
-## Step 8 — SQLJS_WASM_PATH (if sql.js WASM is not found)
-
-On some Android configurations Node.js Mobile may not resolve the WASM file
-path automatically. If you see a `WASM file not found` error, set:
+4. Build:
 
 ```bash
-# In android.ts or via an Android plugin that sets env vars before Node.js starts
-process.env.SQLJS_WASM_PATH = '/path/to/nodejs-project/node_modules/sql.js/dist/sql-wasm.wasm';
+cd mobile/android && ./gradlew assembleRelease
 ```
 
-The typical path inside the APK's assets is:
-```
-/data/data/com.aismithlab.pdh/files/nodejs-project/node_modules/sql.js/dist/sql-wasm.wasm
-```
-
----
-
-## Environment variables summary
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `PDH_MOBILE` | `false` | Set to `true` to use sql.js instead of better-sqlite3 |
-| `PDH_DB_PATH` | `./pdh-data/pdh.db` | Path to the SQLite database file |
-| `PDH_DATA_DIR` | `./pdh-data` | Directory for database + config |
-| `PDH_CONFIG_PATH` | `{PDH_DATA_DIR}/hub-config.yaml` | Path to hub-config.yaml |
-| `PDH_ENCRYPTION_KEY` | auto-generated | Master key for OAuth token encryption |
-| `SQLJS_WASM_PATH` | auto-resolved | Override WASM location for sql.js |
-
----
-
-## Generating a signed APK/AAB
-
-1. In Android Studio: **Build → Generate Signed Bundle / APK**
-2. Create or use an existing keystore
-3. Select release build variant
-4. Build APK (direct install) or AAB (Play Store)
-
----
-
-## Tested configurations
-
-| Device | Android | Status |
-|--------|---------|--------|
-| Emulator (x86_64, API 33) | 13 | Planned |
-| Physical ARM64 device | 11+ | Planned |
-
----
-
-## Known limitations
-
-- **MCP/Agent connectivity:** External MCP clients cannot reach the on-device
-  server unless the Android device is on the same network and port 3000 is
-  accessible. For remote agent access, consider running pdh on a server instead.
-- **Token refresh background work:** When the app is backgrounded, Android may
-  kill the Node.js thread. OAuth tokens will be refreshed on next app open.
-- **App size:** Bundling Node.js Mobile + node_modules adds ~30-50 MB to the APK.
-  The sql.js WASM binary is ~1 MB.
+The APK is at `mobile/android/app/build/outputs/apk/release/app-release.apk`.

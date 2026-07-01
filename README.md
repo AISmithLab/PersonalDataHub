@@ -199,9 +199,22 @@ https://github.com/user-attachments/assets/62e7a26a-44a6-4a78-8b99-59e66b1e8464
 
 ---
 
+## Mobile App (Android / iOS)
+
+PersonalDataHub runs as a self-contained Android or iOS app using React Native. The existing Hono backend runs in a native Node.js Mobile background thread; the UI is a WebView loading `127.0.0.1:3000`.
+
+```bash
+cd mobile && npm install && npm run build:android
+```
+
+See the [Android Build Guide](systemdesigns/ANDROID-BUILD-GUIDE.md) for full setup, prerequisites, and troubleshooting.
+
+---
+
 ## Documentation
 
 - [Setup Guide](systemdesigns/SETUP.md) — install, connect sources, and connect your agent
+- [Android Build Guide](systemdesigns/ANDROID-BUILD-GUIDE.md) — build and run the Android/iOS app
 - [OpenClaw Setup](systemdesigns/OPENCLAW-SETUP.md) — install with OS-level user separation for OpenClaw
 - [OAuth Setup](systemdesigns/OAUTH-SETUP.md) — using your own OAuth credentials
 - [Development Guide](systemdesigns/DEVELOPMENT.md) — codebase structure, adding connectors, testing

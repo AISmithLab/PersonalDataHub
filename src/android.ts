@@ -1,9 +1,8 @@
 /**
- * Android entry point — runs inside nodejs-mobile-capacitor's background thread.
+ * Android entry point — runs inside nodejs-mobile-react-native's background thread.
  *
- * Node.js Mobile starts this file via the `nodejs-mobile-capacitor` plugin
- * on app launch. It starts the Hono server on port 3000, which the Capacitor
- * WebView then loads via capacitor.config.ts → server.url.
+ * nodejs-mobile-react-native starts this file on app launch. It starts the Hono
+ * server on port 3000, which the React Native WebView loads once it's ready.
  *
  * Environment:
  *   PDH_MOBILE=true       → selects sql.js DataStore (no native SQLite bindings)

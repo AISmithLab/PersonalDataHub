@@ -9,7 +9,8 @@
     "start": "react-native start",
     "test": "jest",
     "bundle:node": "node ../scripts/bundle-mobile.cjs",
-    "build:android": "npm run bundle:node && react-native run-android",
+    "setup:android": "node ../scripts/setup-android.cjs",
+    "build:android": "npm run setup:android && npm run bundle:node && react-native run-android",
     "build:ios": "npm run bundle:node && react-native run-ios"
   },
   "dependencies": {

@@ -9,51 +9,50 @@ PersonalDataHub/
 ├── src/
 │   ├── index.ts                 # Entry point — loads config, creates DB, starts server
 │   ├── cli.ts                   # CLI commands (init, start, stop, status, mcp, reset)
+│   ├── android.ts               # Android mobile entry point (bundled by scripts/bundle-mobile.cjs)
+│   ├── ios.ts                   # iOS mobile entry point (bundled by scripts/bundle-mobile.cjs)
+│   ├── app.ts                   # Creates the Hono app (shared by desktop + mobile)
 │   ├── config/                  # Configuration system
-│   │   ├── types.ts             # TypeScript interfaces (HubConfig, SourceConfig, etc.)
 │   │   ├── schema.ts            # Zod schemas for config validation
 │   │   └── loader.ts            # YAML loading with ${ENV_VAR} resolution
-│   ├── db/                      # Database layer
+│   ├── database/                # Database layer
 │   │   ├── db.ts                # SQLite connection (WAL mode, foreign keys)
-│   │   ├── schema.ts            # CREATE TABLE statements
-│   │   └── encryption.ts        # AES-256-GCM encrypt/decrypt for OAuth tokens
-│   ├── auth/                    # Authentication
-│   │   ├── oauth-routes.ts      # OAuth flows (Gmail, GitHub)
-│   │   └── token-manager.ts     # Encrypted token storage and refresh
-│   ├── connectors/              # Source service integrations
-│   │   ├── types.ts             # DataRow interface, SourceConnector interface
-│   │   ├── gmail/
-│   │   │   └── connector.ts     # Gmail fetch, executeAction
-│   │   └── github/
-│   │       ├── connector.ts     # GitHub access validation, fetch issues/PRs
-│   │       └── setup.ts         # Grant/revoke collaborator access
-│   ├── filters.ts               # Quick filter types, catalog, and apply logic
-│   ├── mcp/                     # MCP server
-│   │   ├── server.ts            # Stdio MCP server with source-specific tools
-│   │   └── server.test.ts       # MCP server tests
-│   ├── audit/
-│   │   └── log.ts               # AuditLog class — typed write methods + filtered queries
-│   ├── server/                  # HTTP layer
-│   │   ├── server.ts            # Hono app setup, mounts API + GUI + OAuth routes
-│   │   └── app-api.ts           # POST /pull, POST /propose, GET /sources
-│   ├── gui/
-│   │   └── routes.ts            # Self-contained HTML GUI with inline JS
+│   │   ├── schema.ts            # CREATE TABLE statements (better-sqlite3)
+│   │   ├── schema-sqljs.ts      # CREATE TABLE statements (sql.js, used on mobile)
+│   │   ├── encryption.ts        # AES-256-GCM encrypt/decrypt for OAuth tokens
+│   │   ├── datastore.ts         # DataStore interface
+│   │   ├── sqlite-store.ts      # better-sqlite3 implementation (desktop/server)
+│   │   ├── sqljs-store.ts       # sql.js implementation (mobile — no native bindings)
+│   │   └── dynamo-store.ts      # DynamoDB implementation (Lambda)
+│   ├── gateway/                 # HTTP layer
+│   │   ├── gateway.ts           # Hono app setup, mounts sub-routers
+│   │   ├── server.ts            # HTTP server start/stop
+│   │   ├── app-api.ts           # POST /pull, POST /propose, GET /sources
+│   │   ├── auth/                # OAuth flows and token management
+│   │   ├── connectors/          # Source service integrations (Gmail, GitHub, …)
+│   │   │   └── gmail/
+│   │   │   └── github/
+│   │   ├── filters.ts           # Quick filter types, catalog, and apply logic
+│   │   ├── audit/               # AuditLog class
+│   │   ├── chat/                # Chat/AI routes
+│   │   ├── code-runner/         # Code execution routes
+│   │   └── gui/                 # Self-contained HTML GUI with inline JS
 │   └── test-utils.ts            # Shared test utilities
+├── mobile/                      # React Native app
+│   ├── App.tsx                  # Root component — starts Node.js thread, loads WebView
+│   ├── android/                 # Android Gradle project
+│   ├── ios/                     # iOS Xcode project
+│   ├── nodejs-assets/           # Pre-bundled Node.js backend (generated, not committed)
+│   │   └── nodejs-project/      # Output of scripts/bundle-mobile.cjs
+│   └── package.json             # RN dependencies and build scripts
+├── scripts/
+│   ├── bundle-mobile.cjs        # esbuild: compiles src/android.ts + src/ios.ts for mobile
+│   └── setup-android.cjs        # Auto-generates mobile/android/local.properties
 ├── packages/
 │   └── personaldatahub/         # OpenClaw skill
-│       └── src/
-│           ├── index.ts         # Plugin registration
-│           ├── hub-client.ts    # HTTP client for PersonalDataHub API
-│           ├── tools.ts         # Tool definitions
-│           └── prompts.ts       # System prompt for teaching agents
 ├── tests/
 │   └── e2e/                     # End-to-end integration tests
-│       ├── helpers.ts           # Shared setup (mock connector, in-memory DB)
-│       ├── gmail-recent-readonly.test.ts
-│       ├── gmail-metadata-only.test.ts
-│       ├── gmail-full-access-redacted.test.ts
-│       └── gmail-staged-action.test.ts
-├── systemdesigns/                        # Documentation
+├── systemdesigns/               # Documentation
 ├── hub-config.example.yaml
 ├── package.json
 ├── tsconfig.json
@@ -67,15 +66,19 @@ PersonalDataHub/
 |---|---|
 | Language | TypeScript (strict, ESM, NodeNext modules) |
 | Runtime | Node.js >= 22 |
-| Database | better-sqlite3 (WAL mode) |
+| Database (desktop/server) | better-sqlite3 (WAL mode) |
+| Database (mobile) | sql.js (pure JS + WASM — no native bindings required) |
 | Encryption | AES-256-GCM (application-level, for OAuth tokens) |
 | HTTP Server | Hono (bound to 127.0.0.1) |
 | Agent Protocol | MCP via @modelcontextprotocol/sdk |
 | Config | YAML + Zod validation |
 | Gmail API | googleapis |
 | GitHub API | octokit |
+| Mobile framework | React Native 0.86 |
+| Mobile Node.js runtime | nodejs-mobile-react-native |
+| Mobile bundler | esbuild (via scripts/bundle-mobile.cjs) |
 | Tests | Vitest |
-| Package Manager | pnpm |
+| Package Manager | pnpm (desktop), npm (mobile/) |
 
 ## Development Commands
 
