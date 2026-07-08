@@ -71,9 +71,15 @@ export async function createApp(config: HubConfigParsed): Promise<AppResult> {
 async function seedDefaultSkills(store: DataStore): Promise<void> {
   const existing = await store.listSkills();
 
-  // If skills exist with trigger_event already set, leave them alone
-  if (existing.some(s => s.trigger_event && s.trigger_event !== 'sms_received')) return;
-  if (existing.some(s => s.trigger_event === 'sms_received' && s.instructions?.trim())) return;
+  // If the user has custom/non-default skills, don't overwrite
+  const hasCustomSmsSkill = existing.some(s => 
+    s.trigger_event === 'sms_received' && 
+    s.instructions && 
+    !s.instructions.startsWith('Context:') &&
+    !s.instructions.startsWith('If the sender is')
+  );
+  const hasOtherTriggers = existing.some(s => s.trigger_event && s.trigger_event !== 'sms_received');
+  if (hasCustomSmsSkill || hasOtherTriggers) return;
 
   // Delete any stale seeds from previous schema iterations
   for (const s of existing) await store.deleteSkill(s.id);
@@ -83,16 +89,59 @@ async function seedDefaultSkills(store: DataStore): Promise<void> {
     id,
     name: 'SMS Auto Reply',
     trigger_event: 'sms_received',
+    current_view: 'LOGICAL',
+    logic_tree: JSON.stringify([
+      {
+        id: 'node_1',
+        type: 'CONTEXT',
+        condition: null,
+        action: 'Check the SMS thread history with this contact for prior scheduling or commitments.'
+      },
+      {
+        id: 'node_2',
+        type: 'CONTEXT',
+        condition: null,
+        action: 'Check the calendar for conflicts before replying to anything time-sensitive.'
+      },
+      {
+        id: 'node_3',
+        type: 'CONTEXT',
+        condition: null,
+        action: 'If the sender references a meeting or event by name, check email for related threads.'
+      },
+      {
+        id: 'node_4',
+        type: 'IF',
+        condition: 'the sender is an automated short code or a delivery notification',
+        action: 'Do not reply to the message.'
+      },
+      {
+        id: 'node_5',
+        type: 'ELIF',
+        condition: 'the calendar shows conflicts or a commitment cannot be confirmed',
+        action: 'Do not commit to a specific time or meeting.'
+      },
+      {
+        id: 'node_6',
+        type: 'ELIF',
+        condition: 'the sender shares a new fact about themselves or their preferences',
+        action: 'Save the fact to memory.'
+      },
+      {
+        id: 'node_7',
+        type: 'ELSE',
+        condition: null,
+        action: 'Reply naturally in 1-3 sentences as the phone owner, using the sender\'s first name if known, and do not identify as AI unless directly asked.'
+      }
+    ]),
     instructions: [
       'Context: Check the SMS thread history with this contact for prior scheduling or commitments.',
       'Context: Check the calendar for conflicts before replying to anything time-sensitive.',
       'Context: If the sender references a meeting or event by name, check email for related threads.',
-      '',
-      'Style: Reply in 1-3 sentences. Use the sender\'s first name if known. Write naturally as the phone owner. Do not identify yourself as AI unless directly asked.',
-      '',
-      'Rules: Do not reply to automated short codes or delivery notifications.',
-      'Rules: Do not commit to a specific time or meeting unless the calendar confirms availability.',
-      'Rules: Save new facts about this contact to memory when they share something relevant.',
+      'If the sender is an automated short code or a delivery notification, do not reply to the message.',
+      'Alternatively, if the calendar shows conflicts or a commitment cannot be confirmed, do not commit to a specific time or meeting.',
+      'Alternatively, if the sender shares a new fact about themselves or their preferences, save the fact to memory.',
+      'Otherwise, reply naturally in 1-3 sentences as the phone owner, using the sender\'s first name if known, and do not identify as AI unless directly asked.'
     ].join('\n'),
     enabled: 1,
   });

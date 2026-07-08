@@ -43,14 +43,14 @@ function parseCookie(cookieHeader: string, name: string): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-function getClient(deps: ServerDeps): OpenAI {
+export function getClient(deps: ServerDeps): OpenAI {
   const ai = deps.config.ai!;
   const provider = ai.provider ?? 'anthropic';
   const baseURL = ai.base_url ?? DEFAULT_BASE_URLS[provider];
   return new OpenAI({ apiKey: ai.api_key, ...(baseURL ? { baseURL } : {}) });
 }
 
-function getModel(deps: ServerDeps): string {
+export function getModel(deps: ServerDeps): string {
   const ai = deps.config.ai!;
   return ai.model ?? DEFAULT_MODELS[ai.provider ?? 'anthropic'] ?? 'claude-sonnet-4-6';
 }

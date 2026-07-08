@@ -350,17 +350,27 @@ export class SqliteDataStore implements DataStore {
     return this.db.prepare('SELECT * FROM agent_skills ORDER BY trigger_event ASC, created_at ASC').all() as import('./datastore.js').SkillRow[];
   }
 
-  insertSkill(skill: { id: string; name: string; instructions: string; trigger_event: string; enabled?: number }): void {
-    this.db.prepare('INSERT INTO agent_skills (id, name, instructions, trigger_event, enabled) VALUES (?, ?, ?, ?, ?)').run(skill.id, skill.name, skill.instructions, skill.trigger_event, skill.enabled ?? 0);
+  insertSkill(skill: { id: string; name: string; instructions: string; trigger_event: string; enabled?: number; current_view?: string; logic_tree?: string }): void {
+    this.db.prepare('INSERT INTO agent_skills (id, name, instructions, trigger_event, enabled, current_view, logic_tree) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      skill.id,
+      skill.name,
+      skill.instructions,
+      skill.trigger_event,
+      skill.enabled ?? 0,
+      skill.current_view ?? 'SUMMARIZED',
+      skill.logic_tree ?? '[]'
+    );
   }
 
-  updateSkill(id: string, fields: { name?: string; instructions?: string; trigger_event?: string; enabled?: number }): void {
+  updateSkill(id: string, fields: { name?: string; instructions?: string; trigger_event?: string; enabled?: number; current_view?: string; logic_tree?: string }): void {
     const sets: string[] = [];
     const vals: unknown[] = [];
     if (fields.name !== undefined) { sets.push('name = ?'); vals.push(fields.name); }
     if (fields.instructions !== undefined) { sets.push('instructions = ?'); vals.push(fields.instructions); }
     if (fields.trigger_event !== undefined) { sets.push('trigger_event = ?'); vals.push(fields.trigger_event); }
     if (fields.enabled !== undefined) { sets.push('enabled = ?'); vals.push(fields.enabled); }
+    if (fields.current_view !== undefined) { sets.push('current_view = ?'); vals.push(fields.current_view); }
+    if (fields.logic_tree !== undefined) { sets.push('logic_tree = ?'); vals.push(fields.logic_tree); }
     if (sets.length === 0) return;
     sets.push("updated_at = datetime('now')");
     this.db.prepare(`UPDATE agent_skills SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id);

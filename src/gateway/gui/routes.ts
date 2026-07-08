@@ -11,6 +11,7 @@ import { GoogleCalendarConnector } from '../connectors/calendar/connector.js';
 import { GitHubConnector } from '../connectors/github/connector.js';
 import { Octokit } from 'octokit';
 import { FILTER_TYPES, applyFilters, type QuickFilter } from '../filters.js';
+import { getClient, getModel } from '../chat/routes.js';
 
 interface GuiDeps {
   store: DataStore;
@@ -241,21 +242,35 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   });
 
   app.post('/api/skills', async (c) => {
-    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string };
+    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; current_view?: string; logic_tree?: string };
     if (!body.name?.trim()) return c.json({ ok: false, error: 'name is required' }, 400);
     const id = `skill_${randomUUID().slice(0, 12)}`;
-    await deps.store.insertSkill({ id, name: body.name.trim(), instructions: body.instructions ?? '', trigger_event: body.trigger_event ?? 'sms_received', enabled: 0 });
+    await deps.store.insertSkill({
+      id,
+      name: body.name.trim(),
+      instructions: body.instructions ?? '',
+      trigger_event: body.trigger_event ?? 'sms_received',
+      enabled: 0,
+      current_view: body.current_view ?? 'SUMMARIZED',
+      logic_tree: body.logic_tree ?? '[]'
+    });
     return c.json({ ok: true, id });
   });
 
   app.put('/api/skills/:id', async (c) => {
     const id = c.req.param('id');
-    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; activate?: boolean };
+    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; activate?: boolean; current_view?: string; logic_tree?: string };
     if (body.activate) {
       const skill = (await deps.store.listSkills()).find(s => s.id === id);
       if (skill) await deps.store.activateSkill(id, body.trigger_event ?? skill.trigger_event);
     } else {
-      await deps.store.updateSkill(id, { name: body.name, instructions: body.instructions, trigger_event: body.trigger_event });
+      await deps.store.updateSkill(id, {
+        name: body.name,
+        instructions: body.instructions,
+        trigger_event: body.trigger_event,
+        current_view: body.current_view,
+        logic_tree: body.logic_tree
+      });
     }
     return c.json({ ok: true });
   });
@@ -264,6 +279,92 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
     const id = c.req.param('id');
     await deps.store.deleteSkill(id);
     return c.json({ ok: true });
+  });
+
+  app.post('/api/skills/translate/logical-to-summarized', async (c) => {
+    try {
+      const body = await c.req.json() as { logicTree: any[] };
+      const logicTree = body.logicTree || [];
+      const client = getClient(deps as any);
+      const model = getModel(deps as any);
+      
+      const response = await client.chat.completions.create({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: `You are an expert technical writer. You will receive a JSON array representing a logical decision tree (IF/ELIF/ELSE/CONTEXT). Your task is to translate this exact logic into a single, cohesive, easy-to-read natural language paragraph. Do not drop any conditions, actions, or context blocks. For CONTEXT blocks, present them as background guidelines or context instructions (e.g. starting with "Context: [instruction]" or "Before replying, [instruction]"). Use clear transition words (If, Alternatively, Otherwise). Return ONLY the natural language text.`
+          },
+          {
+            role: 'user',
+            content: JSON.stringify(logicTree, null, 2)
+          }
+        ],
+        max_tokens: 1000
+      });
+      const nlSummary = response.choices[0]?.message?.content?.trim() ?? '';
+      return c.json({ ok: true, nlSummary });
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message || String(e) }, 500);
+    }
+  });
+
+  app.post('/api/skills/translate/summarized-to-logical', async (c) => {
+    try {
+      const body = await c.req.json() as { nlSummary: string };
+      const nlSummary = body.nlSummary || '';
+      
+      if (!nlSummary.trim()) {
+        return c.json({ ok: true, logicTree: [{ id: 'node_' + randomUUID().slice(0, 8), type: 'IF', condition: '', action: '' }] });
+      }
+ 
+      const client = getClient(deps as any);
+      const model = getModel(deps as any);
+      
+      const response = await client.chat.completions.create({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: `You are a JSON parser. You will receive a natural language description of a logical workflow. Your task is to extract the conditional statements, actions, and background context instructions and format them STRICTLY as a JSON array of objects.
+
+Required Schema:
+[{ "type": "IF" | "ELIF" | "ELSE" | "CONTEXT", "condition": "string | null", "action": "string" }]
+
+Rules:
+1. Background context guidelines or instructions that are not conditional (e.g. "Check the SMS thread history...", "Context: ...", "Before replying, ...") MUST be formatted as type "CONTEXT" with condition set to null and the background instruction as the action.
+2. The first conditional statement MUST be "IF".
+3. Subsequent conditional statements MUST be "ELIF".
+4. A fallback/catch-all action MUST be "ELSE", and its "condition" MUST be null.
+5. Keep the extracted strings for condition, action, or context concise.
+6. Output ONLY valid JSON. No markdown formatting, no explanations.`
+          },
+          {
+            role: 'user',
+            content: nlSummary
+          }
+        ],
+        max_tokens: 1000
+      });
+      const text = response.choices[0]?.message?.content?.trim() ?? '';
+      const jsonText = text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+      let logicTree: any[];
+      try {
+        logicTree = JSON.parse(jsonText);
+        if (!Array.isArray(logicTree)) throw new Error('Not an array');
+        logicTree = logicTree.map((node: any, idx: number) => ({
+          id: node.id || `node_${randomUUID().slice(0, 8)}_${idx}`,
+          type: node.type || (idx === 0 ? 'IF' : idx === logicTree.length - 1 ? 'ELSE' : 'ELIF'),
+          condition: (node.type === 'ELSE' || node.type === 'CONTEXT') ? null : node.condition || '',
+          action: node.action || ''
+        }));
+      } catch (err) {
+        return c.json({ ok: false, error: 'Could not parse logic from text. Ensure the natural language has clear conditional logic.' }, 400);
+      }
+      return c.json({ ok: true, logicTree });
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message || String(e) }, 500);
+    }
   });
 
   // --- GitHub repo discovery endpoints ---
@@ -957,8 +1058,8 @@ function getIndexHtml(): string {
       filterTypes: {},
       sms: { messages: null, loading: false, error: null, box: 'inbox', contextMenu: null, autoReplying: false },
       chat: { messages: [], loading: false, error: null, aiAvailable: false, stagedSmsIds: [], codeBlocks: {} },
-      memories: { items: [], loading: false, editingId: null, editContent: '', adding: false, newContent: '', error: null },
-      skills: { items: [], loading: false, editingId: null, editContent: { name: '', instructions: '', trigger_event: 'sms_received' }, adding: false, newName: '', newInstructions: '', newTrigger: 'sms_received', error: null },
+      memories: { items: [], loading: false, loaded: false, editingId: null, editContent: '', adding: false, newContent: '', error: null },
+      skills: { items: [], loading: false, loaded: false, editingId: null, editContent: { name: '', instructions: '', trigger_event: 'sms_received', current_view: 'SUMMARIZED', logic_tree: [] }, adding: false, newName: '', newInstructions: '', newTrigger: 'sms_received', newCurrentView: 'SUMMARIZED', newLogicTree: [], error: null, isTranslating: {} },
       settingsProvider: 'anthropic',
       autoReply: { enabled: false, maxToolRounds: 3, loading: false, testResult: null, testLoading: false },
       settingsSection: 'ai',
@@ -1056,6 +1157,7 @@ function getIndexHtml(): string {
       fetch('/api/skills').then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
           state.skills.items = d.skills;
+          state.skills.loaded = true;
           if (currentTab === 'skill') render();
         }
       }).catch(function() { /* non-fatal */ });
@@ -1063,23 +1165,26 @@ function getIndexHtml(): string {
       render();
     }
 
-    function loadSkills() {
+    function loadSkills(force) {
+      if (!force && state.skills.loaded) return;
       if (state.skills.loading) return;
       state.skills.loading = true;
       fetch('/api/skills').then(function(r) { return r.json(); }).then(function(d) {
         state.skills.loading = false;
-        if (d.ok) { state.skills.items = d.skills; if (currentTab === 'skill') render(); }
+        if (d.ok) { state.skills.items = d.skills; state.skills.loaded = true; if (currentTab === 'skill') render(); }
       }).catch(function() { state.skills.loading = false; });
     }
     window.loadSkills = loadSkills;
 
-    function loadMemories() {
+    function loadMemories(force) {
+      if (!force && state.memories.loaded) return;
       if (state.memories.loading) return;
       state.memories.loading = true;
       fetch('/api/memories').then(function(r) { return r.json(); }).then(function(d) {
         state.memories.loading = false;
         if (d.ok) {
           state.memories.items = d.memories;
+          state.memories.loaded = true;
           if (currentTab === 'memory') render();
           else {
             var el = document.getElementById('mem-count-display');
@@ -1160,7 +1265,7 @@ function getIndexHtml(): string {
         body: JSON.stringify({ content: content }),
       }).then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
-          loadMemories();
+          loadMemories(true);
           state.memories.adding = false;
           state.memories.newContent = '';
           state.memories.error = null;
@@ -2559,42 +2664,303 @@ function getIndexHtml(): string {
       { key: 'sms_received', label: 'SMS Received' },
     ];
 
+    function renderLogicalEditor(id, logicTree) {
+      var isAdding = id === 'new';
+      var html = '<div style="display:flex;flex-direction:column;gap:8px;margin-top:6px">';
+      
+      (logicTree || []).forEach(function(node, index) {
+        var nodeId = escapeAttr(node.id || '');
+        var type = node.type || 'ELIF';
+        var condition = node.condition || '';
+        var action = node.action || '';
+        
+        html += '<div style="display:flex;align-items:center;gap:6px;background:rgba(90,107,122,0.03);padding:8px 10px;border-radius:8px;border:1px solid var(--border);flex-wrap:wrap">';
+        
+        // Node Type selector
+        html += '<select onchange="updateLogicNodeType(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'),' + index + ',this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:12px;width:75px">';
+        html += '<option value="IF"' + (type === 'IF' ? ' selected' : '') + '>IF</option>';
+        html += '<option value="ELIF"' + (type === 'ELIF' ? ' selected' : '') + '>ELIF</option>';
+        html += '<option value="ELSE"' + (type === 'ELSE' ? ' selected' : '') + '>ELSE</option>';
+        html += '<option value="CONTEXT"' + (type === 'CONTEXT' ? ' selected' : '') + '>CONTEXT</option>';
+        html += '</select>';
+        
+        // Condition Input (hidden if ELSE or CONTEXT)
+        if (type === 'ELSE' || type === 'CONTEXT') {
+          html += '<div style="flex:1;font-size:12px;color:var(--muted);font-style:italic">' + (type === 'ELSE' ? 'otherwise' : 'background context') + '</div>';
+        } else {
+          html += '<input type="text" value="' + escapeAttr(condition) + '" oninput="updateLogicNodeCondition(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'),' + index + ',this.value)" onblur="performSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" placeholder="e.g., user asks for pricing" style="flex:1;min-width:140px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:12px;box-sizing:border-box">';
+        }
+        
+        // Action Input
+        var actionPlaceholder = type === 'CONTEXT' ? 'e.g., check all calendars for conflicts' : 'e.g., send pricing PDF';
+        if (type !== 'CONTEXT') {
+          html += '<span style="font-size:11px;color:var(--muted);font-weight:600">THEN</span>';
+        } else {
+          html += '<span style="font-size:11px;color:var(--muted);font-weight:600">INFO</span>';
+        }
+        html += '<input type="text" value="' + escapeAttr(action) + '" oninput="updateLogicNodeAction(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'),' + index + ',this.value)" onblur="performSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" placeholder="' + actionPlaceholder + '" style="flex:1;min-width:140px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:12px;box-sizing:border-box">';
+        
+        // Delete Node Button
+        if ((logicTree || []).length > 1) {
+          html += '<button onclick="removeLogicNode(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'),' + index + ')" title="Remove rule" style="background:none;border:none;cursor:pointer;color:rgba(239,68,68,0.8);font-size:16px;line-height:1;padding:2px 6px;border-radius:4px;display:flex;align-items:center;justify-content:center">×</button>';
+        }
+        
+        html += '</div>';
+      });
+      
+      // Add Node Button
+      html += '<div style="display:flex;justify-content:flex-start;margin-top:2px">';
+      html += '<button class="btn btn-outline btn-sm" onclick="addLogicNode(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" style="font-size:11px;padding:3px 6px;height:auto;line-height:1">+ Add rule</button>';
+      html += '</div>';
+      
+      html += '</div>';
+      return html;
+    }
+    window.renderLogicalEditor = renderLogicalEditor;
+
+    async function toggleEditSkillView(id) {
+      var sk = state.skills;
+      var isAdding = id === 'new';
+      var editContent = isAdding ? {
+        name: sk.newName,
+        instructions: sk.newInstructions,
+        trigger_event: sk.newTrigger,
+        current_view: sk.newCurrentView,
+        logic_tree: sk.newLogicTree
+      } : sk.editContent;
+
+      var currentView = editContent.current_view || 'SUMMARIZED';
+      var targetView = currentView === 'LOGICAL' ? 'SUMMARIZED' : 'LOGICAL';
+
+      sk.isTranslating[id] = true;
+      render();
+
+      try {
+        if (currentView === 'LOGICAL') {
+          // Flow A: Logical -> Summarized
+          var r = await fetch('/api/skills/translate/logical-to-summarized', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ logicTree: editContent.logic_tree })
+          });
+          var d = await r.json();
+          if (d.ok) {
+            editContent.instructions = d.nlSummary;
+            editContent.current_view = 'SUMMARIZED';
+          } else {
+            alert(d.error || 'Failed to translate logic to text');
+          }
+        } else {
+          // Flow B: Summarized -> Logical
+          var r = await fetch('/api/skills/translate/summarized-to-logical', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nlSummary: editContent.instructions })
+          });
+          var d = await r.json();
+          if (d.ok) {
+            editContent.logic_tree = d.logicTree;
+            editContent.current_view = 'LOGICAL';
+          } else {
+            alert(d.error || 'Could not parse logic from text');
+          }
+        }
+      } catch (e) {
+        alert('Translation error: ' + e.message);
+      } finally {
+        sk.isTranslating[id] = false;
+        if (isAdding) {
+          sk.newInstructions = editContent.instructions;
+          sk.newCurrentView = editContent.current_view;
+          sk.newLogicTree = editContent.logic_tree;
+        }
+        render();
+      }
+    }
+    window.toggleEditSkillView = toggleEditSkillView;
+
+    function updateLogicNodeType(id, index, type) {
+      var sk = state.skills;
+      var isAdding = id === 'new';
+      var logicTree = isAdding ? sk.newLogicTree : sk.editContent.logic_tree;
+      
+      if (logicTree[index]) {
+        logicTree[index].type = type;
+        if (type === 'ELSE' || type === 'CONTEXT') {
+          logicTree[index].condition = null;
+          if (type === 'ELSE' && logicTree.length > index + 1) {
+            logicTree.splice(index + 1);
+          }
+        } else {
+          if (logicTree[index].condition === null) {
+            logicTree[index].condition = '';
+          }
+        }
+      }
+      triggerSkillAutoSave(id);
+      render();
+    }
+    window.updateLogicNodeType = updateLogicNodeType;
+
+    function updateLogicNodeCondition(id, index, val) {
+      var sk = state.skills;
+      var isAdding = id === 'new';
+      var logicTree = isAdding ? sk.newLogicTree : sk.editContent.logic_tree;
+      if (logicTree[index]) {
+        logicTree[index].condition = val;
+      }
+      triggerSkillAutoSave(id);
+    }
+    window.updateLogicNodeCondition = updateLogicNodeCondition;
+
+    function updateLogicNodeAction(id, index, val) {
+      var sk = state.skills;
+      var isAdding = id === 'new';
+      var logicTree = isAdding ? sk.newLogicTree : sk.editContent.logic_tree;
+      if (logicTree[index]) {
+        logicTree[index].action = val;
+      }
+      triggerSkillAutoSave(id);
+    }
+    window.updateLogicNodeAction = updateLogicNodeAction;
+
+    function addLogicNode(id) {
+      var sk = state.skills;
+      var isAdding = id === 'new';
+      var logicTree = isAdding ? sk.newLogicTree : sk.editContent.logic_tree;
+      var lastNode = logicTree[logicTree.length - 1];
+      var newNodeId = 'node_' + Math.random().toString(36).slice(2, 9);
+      
+      if (lastNode && lastNode.type === 'ELSE') {
+        logicTree.splice(logicTree.length - 1, 0, {
+          id: newNodeId,
+          type: 'ELIF',
+          condition: '',
+          action: ''
+        });
+      } else {
+        logicTree.push({
+          id: newNodeId,
+          type: 'ELIF',
+          condition: '',
+          action: ''
+        });
+      }
+      triggerSkillAutoSave(id);
+      render();
+    }
+    window.addLogicNode = addLogicNode;
+
+    function removeLogicNode(id, index) {
+      var sk = state.skills;
+      var isAdding = id === 'new';
+      var logicTree = isAdding ? sk.newLogicTree : sk.editContent.logic_tree;
+      
+      if (logicTree.length > 1) {
+        logicTree.splice(index, 1);
+        if (logicTree[0]) {
+          logicTree[0].type = 'IF';
+          if (logicTree[0].condition === null) {
+            logicTree[0].condition = '';
+          }
+        }
+      }
+      triggerSkillAutoSave(id);
+      render();
+    }
+    window.removeLogicNode = removeLogicNode;
+
+    var _skillSaveTimer = null;
+    function triggerSkillAutoSave(id) {
+      if (id === 'new') return;
+      clearTimeout(_skillSaveTimer);
+      _skillSaveTimer = setTimeout(function() {
+        performSkillAutoSave(id);
+      }, 1000);
+    }
+    window.triggerSkillAutoSave = triggerSkillAutoSave;
+
+    async function performSkillAutoSave(id) {
+      if (id === 'new') return;
+      var sk = state.skills;
+      if (sk.editingId !== id) return;
+      var c = sk.editContent;
+      try {
+        await fetch('/api/skills/' + id, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: c.name,
+            instructions: c.instructions,
+            trigger_event: c.trigger_event,
+            current_view: c.current_view,
+            logic_tree: JSON.stringify(c.logic_tree)
+          })
+        });
+      } catch(e) { console.warn('Auto-save failed:', e); }
+    }
+    window.performSkillAutoSave = performSkillAutoSave;
+
     function renderSkillCard(s) {
       var sk = state.skills;
       var isEditing = sk.editingId === s.id;
       var safeId = escapeAttr(s.id);
       var isActive = !!s.enabled;
+      var isTranslating = !!sk.isTranslating[s.id];
       var borderColor = isEditing ? 'var(--primary)' : isActive ? 'rgba(15,160,129,0.4)' : 'var(--border)';
-      var html = '<div style="background:var(--card-bg);border:1px solid ' + borderColor + ';border-radius:10px;padding:14px;transition:border-color 0.15s">';
+      var html = '<div data-skill-id="' + safeId + '" style="position:relative;background:var(--card-bg);border:1px solid ' + borderColor + ';border-radius:10px;padding:14px;transition:border-color 0.15s">';
+      
+      if (isTranslating) {
+        html += '<div style="position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.7);z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;gap:8px">';
+        html += '<div style="border:3px solid var(--border);border-top:3px solid var(--primary);border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite"></div>';
+        html += '<span style="font-size:12px;font-weight:600;color:#000">Translating...</span>';
+        html += '</div>';
+      }
+
       if (isEditing) {
         var triggerOptions = SKILL_TRIGGERS.map(function(t) {
           return '<option value="' + t.key + '"' + (sk.editContent.trigger_event === t.key ? ' selected' : '') + '>' + t.label + '</option>';
         }).join('');
+        
+        var currentView = sk.editContent.current_view || 'SUMMARIZED';
+
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px">';
+        html += '<span style="font-size:13px;font-weight:600;color:var(--muted)">Editing Skill</span>';
+        html += '<div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--input-bg,var(--bg))">';
+        html += '<button onclick="toggleEditSkillView(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" style="background:' + (currentView === 'LOGICAL' ? 'var(--primary)' : 'none') + ';color:' + (currentView === 'LOGICAL' ? '#fff' : 'var(--fg)') + ';border:none;padding:4px 8px;font-size:11px;font-weight:500;cursor:pointer">Logical</button>';
+        html += '<button onclick="toggleEditSkillView(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" style="background:' + (currentView === 'SUMMARIZED' ? 'var(--primary)' : 'none') + ';color:' + (currentView === 'SUMMARIZED' ? '#fff' : 'var(--fg)') + ';border:none;padding:4px 8px;font-size:11px;font-weight:500;cursor:pointer">Summarized</button>';
+        html += '</div>';
+        html += '</div>';
+
         html += '<div style="display:grid;gap:10px">';
         html += '<div style="display:flex;gap:8px">';
-        html += '<input id="edit-skill-name-' + safeId + '" value="' + escapeAttr(s.name) + '" oninput="state.skills.editContent.name=this.value" placeholder="Skill name" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;box-sizing:border-box">';
-        html += '<select id="edit-skill-trigger-' + safeId + '" onchange="state.skills.editContent.trigger_event=this.value" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:13px">' + triggerOptions + '</select>';
+        html += '<input id="edit-skill-name-' + safeId + '" value="' + escapeAttr(sk.editContent.name) + '" oninput="state.skills.editContent.name=this.value; triggerSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" onblur="performSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" placeholder="Skill name" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;box-sizing:border-box">';
+        html += '<select id="edit-skill-trigger-' + safeId + '" onchange="state.skills.editContent.trigger_event=this.value; triggerSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\')); render()" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:13px">' + triggerOptions + '</select>';
         html += '</div>';
-        html += '<textarea id="edit-skill-instructions-' + safeId + '" oninput="state.skills.editContent.instructions=this.value" placeholder="Describe what the AI should do when this trigger fires…" style="width:100%;min-height:120px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">' + escapeHtml(s.instructions) + '</textarea>';
-        html += '</div><div style="display:flex;gap:8px;margin-top:10px">';
-        html += '<button class="btn btn-primary" onclick="saveEditSkill(\\'' + safeId + '\\')" style="font-size:13px">Save</button>';
+        
+        if (currentView === 'LOGICAL') {
+          html += renderLogicalEditor(s.id, sk.editContent.logic_tree);
+        } else {
+          html += '<textarea id="edit-skill-instructions-' + safeId + '" oninput="state.skills.editContent.instructions=this.value; triggerSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" onblur="performSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" placeholder="Describe what the AI should do when this trigger fires…" style="width:100%;min-height:120px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">' + escapeHtml(sk.editContent.instructions) + '</textarea>';
+        }
+        
+        html += '</div><div style="display:flex;gap:8px;margin-top:12px">';
+        html += '<button class="btn btn-primary" onclick="saveEditSkill(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" style="font-size:13px">Save</button>';
         html += '<button class="btn btn-ghost" onclick="cancelEditSkill()" style="font-size:13px">Cancel</button>';
         html += '</div>';
       } else {
-        // Header row: name + trigger badge + action buttons
         html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">';
         html += '<span style="font-size:14px;font-weight:600;flex:1">' + escapeHtml(s.name) + '</span>';
         html += '<span style="font-size:11px;background:' + (isActive ? 'rgba(15,160,129,0.12)' : 'rgba(90,107,122,0.1)') + ';color:' + (isActive ? 'var(--primary)' : 'var(--muted)') + ';padding:2px 8px;border-radius:9999px;white-space:nowrap">' + (SKILL_TRIGGERS.find(function(t){return t.key===s.trigger_event;})||{label:s.trigger_event}).label + '</span>';
         if (isActive) html += '<span style="font-size:11px;background:rgba(15,160,129,0.12);color:var(--primary);padding:2px 8px;border-radius:9999px">active</span>';
-        html += '<button onclick="startEditSkill(\\'' + safeId + '\\')" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px">';
+        html += '<button onclick="startEditSkill(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px">';
         html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>';
-        html += '<button onclick="deleteSkill(\\'' + safeId + '\\')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px;font-size:16px;line-height:1">×</button>';
+        html += '<button onclick="deleteSkill(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px;font-size:16px;line-height:1">×</button>';
         html += '</div>';
-        // Instructions preview
+        
         html += '<p style="margin:0 0 12px;font-size:13px;color:var(--fg);white-space:pre-wrap;word-break:break-word;line-height:1.6">' + escapeHtml(s.instructions) + '</p>';
-        // Activate button
         if (!isActive) {
-          html += '<button onclick="activateSkill(\\'' + safeId + '\\',\\'' + escapeAttr(s.trigger_event) + '\\')" class="btn btn-outline btn-sm" style="font-size:12px">Set as active</button>';
+          html += '<button onclick="activateSkill(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'),\\'' + escapeAttr(s.trigger_event) + '\\')" class="btn btn-outline btn-sm" style="font-size:12px">Set as active</button>';
         }
       }
       html += '</div>';
@@ -2614,13 +2980,38 @@ function getIndexHtml(): string {
       }
       if (sk.adding) {
         var triggerOpts = SKILL_TRIGGERS.map(function(t) { return '<option value="' + t.key + '">' + t.label + '</option>'; }).join('');
-        html += '<div style="background:var(--card-bg);border:1px solid var(--primary);border-radius:10px;padding:14px;margin-bottom:16px">';
+        var isTranslatingNew = !!sk.isTranslating['new'];
+        var currentViewNew = sk.newCurrentView || 'SUMMARIZED';
+        
+        html += '<div data-skill-id="new" style="position:relative;background:var(--card-bg);border:1px solid var(--primary);border-radius:10px;padding:14px;margin-bottom:16px">';
+        
+        if (isTranslatingNew) {
+          html += '<div style="position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.7);z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;gap:8px">';
+          html += '<div style="border:3px solid var(--border);border-top:3px solid var(--primary);border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite"></div>';
+          html += '<span style="font-size:12px;font-weight:600;color:#000">Translating...</span>';
+          html += '</div>';
+        }
+        
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px">';
+        html += '<span style="font-size:13px;font-weight:600;color:var(--muted)">New Skill</span>';
+        html += '<div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--input-bg,var(--bg))">';
+        html += '<button onclick="toggleEditSkillView(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" style="background:' + (currentViewNew === 'LOGICAL' ? 'var(--primary)' : 'none') + ';color:' + (currentViewNew === 'LOGICAL' ? '#fff' : 'var(--fg)') + ';border:none;padding:4px 8px;font-size:11px;font-weight:500;cursor:pointer">Logical</button>';
+        html += '<button onclick="toggleEditSkillView(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" style="background:' + (currentViewNew === 'SUMMARIZED' ? 'var(--primary)' : 'none') + ';color:' + (currentViewNew === 'SUMMARIZED' ? '#fff' : 'var(--fg)') + ';border:none;padding:4px 8px;font-size:11px;font-weight:500;cursor:pointer">Summarized</button>';
+        html += '</div>';
+        html += '</div>';
+
         html += '<div style="display:grid;gap:10px">';
         html += '<div style="display:flex;gap:8px">';
-        html += '<input id="new-skill-name" placeholder="Skill name" oninput="state.skills.newName=this.value" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;box-sizing:border-box">';
-        html += '<select id="new-skill-trigger" onchange="state.skills.newTrigger=this.value" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:13px">' + triggerOpts + '</select>';
+        html += '<input id="new-skill-name" placeholder="Skill name" value="' + escapeAttr(sk.newName) + '" oninput="state.skills.newName=this.value" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;box-sizing:border-box">';
+        html += '<select id="new-skill-trigger" onchange="state.skills.newTrigger=this.value; render()" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:13px">' + triggerOpts + '</select>';
         html += '</div>';
-        html += '<textarea id="new-skill-instructions" placeholder="Describe what the AI should do when this trigger fires — context to check, reply style, behavioral rules, anything." oninput="state.skills.newInstructions=this.value" style="width:100%;min-height:120px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5"></textarea>';
+        
+        if (currentViewNew === 'LOGICAL') {
+          html += renderLogicalEditor('new', sk.newLogicTree);
+        } else {
+          html += '<textarea id="new-skill-instructions" placeholder="Describe what the AI should do when this trigger fires — context to check, reply style, behavioral rules, anything." oninput="state.skills.newInstructions=this.value" style="width:100%;min-height:120px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">' + escapeHtml(sk.newInstructions) + '</textarea>';
+        }
+        
         html += '</div><div style="display:flex;gap:8px;margin-top:10px">';
         html += '<button class="btn btn-primary" onclick="submitNewSkill()" style="font-size:13px">Save</button>';
         html += '<button class="btn btn-ghost" onclick="toggleAddSkill()" style="font-size:13px">Cancel</button>';
@@ -2632,7 +3023,7 @@ function getIndexHtml(): string {
         html += '<div style="text-align:center;padding:60px 20px;color:var(--muted)">';
         html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;margin-bottom:12px;opacity:0.4"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
         html += '<p style="margin:0;font-size:15px;font-weight:500">No skills yet</p>';
-        html += '<p style="margin:8px 0 0;font-size:13px">Create a skill to guide the AI\\'s behavior when a trigger fires.</p>';
+        html += '<p style="margin:8px 0 0;font-size:13px">Create a skill to guide the AI\\\'s behavior when a trigger fires.</p>';
         html += '</div>';
       } else {
         html += '<div style="display:grid;gap:10px">';
@@ -2645,7 +3036,11 @@ function getIndexHtml(): string {
 
     function toggleAddSkill() {
       state.skills.adding = !state.skills.adding;
-      state.skills.newName = ''; state.skills.newInstructions = ''; state.skills.newTrigger = 'sms_received';
+      state.skills.newName = '';
+      state.skills.newInstructions = '';
+      state.skills.newTrigger = 'sms_received';
+      state.skills.newCurrentView = 'SUMMARIZED';
+      state.skills.newLogicTree = [{ id: 'node_' + Math.random().toString(36).slice(2, 9), type: 'IF', condition: '', action: '' }];
       render();
     }
     window.toggleAddSkill = toggleAddSkill;
@@ -2655,25 +3050,61 @@ function getIndexHtml(): string {
       if (!name) { alert('Skill name is required'); return; }
       var trigger = state.skills.newTrigger || 'sms_received';
       var instructions = state.skills.newInstructions || '';
+      var current_view = state.skills.newCurrentView || 'SUMMARIZED';
+      var logic_tree = JSON.stringify(state.skills.newLogicTree || []);
       try {
-        var r = await fetch('/api/skills', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, instructions: instructions, trigger_event: trigger }) });
+        var r = await fetch('/api/skills', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name,
+            instructions: instructions,
+            trigger_event: trigger,
+            current_view: current_view,
+            logic_tree: logic_tree
+          })
+        });
         var d = await r.json();
-        if (d.ok) { state.skills.adding = false; state.skills.newName = ''; state.skills.newInstructions = ''; await loadSkillsAsync(); }
-        else { state.skills.error = d.error || 'Failed to save'; render(); }
+        if (d.ok) {
+          state.skills.adding = false;
+          state.skills.newName = '';
+          state.skills.newInstructions = '';
+          state.skills.newCurrentView = 'SUMMARIZED';
+          state.skills.newLogicTree = [];
+          await loadSkillsAsync();
+        } else {
+          state.skills.error = d.error || 'Failed to save';
+          render();
+        }
       } catch(e) { state.skills.error = e.message; render(); }
     }
     window.submitNewSkill = submitNewSkill;
 
     async function loadSkillsAsync() {
       var d = await fetch('/api/skills').then(function(r) { return r.json(); });
-      if (d.ok) { state.skills.items = d.skills; render(); }
+      if (d.ok) { state.skills.items = d.skills; state.skills.loaded = true; render(); }
     }
 
     function startEditSkill(id) {
       var skill = state.skills.items.find(function(s) { return s.id === id; });
       if (!skill) return;
       state.skills.editingId = id;
-      state.skills.editContent = { name: skill.name, instructions: skill.instructions, trigger_event: skill.trigger_event };
+      var parsedLogic = [];
+      try {
+        parsedLogic = JSON.parse(skill.logic_tree || '[]');
+      } catch (e) {
+        parsedLogic = [{ id: 'node_' + Math.random().toString(36).slice(2, 9), type: 'IF', condition: '', action: '' }];
+      }
+      if (!parsedLogic.length) {
+        parsedLogic = [{ id: 'node_' + Math.random().toString(36).slice(2, 9), type: 'IF', condition: '', action: '' }];
+      }
+      state.skills.editContent = {
+        name: skill.name,
+        instructions: skill.instructions,
+        trigger_event: skill.trigger_event,
+        current_view: skill.current_view || 'SUMMARIZED',
+        logic_tree: parsedLogic
+      };
       render();
     }
     window.startEditSkill = startEditSkill;
@@ -2684,7 +3115,17 @@ function getIndexHtml(): string {
     async function saveEditSkill(id) {
       var c = state.skills.editContent;
       try {
-        var r = await fetch('/api/skills/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: c.name, instructions: c.instructions, trigger_event: c.trigger_event }) });
+        var r = await fetch('/api/skills/' + id, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: c.name,
+            instructions: c.instructions,
+            trigger_event: c.trigger_event,
+            current_view: c.current_view,
+            logic_tree: JSON.stringify(c.logic_tree)
+          })
+        });
         var d = await r.json();
         if (d.ok) { state.skills.editingId = null; await loadSkillsAsync(); }
         else { state.skills.error = d.error || 'Failed to save'; render(); }

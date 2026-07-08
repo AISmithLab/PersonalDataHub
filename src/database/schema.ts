@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS agent_skills (
   instructions TEXT NOT NULL DEFAULT '',
   trigger_event TEXT NOT NULL DEFAULT 'sms_received',
   enabled INTEGER NOT NULL DEFAULT 0,
+  current_view TEXT NOT NULL DEFAULT 'SUMMARIZED',
+  logic_tree TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`;
@@ -122,4 +124,6 @@ export function createTables(db: Database.Database): void {
   // Migrate existing agent_skills tables
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN instructions TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already exists */ }
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN trigger_event TEXT NOT NULL DEFAULT 'sms_received'"); } catch (_) { /* already exists */ }
+  try { db.exec("ALTER TABLE agent_skills ADD COLUMN current_view TEXT NOT NULL DEFAULT 'SUMMARIZED'"); } catch (_) { /* already exists */ }
+  try { db.exec("ALTER TABLE agent_skills ADD COLUMN logic_tree TEXT NOT NULL DEFAULT '[]'"); } catch (_) { /* already exists */ }
 }
