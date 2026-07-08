@@ -2730,7 +2730,32 @@ function getIndexHtml(): string {
       } : sk.editContent;
 
       var currentView = editContent.current_view || 'SUMMARIZED';
-      var targetView = currentView === 'LOGICAL' ? 'SUMMARIZED' : 'LOGICAL';
+      var cache = sk.translationCache || {};
+
+      if (currentView === 'LOGICAL') {
+        var currentTreeJson = JSON.stringify(editContent.logic_tree);
+        if (cache.logicTreeJson === currentTreeJson && cache.instructions !== undefined) {
+          editContent.current_view = 'SUMMARIZED';
+          editContent.instructions = cache.instructions;
+          if (isAdding) {
+            sk.newCurrentView = 'SUMMARIZED';
+            sk.newInstructions = cache.instructions;
+          }
+          render();
+          return;
+        }
+      } else {
+        if (cache.instructions === editContent.instructions && cache.logicTreeJson !== undefined) {
+          editContent.current_view = 'LOGICAL';
+          editContent.logic_tree = JSON.parse(cache.logicTreeJson);
+          if (isAdding) {
+            sk.newCurrentView = 'LOGICAL';
+            sk.newLogicTree = JSON.parse(cache.logicTreeJson);
+          }
+          render();
+          return;
+        }
+      }
 
       sk.isTranslating[id] = true;
       render();
@@ -2747,6 +2772,10 @@ function getIndexHtml(): string {
           if (d.ok) {
             editContent.instructions = d.nlSummary;
             editContent.current_view = 'SUMMARIZED';
+            sk.translationCache = {
+              instructions: d.nlSummary,
+              logicTreeJson: JSON.stringify(editContent.logic_tree)
+            };
           } else {
             alert(d.error || 'Failed to translate logic to text');
           }
@@ -2761,6 +2790,10 @@ function getIndexHtml(): string {
           if (d.ok) {
             editContent.logic_tree = d.logicTree;
             editContent.current_view = 'LOGICAL';
+            sk.translationCache = {
+              instructions: editContent.instructions,
+              logicTreeJson: JSON.stringify(d.logicTree)
+            };
           } else {
             alert(d.error || 'Could not parse logic from text');
           }
@@ -3040,19 +3073,69 @@ function getIndexHtml(): string {
       state.skills.newInstructions = '';
       state.skills.newTrigger = 'sms_received';
       state.skills.newCurrentView = 'SUMMARIZED';
-      state.skills.newLogicTree = [{ id: 'node_' + Math.random().toString(36).slice(2, 9), type: 'IF', condition: '', action: '' }];
+      var initialTree = [{ id: 'node_' + Math.random().toString(36).slice(2, 9), type: 'IF', condition: '', action: '' }];
+      state.skills.newLogicTree = initialTree;
+      state.skills.translationCache = {
+        instructions: '',
+        logicTreeJson: JSON.stringify(initialTree)
+      };
       render();
     }
     window.toggleAddSkill = toggleAddSkill;
 
     async function submitNewSkill() {
-      var name = state.skills.newName.trim();
+      var sk = state.skills;
+      var name = sk.newName.trim();
       if (!name) { alert('Skill name is required'); return; }
-      var trigger = state.skills.newTrigger || 'sms_received';
-      var instructions = state.skills.newInstructions || '';
-      var current_view = state.skills.newCurrentView || 'SUMMARIZED';
-      var logic_tree = JSON.stringify(state.skills.newLogicTree || []);
+      var trigger = sk.newTrigger || 'sms_received';
+      var current_view = sk.newCurrentView || 'SUMMARIZED';
+      var instructions = sk.newInstructions || '';
+      var logic_tree_arr = sk.newLogicTree || [];
+      var cache = sk.translationCache || {};
+
+      sk.isTranslating['new'] = true;
+      render();
+
       try {
+        if (current_view === 'LOGICAL') {
+          var currentTreeJson = JSON.stringify(logic_tree_arr);
+          if (cache.logicTreeJson !== currentTreeJson) {
+            var tr = await fetch('/api/skills/translate/logical-to-summarized', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ logicTree: logic_tree_arr })
+            });
+            var td = await tr.json();
+            if (td.ok) {
+              instructions = td.nlSummary;
+            } else {
+              throw new Error(td.error || 'Failed to translate logic to text before saving');
+            }
+          } else {
+            if (cache.instructions !== undefined) {
+              instructions = cache.instructions;
+            }
+          }
+        } else {
+          if (cache.instructions !== instructions) {
+            var tr = await fetch('/api/skills/translate/summarized-to-logical', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ nlSummary: instructions })
+            });
+            var td = await tr.json();
+            if (td.ok) {
+              logic_tree_arr = td.logicTree;
+            } else {
+              throw new Error(td.error || 'Could not parse logic from text before saving');
+            }
+          } else {
+            if (cache.logicTreeJson !== undefined) {
+              logic_tree_arr = JSON.parse(cache.logicTreeJson);
+            }
+          }
+        }
+
         var r = await fetch('/api/skills', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -3061,22 +3144,29 @@ function getIndexHtml(): string {
             instructions: instructions,
             trigger_event: trigger,
             current_view: current_view,
-            logic_tree: logic_tree
+            logic_tree: JSON.stringify(logic_tree_arr)
           })
         });
         var d = await r.json();
         if (d.ok) {
-          state.skills.adding = false;
-          state.skills.newName = '';
-          state.skills.newInstructions = '';
-          state.skills.newCurrentView = 'SUMMARIZED';
-          state.skills.newLogicTree = [];
+          sk.adding = false;
+          sk.newName = '';
+          sk.newInstructions = '';
+          sk.newCurrentView = 'SUMMARIZED';
+          sk.newLogicTree = [];
+          sk.translationCache = null;
           await loadSkillsAsync();
         } else {
-          state.skills.error = d.error || 'Failed to save';
+          sk.error = d.error || 'Failed to save';
           render();
         }
-      } catch(e) { state.skills.error = e.message; render(); }
+      } catch(e) {
+        sk.error = e.message;
+        render();
+      } finally {
+        sk.isTranslating['new'] = false;
+        render();
+      }
     }
     window.submitNewSkill = submitNewSkill;
 
@@ -3105,6 +3195,10 @@ function getIndexHtml(): string {
         current_view: skill.current_view || 'SUMMARIZED',
         logic_tree: parsedLogic
       };
+      state.skills.translationCache = {
+        instructions: skill.instructions,
+        logicTreeJson: JSON.stringify(parsedLogic)
+      };
       render();
     }
     window.startEditSkill = startEditSkill;
@@ -3113,23 +3207,101 @@ function getIndexHtml(): string {
     window.cancelEditSkill = cancelEditSkill;
 
     async function saveEditSkill(id) {
-      var c = state.skills.editContent;
+      var sk = state.skills;
+      var c = sk.editContent;
+      var cache = sk.translationCache || {};
+      
+      var name = c.name;
+      var trigger = c.trigger_event;
+      var current_view = c.current_view || 'SUMMARIZED';
+      var instructions = c.instructions;
+      var logic_tree_arr = c.logic_tree;
+
+      sk.isTranslating[id] = true;
+      render();
+
       try {
+        if (current_view === 'LOGICAL') {
+          var currentTreeJson = JSON.stringify(logic_tree_arr);
+          if (cache.logicTreeJson !== currentTreeJson) {
+            // Logic tree has changed! Generate new instructions (nlSummary) via translation
+            var tr = await fetch('/api/skills/translate/logical-to-summarized', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ logicTree: logic_tree_arr })
+            });
+            var td = await tr.json();
+            if (td.ok) {
+              instructions = td.nlSummary;
+              c.instructions = td.nlSummary;
+              sk.translationCache = {
+                instructions: td.nlSummary,
+                logicTreeJson: currentTreeJson
+              };
+            } else {
+              throw new Error(td.error || 'Failed to translate logic to text before saving');
+            }
+          } else {
+            // No changes to logic tree, use cached instructions
+            if (cache.instructions !== undefined) {
+              instructions = cache.instructions;
+            }
+          }
+        } else {
+          // current_view === 'SUMMARIZED'
+          if (cache.instructions !== instructions) {
+            // Instructions have changed! Generate new logic tree via translation
+            var tr = await fetch('/api/skills/translate/summarized-to-logical', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ nlSummary: instructions })
+            });
+            var td = await tr.json();
+            if (td.ok) {
+              logic_tree_arr = td.logicTree;
+              c.logic_tree = td.logicTree;
+              sk.translationCache = {
+                instructions: instructions,
+                logicTreeJson: JSON.stringify(td.logicTree)
+              };
+            } else {
+              throw new Error(td.error || 'Could not parse logic from text before saving');
+            }
+          } else {
+            // No changes to instructions, use cached logic tree
+            if (cache.logicTreeJson !== undefined) {
+              logic_tree_arr = JSON.parse(cache.logicTreeJson);
+            }
+          }
+        }
+
+        // Now save both to storage
         var r = await fetch('/api/skills/' + id, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name: c.name,
-            instructions: c.instructions,
-            trigger_event: c.trigger_event,
-            current_view: c.current_view,
-            logic_tree: JSON.stringify(c.logic_tree)
+            name: name,
+            instructions: instructions,
+            trigger_event: trigger,
+            current_view: current_view,
+            logic_tree: JSON.stringify(logic_tree_arr)
           })
         });
         var d = await r.json();
-        if (d.ok) { state.skills.editingId = null; await loadSkillsAsync(); }
-        else { state.skills.error = d.error || 'Failed to save'; render(); }
-      } catch(e) { state.skills.error = e.message; render(); }
+        if (d.ok) {
+          state.skills.editingId = null;
+          await loadSkillsAsync();
+        } else {
+          state.skills.error = d.error || 'Failed to save';
+          render();
+        }
+      } catch(e) {
+        state.skills.error = e.message;
+        render();
+      } finally {
+        sk.isTranslating[id] = false;
+        render();
+      }
     }
     window.saveEditSkill = saveEditSkill;
 
