@@ -881,6 +881,10 @@ export function createChatRoutes(deps: ServerDeps): Hono {
 
   // Session auth — same pattern as gui/routes.ts
   app.use('/api/*', async (c, next) => {
+    if (c.req.path === '/api/auth/status') {
+      await next();
+      return;
+    }
     const cookie = parseCookie(c.req.header('Cookie') ?? '', 'pdh_session');
     if (!cookie) return c.json({ ok: false, error: 'Unauthorized' }, 401);
     const session = await deps.store.getValidSession(cookie);

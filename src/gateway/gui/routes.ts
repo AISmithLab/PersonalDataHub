@@ -29,6 +29,23 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
     return c.html(getIndexHtml());
   });
 
+  app.post('/api/error-log', async (c) => {
+    try {
+      const body = await c.req.json();
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const logDir = '/home/goose/projects/PersonalDataHub/scratch';
+      fs.mkdirSync(logDir, { recursive: true });
+      fs.appendFileSync(
+        path.join(logDir, 'browser_errors.log'),
+        `[${new Date().toISOString()}] Message: ${body.message}\nSource: ${body.source}:${body.lineno}:${body.colno}\nStack: ${body.stack}\n\n`
+      );
+    } catch (e) {
+      console.error('Failed to log browser error:', e);
+    }
+    return c.json({ ok: true });
+  });
+
   // --- Auth endpoints (before middleware) ---
 
   // Auth status check — also tells frontend if signup is needed
@@ -628,404 +645,402 @@ function parseCookie(header: string, name: string): string | null {
 
 function getIndexHtml(): string {
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="light">
 <head>
+  <script>
+    window.onerror = function(message, source, lineno, colno, error) {
+      fetch('/api/error-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: message,
+          source: source,
+          lineno: lineno,
+          colno: colno,
+          stack: error ? error.stack : ''
+        })
+      }).catch(function() {});
+      return false;
+    };
+    window.addEventListener('unhandledrejection', function(event) {
+      fetch('/api/error-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Unhandled Promise Rejection: ' + event.reason,
+          stack: event.reason ? event.reason.stack : ''
+        })
+      }).catch(function() {});
+    });
+  </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>PersonalDataHub</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config">
+    if (typeof tailwind !== 'undefined') {
+      tailwind.config = {
+        darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "on-tertiary-fixed-variant": "#3f484f",
+            "primary-fixed": "#80f7dc",
+            "on-tertiary": "#ffffff",
+            "inverse-surface": "#2d3135",
+            "secondary-container": "#e0e3e5",
+            "primary-container": "#14a38b",
+            "on-background": "#181c20",
+            "error": "#ba1a1a",
+            "surface-tint": "#006b5a",
+            "on-primary-fixed": "#00201a",
+            "on-primary-container": "#003028",
+            "on-error-container": "#93000a",
+            "on-secondary-fixed-variant": "#444749",
+            "tertiary-fixed-dim": "#bfc8d0",
+            "on-secondary": "#ffffff",
+            "secondary-fixed-dim": "#c4c7c9",
+            "on-surface": "#181c20",
+            "tertiary-container": "#89929a",
+            "on-tertiary-fixed": "#141d23",
+            "inverse-on-surface": "#eef1f6",
+            "inverse-primary": "#62dac0",
+            "surface-variant": "#e0e3e8",
+            "on-error": "#ffffff",
+            "on-secondary-container": "#626567",
+            "tertiary-fixed": "#dbe4ed",
+            "primary": "#006b5a",
+            "outline-variant": "#bccac4",
+            "secondary": "#5c5f61",
+            "on-tertiary-container": "#222b32",
+            "background": "#f7f9ff",
+            "surface-bright": "#f7f9ff",
+            "surface-container-high": "#e5e8ee",
+            "outline": "#6d7a75",
+            "surface-container-lowest": "#ffffff",
+            "surface-dim": "#d7dadf",
+            "on-secondary-fixed": "#191c1e",
+            "surface-container-highest": "#e0e3e8",
+            "error-container": "#ffdad6",
+            "tertiary": "#575f67",
+            "on-primary-fixed-variant": "#005144",
+            "primary-fixed-dim": "#62dac0",
+            "surface-container": "#ebeef3",
+            "on-primary": "#ffffff",
+            "secondary-fixed": "#e0e3e5",
+            "surface-container-low": "#f1f4f9",
+            "surface": "#f7f9ff",
+            "on-surface-variant": "#3d4945"
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          spacing: {
+            "gutter": "12px",
+            "base": "4px",
+            "sm": "12px",
+            "md": "16px",
+            "xs": "8px",
+            "xl": "32px",
+            "margin": "16px",
+            "lg": "24px"
+          },
+          fontFamily: {
+            "mono-label": ["JetBrains Mono"],
+            "label-sm": ["Hanken Grotesk"],
+            "headline-lg": ["Hanken Grotesk"],
+            "headline-md": ["Hanken Grotesk"],
+            "label-caps": ["Hanken Grotesk"],
+            "body-sm": ["Hanken Grotesk"],
+            "body-md": ["Hanken Grotesk"]
+          },
+          fontSize: {
+            "mono-label": ["11px", {"lineHeight": "1", "fontWeight": "500"}],
+            "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+            "headline-lg": ["32px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+            "headline-md": ["20px", {"lineHeight": "1.4", "fontWeight": "600"}],
+            "label-caps": ["12px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "700"}],
+            "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+            "body-md": ["16px", {"lineHeight": "1.5", "fontWeight": "400"}]
+          }
+        }
+      }
+    };
+    }
+  </script>
   <style>
     :root {
-      --primary: #0fa081;
-      --primary-hover: #0d8a6f;
-      --bg: #f7f7ff;
+      --primary: #006b5a;
+      --primary-hover: #005144;
+      --bg: #f7f9ff;
       --card: #ffffff;
-      --sidebar-bg: #fafbfd;
-      --sidebar-border: #e5e7eb;
-      --fg: #1a1a33;
-      --muted: #5a6b7a;
-      --destructive: #ef4444;
-      --destructive-hover: #dc2626;
+      --card-bg: #ffffff;
+      --input-bg: #ffffff;
+      --sidebar-bg: #f1f4f9;
+      --sidebar-border: #bccac4;
+      --fg: #181c20;
+      --muted: #5c5f61;
+      --destructive: #ba1a1a;
+      --destructive-hover: #93000a;
       --warning: #f59e0b;
-      --success: #0fa081;
-      --border: #e2e5e9;
-      --input-border: #e2e5e9;
-      --ring: #0fa081;
-      --radius: 8px;
-      --sidebar-width: 224px;
+      --success: #006b5a;
+      --border: #bccac4;
+      --input-border: #bccac4;
+      --ring: #006b5a;
+      --radius: 12px;
+      --sidebar-width: 240px;
     }
-
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); font-size: 15px; line-height: 1.6; padding-top: env(safe-area-inset-top, 0px); }
-
-    /* ---- Layout: sidebar + main ---- */
-    #app { display: flex; min-height: 100vh; }
-    .sidebar { width: var(--sidebar-width); min-width: var(--sidebar-width); background: var(--sidebar-bg); border-right: 1px solid var(--sidebar-border); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 40; }
-    .sidebar-header { padding: 16px; border-bottom: 1px solid var(--sidebar-border); }
-    .sidebar-brand { display: flex; align-items: center; gap: 10px; }
-    .sidebar-brand svg { width: 22px; height: 22px; color: var(--primary); flex-shrink: 0; }
-    .sidebar-brand span { font-size: 16px; font-weight: 600; color: var(--fg); letter-spacing: -0.3px; }
-    .sidebar-subtitle { font-size: 12px; color: var(--muted); margin-top: 4px; }
-    .sidebar-nav { flex: 1; overflow-y: auto; padding: 12px 0; }
-    .nav-group-label { padding: 0 16px; font-size: 11px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 4px; margin-top: 16px; }
-    .nav-group-label:first-child { margin-top: 0; }
-    .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 16px; font-size: 14px; color: var(--muted); cursor: pointer; transition: all 0.15s; border-left: 3px solid transparent; text-decoration: none; }
-    .nav-item:hover { background: rgba(0,0,0,0.03); color: var(--fg); }
-    .nav-item.active { background: rgba(15,160,129,0.06); color: var(--fg); font-weight: 500; border-left-color: var(--primary); }
-    .nav-item.disabled { color: rgba(90,107,122,0.4); cursor: default; pointer-events: none; }
-    .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
-    .nav-item .nav-label { flex: 1; }
-    .nav-badge { font-size: 11px; font-family: 'JetBrains Mono', monospace; background: var(--warning); color: #fff; padding: 2px 7px; border-radius: 9999px; min-width: 20px; text-align: center; font-weight: 500; }
-    .nav-badge-muted { font-size: 10px; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; color: rgba(90,107,122,0.5); }
-    .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-    .status-dot-connected { background: var(--success); box-shadow: 0 0 6px rgba(15,160,129,0.5); }
-    .status-dot-disconnected { background: #b0b8c4; }
-    .status-dot-pending { background: var(--warning); box-shadow: 0 0 6px rgba(245,158,11,0.5); }
-    .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--sidebar-border); }
-    .sidebar-save-flash { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--success); opacity: 0; transition: opacity 0.3s; }
-    .sidebar-save-flash.show { opacity: 1; }
-
-    /* ---- Main content area ---- */
-    .main-content { flex: 1; margin-left: var(--sidebar-width); overflow-y: auto; display: flex; justify-content: center; }
-    .content { width: 100%; max-width: 1600px; padding: 32px 48px; }
-
-    /* ---- Cards ---- */
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      user-select: none;
+      display: inline-block;
+      line-height: 1;
+      text-transform: none;
+      letter-spacing: normal;
+      word-wrap: normal;
+      white-space: nowrap;
+      direction: ltr;
+    }
+    body {
+      font-family: 'Hanken Grotesk', sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      background-color: var(--bg);
+      color: var(--fg);
+      padding-top: env(safe-area-inset-top, 0px);
+    }
+    @media (max-width: 768px) {
+      #bottom-nav {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+    }
+    .logic-card-shadow {
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+    .hide-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .hide-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      border: 2px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .nav-item.active {
+      background-color: var(--sidebar-bg);
+      color: var(--primary) !important;
+      border-left-color: var(--primary);
+      font-weight: 600;
+    }
+    .nav-item.active .material-symbols-outlined {
+      font-variation-settings: 'FILL' 1;
+    }
+    #bottom-nav a.active {
+      color: var(--primary) !important;
+      font-weight: 600;
+    }
+    #bottom-nav a.active .material-symbols-outlined {
+      font-variation-settings: 'FILL' 1;
+    }
+    .chat-bubble-user {
+      border-bottom-right-radius: 4px;
+    }
+    .chat-bubble-ai {
+      border-bottom-left-radius: 4px;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot-connected {
+      background: var(--success);
+      box-shadow: 0 0 6px rgba(0,107,90,0.5);
+    }
+    .status-dot-disconnected {
+      background: #c4c7c9;
+    }
+    .status-dot-pending {
+      background: var(--warning);
+      box-shadow: 0 0 6px rgba(245,158,11,0.5);
+    }
+    /* Fallback styles for inline elements of non-redesigned tabs */
     .card { background: var(--card); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
     .card h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--fg); }
     .card h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; color: var(--muted); }
-
-    /* ---- Status badges ---- */
     .status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
-    .status.connected { background: rgba(15,160,129,0.1); color: var(--success); }
+    .status.connected { background: rgba(0,107,90,0.1); color: var(--success); }
     .status.disconnected { background: rgba(239,68,68,0.08); color: var(--destructive); }
     .status.pending { background: rgba(245,158,11,0.1); color: #b45309; }
-    .status.approved { background: rgba(15,160,129,0.1); color: var(--success); }
+    .status.approved { background: rgba(0,107,90,0.1); color: var(--success); }
     .status.rejected { background: rgba(239,68,68,0.08); color: var(--destructive); }
-    .status.committed { background: rgba(15,160,129,0.1); color: var(--success); }
-
-    /* ---- Buttons ---- */
-    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; font-family: inherit; transition: all 0.15s; line-height: 1; }
+    .status.committed { background: rgba(0,107,90,0.1); color: var(--success); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 18px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; font-family: inherit; transition: all 0.15s; line-height: 1; }
     .btn-primary { background: var(--primary); color: #fff; }
     .btn-primary:hover { background: var(--primary-hover); }
-    .btn-success { background: var(--success); color: #fff; }
-    .btn-success:hover { background: var(--primary-hover); }
-    .btn-danger { background: var(--destructive); color: #fff; }
-    .btn-danger:hover { background: var(--destructive-hover); }
     .btn-outline { background: var(--card); color: var(--fg); border: 1px solid var(--border); }
-    .btn-outline:hover { background: #f5f6f8; }
+    .btn-outline:hover { background: #f1f4f9; }
     .btn-sm { padding: 6px 12px; font-size: 13px; }
     .btn-ghost { background: transparent; color: var(--muted); border: none; }
     .btn-ghost:hover { background: rgba(0,0,0,0.04); color: var(--fg); }
-
-    /* ---- Tables ---- */
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 14px; }
     th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-
-    /* ---- Forms ---- */
-    .toggle { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
-    .toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--primary); }
-    .toggle label { font-size: 14px; cursor: pointer; }
-    input[type="text"], input[type="number"], select { padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 6px; font-size: 14px; font-family: inherit; width: 100%; outline: none; transition: border-color 0.15s, box-shadow 0.15s; background: var(--card); }
-    input[type="text"]:focus, input[type="number"]:focus, select:focus { border-color: var(--ring); box-shadow: 0 0 0 3px rgba(15,160,129,0.1); }
-    input[type="datetime-local"] { padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 6px; font-size: 14px; font-family: inherit; width: 100%; outline: none; transition: border-color 0.15s; background: var(--card); }
-    input[type="datetime-local"]:focus { border-color: var(--ring); box-shadow: 0 0 0 3px rgba(15,160,129,0.1); }
-    input[type="date"] { padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 6px; font-size: 14px; font-family: inherit; outline: none; transition: border-color 0.15s; background: var(--card); }
-    input[type="date"]:focus { border-color: var(--ring); box-shadow: 0 0 0 3px rgba(15,160,129,0.1); }
+    input[type="text"], input[type="number"], select { padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; font-family: inherit; width: 100%; outline: none; transition: border-color 0.15s; background: var(--card); color: var(--fg); }
+    input[type="text"]:focus, input[type="number"]:focus, select:focus { border-color: var(--primary); }
     .form-group { margin-bottom: 14px; }
     .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; color: var(--muted); }
     .actions { display: flex; gap: 8px; margin-top: 14px; }
     .empty { text-align: center; color: var(--muted); padding: 24px; font-size: 14px; }
-    .key-display { background: #f0fdf9; padding: 12px 16px; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 13px; word-break: break-all; margin: 8px 0; border: 1px solid rgba(15,160,129,0.2); }
-    .section { margin-bottom: 24px; }
-
-    /* ---- Access control rows ---- */
     .ac-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
     .ac-row label { font-size: 14px; white-space: nowrap; }
     .ac-row input[type="datetime-local"] { width: auto; flex: 1; max-width: 220px; }
     .ac-row input[type="text"] { flex: 1; }
     .checkbox-group { display: flex; flex-wrap: wrap; gap: 2px 14px; }
     .checkbox-group .toggle { margin: 2px 0; position: relative; }
-    .checkbox-group .toggle label { border-bottom: 1px dotted #bbb; }
-    .checkbox-group .toggle label:hover::after { content: attr(data-tip); position: absolute; left: 0; top: 100%; margin-top: 4px; background: var(--fg); color: #fff; font-size: 11px; padding: 4px 8px; border-radius: 4px; white-space: nowrap; z-index: 10; pointer-events: none; }
-
-    /* ---- Filter panel ---- */
-    .filter-panel { margin-left: 26px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; display: none; }
+    .filter-panel { margin-left: 26px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; display: none; }
     .filter-panel.show { display: block; }
     .filter-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
     .filter-row:last-child { margin-bottom: 0; }
     .filter-label { font-size: 14px; color: var(--fg); min-width: 110px; }
     .filter-row input[type="text"] { flex: 1; }
-    .filter-row input[type="text"]:focus { border-color: var(--ring); }
     .filter-row input[type="date"] { flex: 1; }
-    .filter-row select { border: 1px solid var(--input-border); border-radius: 6px; padding: 9px 12px; background: var(--card); font-size: 14px; font-family: inherit; outline: none; }
+    .filter-row select { border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; background: var(--card); font-size: 14px; }
     .filter-row input[type="number"] { width: 100px; }
-    .expand-link { font-size: 13px; color: var(--primary); cursor: pointer; text-decoration: none; margin-left: 4px; }
-    .expand-link:hover { text-decoration: underline; }
-    .sel-links { font-size: 12px; margin-left: 4px; }
+    .expand-link { font-size: 13px; color: var(--primary); cursor: pointer; text-decoration: none; }
+    .sel-links { font-size: 12px; }
     .sel-links a { color: var(--primary); text-decoration: none; cursor: pointer; }
-    .sel-links a:hover { text-decoration: underline; }
-
-    /* ---- GitHub repos ---- */
-    .repo-item { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px; }
-    .repo-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; background: var(--sidebar-bg); transition: background 0.15s; }
-    .repo-header:hover { background: #f0f1f4; }
+    .repo-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+    .repo-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; background: var(--sidebar-bg); }
     .repo-name { font-family: 'JetBrains Mono', monospace; font-size: 14px; flex: 1; }
-    .repo-chevron { font-size: 13px; color: var(--muted); transition: transform 0.2s; }
-    .repo-chevron.open { transform: rotate(90deg); }
+    .repo-chevron { font-size: 13px; color: var(--muted); }
     .repo-perms { padding: 12px 14px 4px; border-top: 1px solid var(--border); display: none; }
     .repo-perms.show { display: block; }
     .perm-grid { display: flex; gap: 24px; }
-    .perm-col h4 { font-size: 13px; font-weight: 700; color: var(--fg); margin-bottom: 6px; letter-spacing: 0.3px; }
-
-    /* ---- Save flash ---- */
-    .save-flash { display: inline-block; margin-left: 10px; font-size: 13px; font-weight: 600; color: var(--success); opacity: 0; transition: opacity 0.3s; }
-    .save-flash.show { opacity: 1; }
-
-    /* ---- Email action cards ---- */
-    .email-card { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 14px; overflow: hidden; background: var(--card); transition: box-shadow 0.2s; }
-    .email-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+    .perm-col h4 { font-size: 13px; font-weight: 700; color: var(--fg); margin-bottom: 6px; }
+    .email-card { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 14px; overflow: hidden; background: var(--card); }
     .email-card-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
     .email-card-title { font-size: 15px; font-weight: 600; color: var(--fg); }
     .email-card-meta { padding: 12px 18px 0; }
     .email-field { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; font-size: 14px; }
-    .email-field-label { font-weight: 600; color: var(--muted); min-width: 55px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .email-field-label { font-weight: 600; color: var(--muted); min-width: 55px; font-size: 12px; text-transform: uppercase; }
     .email-card-body { padding: 10px 18px 14px; }
-    .email-body-display { white-space: pre-wrap; word-wrap: break-word; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.7; margin: 0; background: #f8f9fb; border: none; border-radius: 6px; padding: 14px 16px; color: var(--fg); }
+    .email-body-display { white-space: pre-wrap; word-wrap: break-word; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.7; margin: 0; background: #f1f4f9; border-radius: 8px; padding: 14px 16px; color: var(--fg); }
     .email-card-actions { display: flex; gap: 8px; padding: 0 18px 14px; justify-content: flex-end; }
-    .email-card-actions .btn { border-radius: 6px; font-weight: 500; font-size: 14px; padding: 8px 18px; }
-    .email-card-actions .btn-approve { background: var(--success); color: white; border: none; }
-    .email-card-actions .btn-approve:hover { background: var(--primary-hover); }
-    .email-card-actions .btn-deny { background: var(--card); color: var(--destructive); border: 1px solid rgba(239,68,68,0.3); }
-    .email-card-actions .btn-deny:hover { background: rgba(239,68,68,0.04); border-color: var(--destructive); }
-    .email-card-actions .btn-edit { background: var(--card); color: var(--muted); border: 1px solid var(--border); }
-    .email-card-actions .btn-edit:hover { background: #f5f6f8; border-color: #ccc; }
-    .email-edit-input { padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 6px; font-size: 14px; font-family: inherit; flex: 1; outline: none; transition: border 0.15s; }
-    .email-edit-input:focus { border-color: var(--ring); box-shadow: 0 0 0 3px rgba(15,160,129,0.1); }
-    .email-body-edit { width: 100%; min-height: 120px; padding: 12px 14px; border: 1px solid var(--input-border); border-radius: 6px; font-size: 14px; font-family: inherit; resize: vertical; outline: none; transition: border 0.15s; line-height: 1.6; }
-    .email-body-edit:focus { border-color: var(--ring); box-shadow: 0 0 0 3px rgba(15,160,129,0.1); }
     .resolved-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; font-size: 14px; border-bottom: 1px solid var(--border); }
-    .resolved-row:last-child { border-bottom: none; }
-
-    /* ---- Gmail 2-col grid ---- */
     .gmail-grid { display: grid; grid-template-columns: 1fr 400px; gap: 24px; }
-    .gmail-grid-left { min-width: 0; }
-    .gmail-grid-right { min-width: 0; }
-    .gmail-top-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .gmail-top-row .card { margin-bottom: 0; }
-    @media (max-width: 1200px) { .gmail-grid { grid-template-columns: 1fr 360px; } }
-    @media (max-width: 1000px) { .gmail-grid { grid-template-columns: 1fr; } .gmail-top-row { grid-template-columns: 1fr; } }
-
-    /* ---- Summary stats bar ---- */
     .summary-bar { display: flex; align-items: center; gap: 20px; padding: 10px 16px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; }
     .summary-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
     .summary-stat-value { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--fg); }
-    .summary-stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .summary-stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
     .summary-divider { width: 1px; height: 28px; background: var(--border); }
-
-    /* ---- Right column action review header ---- */
-    .action-review-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-    .action-review-header h2 { margin: 0; font-size: 16px; }
-
-    /* ---- Field pills ---- */
-    .field-pill { display: inline-block; font-size: 13px; padding: 4px 12px; border-radius: 9999px; border: 1px solid; cursor: pointer; transition: all 0.15s; font-family: inherit; background: none; }
-    .field-pill-on { border-color: rgba(15,160,129,0.4); background: rgba(15,160,129,0.08); color: var(--primary); }
+    .field-pill { display: inline-block; font-size: 13px; padding: 4px 12px; border-radius: 9999px; border: 1px solid; cursor: pointer; background: none; }
+    .field-pill-on { border-color: rgba(0,107,90,0.4); background: rgba(0,107,90,0.08); color: var(--primary); }
     .field-pill-off { border-color: var(--border); color: var(--muted); text-decoration: line-through; opacity: 0.5; }
-    .field-pill-off:hover { opacity: 0.75; }
-
-    /* ---- Email list ---- */
     .email-list-header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--sidebar-bg); border-bottom: 1px solid var(--border); }
-    .email-list-header .stat { font-size: 13px; color: var(--muted); }
-    .email-list-header .stat strong { color: var(--fg); font-family: 'JetBrains Mono', monospace; font-weight: 600; }
-    .email-list-header .stat-accent strong { color: var(--primary); }
-    .email-row { border-bottom: 1px solid var(--border); position: relative; }
-    .email-row:last-child { border-bottom: none; }
-    .email-row-hidden .email-row-btn { opacity: 0.35; }
-    .email-row-hidden .email-row-btn:hover { opacity: 0.55; }
-    .email-row-btn { display: block; width: 100%; text-align: left; padding: 14px 20px; background: none; border: none; cursor: pointer; transition: all 0.15s; font-family: inherit; }
-    .email-row-btn:hover { background: rgba(15,160,129,0.03); }
-    .email-row-sender { font-size: 14px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .email-row-sender.hidden-field { color: var(--muted); text-decoration: line-through; font-weight: 400; }
-    .email-row-subject { font-size: 13px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-    .email-row-subject.hidden-field { color: var(--muted); text-decoration: line-through; opacity: 0.5; }
-    .email-row-snippet { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; line-height: 1.4; }
-    .email-row-snippet.hidden-field { text-decoration: line-through; opacity: 0.4; }
-    .email-row-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-    .email-row-date { font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
-    .email-row-labels { display: flex; gap: 4px; margin-top: 2px; }
-    .email-label { font-size: 11px; font-family: 'JetBrains Mono', monospace; padding: 2px 8px; border-radius: 4px; background: rgba(15,160,129,0.07); color: var(--primary); font-weight: 500; }
-    .email-label.hidden-field { text-decoration: line-through; opacity: 0.45; }
-    .email-row-labels.hidden-field { opacity: 0.5; }
-    .email-row-attach { color: var(--muted); flex-shrink: 0; }
-    .email-row-attach.hidden-field { opacity: 0.3; }
-    .email-row-vis { width: 3px; align-self: stretch; border-radius: 2px; flex-shrink: 0; }
-    .email-row-vis-on { background: var(--primary); }
-    .email-row-vis-off { background: var(--border); }
-    .email-expand { padding: 16px 20px 20px; border-top: 1px solid var(--border); background: #f9fafb; }
-    .email-expand-field { display: flex; gap: 10px; font-size: 14px; padding: 4px 0; }
-    .email-expand-field .field-label { color: var(--muted); width: 64px; flex-shrink: 0; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; padding-top: 2px; }
-    .email-expand-field .field-value { color: var(--fg); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
-    .email-expand-field .field-value.hidden-field { text-decoration: line-through; color: var(--muted); opacity: 0.45; }
-    .email-expand-body { margin-top: 12px; }
-    .email-expand-body pre { white-space: pre-wrap; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-size: 13px; line-height: 1.7; color: var(--fg); font-family: 'JetBrains Mono', monospace; }
-    .email-expand-body pre.hidden-field { text-decoration: line-through; color: var(--muted); opacity: 0.4; }
-    .email-expand-alert { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(239,68,68,0.05); border: 1px solid rgba(239,68,68,0.15); border-radius: 6px; margin-bottom: 12px; font-size: 13px; color: var(--destructive); }
-
-    /* ---- Misc ---- */
-    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.6s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    @keyframes flash-save { 0% { opacity: 1; } 100% { opacity: 0; } }
-    .font-mono { font-family: 'JetBrains Mono', monospace; }
-
-    /* ---- Mobile / Android layout ---- */
-    @media (max-width: 768px) {
-      :root { --sidebar-width: 0px; }
-      .sidebar { display: none; }
-      .main-content { margin-left: 0; }
-      .content { padding: 16px; }
-      .gmail-grid { grid-template-columns: 1fr; }
-      .gmail-top-row { grid-template-columns: 1fr; }
-
-      /* Bottom navigation replaces sidebar on mobile */
-      #bottom-nav {
-        display: flex;
-        position: fixed;
-        bottom: 0; left: 0; right: 0;
-        background: var(--sidebar-bg);
-        border-top: 1px solid var(--sidebar-border);
-        z-index: 50;
-        padding-bottom: env(safe-area-inset-bottom, 0px);
-      }
-      #bottom-nav a {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 12px 8px;
-        font-size: 12px;
-        color: var(--muted);
-        text-decoration: none;
-        cursor: pointer;
-        gap: 6px;
-        border-top: 2px solid transparent;
-        transition: all 0.15s;
-      }
-      #bottom-nav a.active { color: var(--primary); border-top-color: var(--primary); }
-      #bottom-nav a svg { width: 22px; height: 22px; }
-      #bottom-nav .nav-badge { font-size: 10px; padding: 1px 5px; }
-
-      /* Chat container — full height minus bottom nav + padding */
-      .chat-container { height: calc(100dvh - 86px); display: flex; flex-direction: column; }
-
-      /* Large source tiles on mobile overview */
-      .source-tile {
-        padding: 20px 18px;
-        min-height: 90px;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-      }
-
-      /* Increase touch targets */
-      .btn { min-height: 44px; padding: 10px 18px; }
-      .btn-sm { min-height: 36px; }
-      .nav-item { padding: 12px 16px; }
-      .email-row-btn { padding: 16px 12px; }
-
-      /* Main content needs bottom padding to clear bottom nav + gesture bar */
-      .main-content { padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
-
-      /* Chat container: full screen minus top inset, bottom nav, and gesture bar */
-      .chat-container { height: calc(100dvh - 86px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); }
-    }
-    @media (min-width: 769px) { #bottom-nav { display: none; } .chat-container { height: calc(100vh - 80px); } }
+    .email-row { border-bottom: 1px solid var(--border); }
+    .email-row-btn { display: block; width: 100%; text-align: left; padding: 14px 20px; background: none; border: none; cursor: pointer; }
+    .email-row-btn:hover { background: rgba(0,107,90,0.03); }
+    .email-row-sender { font-size: 14px; font-weight: 600; color: var(--fg); }
   </style>
 </head>
-<body>
+<body class="font-body-md text-body-md bg-background text-on-background min-h-screen">
   <!-- Login screen -->
-  <div id="login-screen" style="display:none;justify-content:center;align-items:center;min-height:100vh;background:var(--bg)">
-    <div style="background:var(--card);padding:40px;border-radius:12px;border:1px solid var(--border);box-shadow:0 2px 12px rgba(0,0,0,0.06);max-width:400px;width:100%">
-      <div style="text-align:center;margin-bottom:24px">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        <h1 style="font-size:20px;font-weight:700;margin-top:12px">PersonalDataHub</h1>
-        <p id="login-subtitle" style="font-size:14px;color:var(--muted);margin-top:4px">Sign in to continue</p>
+  <div id="login-screen" style="display:none" class="fixed inset-0 z-50 flex items-center justify-center bg-background p-4">
+    <div class="bg-surface border border-outline-variant rounded-2xl p-8 max-w-sm w-full shadow-lg flex flex-col gap-6">
+      <div class="text-center flex flex-col items-center gap-2">
+        <span class="material-symbols-outlined text-primary text-4xl">account_tree</span>
+        <h1 class="font-headline-lg text-headline-lg text-on-background font-bold tracking-tight">PersonalDataHub</h1>
+        <p id="login-subtitle" class="font-body-sm text-body-sm text-on-surface-variant">Sign in to continue</p>
       </div>
-      <form id="login-form" style="display:flex;flex-direction:column;gap:12px" onsubmit="return handleAuthSubmit(event)">
-        <input id="auth-email" type="email" placeholder="Email" required style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg);color:var(--fg)">
-        <input id="auth-password" type="password" placeholder="Password" required minlength="8" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg);color:var(--fg)">
-        <button id="auth-submit" type="submit" class="btn btn-primary" style="width:100%;padding:10px;font-size:14px">Sign In</button>
+      <form id="login-form" class="flex flex-col gap-4" onsubmit="return handleAuthSubmit(event)">
+        <input id="auth-email" type="email" placeholder="Email" required class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors">
+        <input id="auth-password" type="password" placeholder="Password" required minlength="8" class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors">
+        <button id="auth-submit" type="submit" class="w-full bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps py-2.5 rounded-xl transition-all active:scale-95">Sign In</button>
       </form>
-      <div id="login-error" style="color:var(--destructive);font-size:13px;margin-top:12px;text-align:center"></div>
-      <div style="text-align:center;margin-top:16px;font-size:13px;color:var(--muted)">
-        <a id="auth-toggle" href="#" onclick="toggleAuthMode();return false;" style="color:var(--primary);text-decoration:none">Already have an account? Sign in</a>
+      <div id="login-error" class="text-error text-body-sm text-center"></div>
+      <div class="text-center font-body-sm text-body-sm text-on-surface-variant">
+        <a id="auth-toggle" href="#" onclick="toggleAuthMode();return false;" class="text-primary hover:underline font-medium">New here? Create account</a>
       </div>
     </div>
   </div>
 
-  <div id="app" style="display:none">
-    <aside class="sidebar" id="sidebar">
-      <div class="sidebar-header">
-        <div class="sidebar-brand">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          <span>PersonalDataHub</span>
+  <div id="app" style="display:none" class="min-h-screen flex bg-background text-on-background">
+    <!-- Desktop Sidebar -->
+    <aside class="hidden md:flex md:flex-col md:w-60 md:fixed md:inset-y-0 md:left-0 md:z-40 bg-surface border-r border-outline-variant shrink-0">
+      <div class="p-md border-b border-outline-variant flex flex-col gap-base">
+        <div class="flex items-center gap-xs">
+          <span class="material-symbols-outlined text-primary text-2xl">account_tree</span>
+          <span class="font-headline-md text-headline-md font-bold text-primary tracking-tight">PersonalDataHub</span>
         </div>
-        <div class="sidebar-subtitle">Access control for AI agents</div>
+        <span class="font-body-sm text-body-sm text-on-surface-variant leading-none">Access control for AI agents</span>
       </div>
-      <nav class="sidebar-nav" id="sidebar-nav">
-        <a class="nav-item active" data-tab="ai" onclick="switchTab('ai')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          <span class="nav-label">Chat</span>
-          <span class="status-dot" id="ai-dot" style="background:var(--muted)"></span>
+      <nav class="flex-grow py-md overflow-y-auto flex flex-col gap-1">
+        <a class="nav-item flex items-center gap-sm px-md py-3 text-body-md font-body-md text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer border-l-4 border-transparent active" data-tab="ai" onclick="switchTab('ai')">
+          <span class="material-symbols-outlined">chat</span>
+          <span class="flex-grow">Chat</span>
+          <span class="w-2.5 h-2.5 rounded-full" id="ai-dot" style="background:var(--muted)"></span>
         </a>
-        <a class="nav-item" data-tab="skill" onclick="switchTab('skill')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-          <span class="nav-label">Skill</span>
+        <a class="nav-item flex items-center gap-sm px-md py-3 text-body-md font-body-md text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer border-l-4 border-transparent" data-tab="skill" onclick="switchTab('skill')">
+          <span class="material-symbols-outlined">bolt</span>
+          <span class="flex-grow">Skill</span>
         </a>
-        <a class="nav-item" data-tab="memory" onclick="switchTab('memory')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-          <span class="nav-label">Memory</span>
-          <span class="nav-badge" id="memory-count-badge" style="display:none">0</span>
+        <a class="nav-item flex items-center gap-sm px-md py-3 text-body-md font-body-md text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer border-l-4 border-transparent" data-tab="memory" onclick="switchTab('memory')">
+          <span class="material-symbols-outlined">database</span>
+          <span class="flex-grow">Memory</span>
+          <span class="bg-primary text-on-primary font-mono-label text-mono-label px-2 py-0.5 rounded-full" id="memory-count-badge" style="display:none">0</span>
         </a>
-        <a class="nav-item" data-tab="settings" onclick="switchTab('settings')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          <span class="nav-label">Settings</span>
+        <a class="nav-item flex items-center gap-sm px-md py-3 text-body-md font-body-md text-on-surface-variant hover:bg-surface-container-high transition-colors cursor-pointer border-l-4 border-transparent" data-tab="settings" onclick="switchTab('settings')">
+          <span class="material-symbols-outlined">settings</span>
+          <span class="flex-grow">Settings</span>
         </a>
       </nav>
-      <div class="sidebar-footer">
-        <span class="sidebar-save-flash" id="sidebar-flash">Saved</span>
-        <button class="btn btn-ghost btn-sm" onclick="logout()" style="width:100%;margin-top:8px;font-size:13px">Sign out</button>
+      <div class="p-md border-t border-outline-variant flex flex-col gap-sm">
+        <span class="sidebar-save-flash text-success font-mono-label text-mono-label opacity-0" id="sidebar-flash">Saved</span>
+        <button class="w-full text-center py-2 border border-outline hover:bg-surface-container-high rounded-lg text-body-sm font-body-sm text-on-surface-variant transition-colors" onclick="logout()">Sign out</button>
       </div>
     </aside>
-    <div class="main-content">
-      <div class="content" id="content"></div>
+
+    <!-- Main Content Area -->
+    <div class="flex-grow md:pl-60 flex flex-col min-w-0">
+      <div class="flex-grow pb-24 md:pb-0" id="content"></div>
     </div>
   </div>
 
-  <!-- Bottom navigation (visible only on mobile via CSS media query) -->
-  <nav id="bottom-nav">
-    <a data-tab="ai" onclick="switchTab('ai')" class="active">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-      <span>Chat</span>
+  <!-- Bottom navigation (visible only on mobile) -->
+  <nav id="bottom-nav" class="fixed bottom-0 left-0 right-0 z-50 bg-surface border-t border-outline-variant flex justify-around items-center py-2 md:hidden">
+    <a data-tab="ai" onclick="switchTab('ai')" class="flex flex-col items-center gap-1 px-4 py-1 text-on-surface-variant active:scale-95 transition-all">
+      <span class="material-symbols-outlined">chat</span>
+      <span class="font-label-sm text-label-sm">Chat</span>
     </a>
-    <a data-tab="skill" onclick="switchTab('skill')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-      <span>Skill</span>
+    <a data-tab="skill" onclick="switchTab('skill')" class="flex flex-col items-center gap-1 px-4 py-1 text-on-surface-variant active:scale-95 transition-all">
+      <span class="material-symbols-outlined">bolt</span>
+      <span class="font-label-sm text-label-sm">Skill</span>
     </a>
-    <a data-tab="memory" onclick="switchTab('memory')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-      <span>Memory</span>
+    <a data-tab="memory" onclick="switchTab('memory')" class="flex flex-col items-center gap-1 px-4 py-1 text-on-surface-variant active:scale-95 transition-all">
+      <span class="material-symbols-outlined">database</span>
+      <span class="font-label-sm text-label-sm">Memory</span>
     </a>
-    <a data-tab="settings" onclick="switchTab('settings')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      <span>Settings</span>
+    <a data-tab="settings" onclick="switchTab('settings')" class="flex flex-col items-center gap-1 px-4 py-1 text-on-surface-variant active:scale-95 transition-all">
+      <span class="material-symbols-outlined">settings</span>
+      <span class="font-label-sm text-label-sm">Settings</span>
     </a>
   </nav>
 
   <script>
-    let currentTab = 'ai';
+    var currentTab = 'ai';
     var ALL_FIELDS = ['Subject', 'Body', 'Sender', 'Recipients', 'Labels', 'Attachments', 'Snippet'];
     var DEMO_EMAILS = [
       { id:'e1', from:'alice@company.com', to:'owner@gmail.com', subject:'Q1 Planning Meeting', snippet:'Can we reschedule Thursday\\'s meeting to 2pm?', body:'Hi,\\n\\nCan we reschedule Thursday\\'s meeting to 2pm? I have a conflict with the original time.\\n\\nThanks,\\nAlice', date:'2025-02-22T09:15:00Z', labels:['Inbox'], hasAttachment:false },
@@ -1042,7 +1057,7 @@ function getIndexHtml(): string {
       { id:'e12', from:'newsletter@techweekly.com', to:'owner@gmail.com', subject:'This Week in Tech: AI Privacy Concerns', snippet:'The latest on AI regulation and data privacy', body:'This Week in Tech Newsletter\\n\\n1. EU proposes new AI transparency rules\\n2. Major breach at social media company\\n3. Open source privacy tools gaining traction\\n4. Interview: Building privacy-first AI agents\\n\\nRead more at techweekly.com', date:'2025-02-13T06:00:00Z', labels:['Inbox','Newsletter'], hasAttachment:false },
     ];
 
-    let state = {
+    var state = {
       sources: [], filters: [], staging: [], audit: [],
       gmail: {},
       github: { repoList: [], reposLoading: false, reposLoaded: false, filterOwner: '', search: '' },
@@ -1057,14 +1072,14 @@ function getIndexHtml(): string {
       eventsError: null,
       filterTypes: {},
       sms: { messages: null, loading: false, error: null, box: 'inbox', contextMenu: null, autoReplying: false },
-      chat: { messages: [], loading: false, error: null, aiAvailable: false, stagedSmsIds: [], codeBlocks: {} },
+      chat: { messages: [], loading: false, error: null, aiAvailable: false, stagedSmsIds: [], codeBlocks: {}, configuredModel: '' },
       memories: { items: [], loading: false, loaded: false, editingId: null, editContent: '', adding: false, newContent: '', error: null },
       skills: { items: [], loading: false, loaded: false, editingId: null, editContent: { name: '', instructions: '', trigger_event: 'sms_received', current_view: 'SUMMARIZED', logic_tree: [] }, adding: false, newName: '', newInstructions: '', newTrigger: 'sms_received', newCurrentView: 'SUMMARIZED', newLogicTree: [], error: null, isTranslating: {} },
       settingsProvider: 'anthropic',
       autoReply: { enabled: false, maxToolRounds: 3, loading: false, testResult: null, testLoading: false },
       settingsSection: 'ai',
     };
-    let _saveTimer = null;
+    var _saveTimer = null;
 
     // Sidebar + bottom-nav switching
     function switchTab(tab) {
@@ -1076,21 +1091,39 @@ function getIndexHtml(): string {
     }
     window.switchTab = switchTab;
 
+    function injectDemoQuestion(text) {
+      var input = document.getElementById('chat-input');
+      if (input) {
+        input.value = text;
+        sendChatMessage();
+      }
+    }
+    window.injectDemoQuestion = injectDemoQuestion;
+
     async function fetchData() {
-      const [sources, filtersData, staging, audit] = await Promise.all([
-        fetch('/api/sources').then(r => r.json()),
-        fetch('/api/filters').then(r => r.json()),
-        fetch('/api/staging').then(r => r.json()),
-        fetch('/api/audit?limit=20').then(r => r.json()),
-      ]);
-      state.sources = sources.sources || [];
-      state.filters = filtersData.filters || [];
-      state.filterTypes = filtersData.filterTypes || {};
-      state.staging = staging.actions || [];
-      state.audit = audit.entries || [];
+      try {
+        var resList = await Promise.all([
+          fetch('/api/sources').then(function(r) { return r.json(); }),
+          fetch('/api/filters').then(function(r) { return r.json(); }),
+          fetch('/api/staging').then(function(r) { return r.json(); }),
+          fetch('/api/audit?limit=20').then(function(r) { return r.json(); })
+        ]);
+        var sources = resList[0];
+        var filtersData = resList[1];
+        var staging = resList[2];
+        var audit = resList[3];
+
+        state.sources = sources.sources || [];
+        state.filters = filtersData.filters || [];
+        state.filterTypes = filtersData.filterTypes || {};
+        state.staging = staging.actions || [];
+        state.audit = audit.entries || [];
+      } catch (err) {
+        console.warn('[fetchData] Failed to fetch backend data:', err);
+      }
 
       // Fetch real emails if Gmail is connected (uses preview with filters)
-      const gm = state.sources.find(s => s.name === 'gmail');
+      var gm = state.sources.find(function(s) { return s.name === 'gmail'; });
       if (gm && gm.connected && !state.realEmails && !state.emailsLoading) {
         state.emailsLoading = true;
         state.emailsError = null;
@@ -1098,12 +1131,7 @@ function getIndexHtml(): string {
           .then(function(r) { return r.json(); })
           .then(function(data) {
             state.emailsLoading = false;
-            if (data.ok && data.emails) {
-              state.realEmails = data.emails;
-              state.emailsError = null;
-            } else {
-              state.emailsError = data.error || 'Failed to load emails';
-            }
+            state.realEmails = data.messages || [];
             if (currentTab === 'gmail') render();
           })
           .catch(function(err) {
@@ -1114,20 +1142,15 @@ function getIndexHtml(): string {
       }
 
       // Fetch real calendar events if Google Calendar is connected
-      const cal = state.sources.find(s => s.name === 'google_calendar');
+      var cal = state.sources.find(function(s) { return s.name === 'google_calendar'; });
       if (cal && cal.connected && !state.realEvents && !state.eventsLoading) {
         state.eventsLoading = true;
         state.eventsError = null;
-        fetch('/api/calendar/preview?limit=20&t=' + Date.now())
+        fetch('/api/google_calendar/preview?limit=20&t=' + Date.now())
           .then(function(r) { return r.json(); })
           .then(function(data) {
             state.eventsLoading = false;
-            if (data.ok && data.events) {
-              state.realEvents = data.events;
-              state.eventsError = null;
-            } else {
-              state.eventsError = data.error || 'Failed to load events';
-            }
+            state.realEvents = data.events || [];
             if (currentTab === 'google_calendar') render();
           })
           .catch(function(err) {
@@ -1140,7 +1163,9 @@ function getIndexHtml(): string {
       fetch('/api/chat/status').then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
           state.chat.aiAvailable = d.configured;
-          if (currentTab === 'ai') render();
+          if (d.provider) state.settingsProvider = d.provider;
+          if (d.model) state.chat.configuredModel = d.model;
+          if (currentTab === 'ai' || currentTab === 'settings') render();
         }
       }).catch(function() { /* non-fatal */ });
 
@@ -1282,7 +1307,13 @@ function getIndexHtml(): string {
       var focusId = focused && focused.id ? focused.id : null;
       var cursorPos = focused && focused.selectionStart != null ? focused.selectionStart : null;
 
-      const content = document.getElementById('content');
+      // Sync active navigation classes
+      document.querySelectorAll('.nav-item[data-tab], #bottom-nav a[data-tab]').forEach(function(el) {
+        el.classList.toggle('active', el.dataset.tab === currentTab);
+      });
+
+      var content = document.getElementById('content');
+      if (!content) return;
       switch (currentTab) {
         case 'overview': content.innerHTML = renderOverviewTab(); break;
         case 'gmail': content.innerHTML = renderGmailTab(); break;
@@ -1794,7 +1825,7 @@ function getIndexHtml(): string {
     }
 
     function renderGitHubTab() {
-      const github = state.sources.find(s => s.name === 'github');
+      var github = state.sources.find(function(s) { return s.name === 'github'; });
       var ghConnected = github && github.connected;
       var ghAccount = github && github.accountInfo;
       var allRepos = state.github.repoList || [];
@@ -2206,72 +2237,103 @@ function getIndexHtml(): string {
     function renderMemoryTab() {
       var mem = state.memories;
       var total = mem.items.length;
-      var html = '<div style="max-width:640px;margin:0 auto;padding:16px">';
+      var percent = Math.min(100, Math.round((total / 50) * 100));
 
-      // Header row
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">';
-      html += '<div>';
-      html += '<h2 style="margin:0 0 2px">AI Memory</h2>';
-      html += '<p style="margin:0;font-size:13px;color:var(--muted)">' + total + ' / 50 memories saved</p>';
+      var html = '<div class="flex flex-col h-full bg-background">';
+
+      // TopBar
+      html += '<header class="flex justify-between items-center px-margin h-16 border-b border-outline-variant bg-surface shrink-0">';
+      html += '<div class="flex items-center gap-sm">';
+      html += '<span class="material-symbols-outlined text-primary">smart_toy</span>';
+      html += '<h1 class="font-headline-md text-headline-md font-bold text-primary">AI Studio</h1>';
       html += '</div>';
-      html += '<button class="btn ' + (mem.adding ? 'btn-ghost' : 'btn-primary') + '" onclick="toggleAddMemory()" style="font-size:13px">' + (mem.adding ? 'Cancel' : '+ Add memory') + '</button>';
+      html += '</header>';
+
+      // Content area
+      html += '<div class="flex-grow overflow-y-auto px-margin py-md space-y-md max-w-2xl mx-auto w-full pb-24">';
+
+      // Title & Capacity block
+      html += '<div class="flex justify-between items-end pb-xs border-b border-outline-variant/60">';
+      html += '<div class="flex flex-col gap-base">';
+      html += '<h2 class="font-headline-lg text-headline-lg text-on-surface">AI Memory</h2>';
+      html += '<div class="flex items-center gap-sm">';
+      html += '<div class="w-32 h-1.5 bg-surface-container-highest rounded-full overflow-hidden">';
+      html += '<div class="h-full bg-primary" style="width: ' + percent + '%"></div>';
+      html += '</div>';
+      html += '<span class="font-label-sm text-label-sm text-on-surface-variant">' + total + ' / 50 memories saved</span>';
+      html += '</div>';
+      html += '</div>';
+      html += '<button onclick="toggleAddMemory()" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-4 py-2 rounded-xl transition-all active:scale-95 flex items-center gap-xs shadow-sm">';
+      html += '<span class="material-symbols-outlined text-[18px]">add</span>';
+      html += '<span>' + (mem.adding ? 'Cancel' : 'Add memory') + '</span>';
+      html += '</button>';
       html += '</div>';
 
       // Error banner
       if (mem.error) {
-        html += '<div style="padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;color:#ef4444;font-size:14px;margin-bottom:12px">' + escapeHtml(mem.error) + '</div>';
+        html += '<div class="p-md bg-error-container text-on-error-container border border-error/20 rounded-xl font-body-sm text-body-sm shadow-sm">' + escapeHtml(mem.error) + '</div>';
       }
 
-      // Add form
+      // Add memory form
       if (mem.adding) {
-        html += '<div style="background:var(--card-bg);border:1px solid var(--primary);border-radius:10px;padding:14px;margin-bottom:16px">';
-        html += '<p style="margin:0 0 8px;font-size:13px;color:var(--muted)">What should the AI remember?</p>';
-        html += '<textarea id="new-memory-input" onchange="updateNewMemoryContent(this.value)" oninput="updateNewMemoryContent(this.value)" placeholder="e.g. Prefers concise replies. Works in timezone UTC+5:30." style="width:100%;min-height:70px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit">' + escapeHtml(mem.newContent) + '</textarea>';
-        html += '<div style="display:flex;gap:8px;margin-top:8px">';
-        html += '<button class="btn btn-primary" onclick="submitNewMemory()" style="font-size:13px">Save</button>';
-        html += '<button class="btn btn-ghost" onclick="toggleAddMemory()" style="font-size:13px">Cancel</button>';
+        html += '<div class="bg-surface-container-low border border-primary/40 rounded-xl p-md space-y-sm shadow-md">';
+        html += '<p class="font-label-caps text-label-caps text-on-surface-variant">What should the AI remember?</p>';
+        html += '<textarea id="new-memory-input" onchange="updateNewMemoryContent(this.value)" oninput="updateNewMemoryContent(this.value)" placeholder="e.g. Prefers concise replies. Works in timezone UTC+5:30." class="w-full bg-white border border-outline-variant rounded-lg p-md text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm min-h-[80px]" rows="2">' + escapeHtml(mem.newContent) + '</textarea>';
+        html += '<div class="flex gap-sm pt-xs">';
+        html += '<button onclick="submitNewMemory()" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-6 py-2 rounded-xl transition-all active:scale-95">Save</button>';
+        html += '<button onclick="toggleAddMemory()" class="border border-outline text-on-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps px-6 py-2 rounded-xl transition-all active:scale-95">Cancel</button>';
         html += '</div>';
         html += '</div>';
       }
 
-      // Loading
+      // Loading / Empty / List
       if (mem.loading && !total) {
-        html += '<p style="color:var(--muted);text-align:center;padding:40px 0">Loading…</p>';
+        html += '<div class="flex items-center justify-center p-xl"><div class="spinner w-8 h-8"></div></div>';
       } else if (!total && !mem.adding) {
-        html += '<div style="text-align:center;padding:60px 20px;color:var(--muted)">';
-        html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;margin-bottom:12px;opacity:0.4"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
-        html += '<p style="margin:0;font-size:15px;font-weight:500">No memories yet</p>';
-        html += '<p style="margin:8px 0 0;font-size:13px">Chat with the AI and it will save facts about you automatically, or add one manually above.</p>';
+        // Empty state matching memory_redesign/code.html
+        html += '<div class="bg-surface-container-low border border-outline-variant rounded-xl p-xl flex flex-col items-center justify-center text-center min-h-[300px]">';
+        html += '<div class="w-16 h-16 bg-white border border-outline-variant rounded-2xl flex items-center justify-center mb-md shadow-sm">';
+        html += '<span class="material-symbols-outlined text-primary text-3xl">edit_note</span>';
+        html += '</div>';
+        html += '<h3 class="font-headline-md text-headline-md text-on-surface mb-xs">No memories yet</h3>';
+        html += '<div class="max-w-md bg-white border border-outline-variant rounded-lg p-md mt-base text-left shadow-sm">';
+        html += '<div class="flex items-start gap-xs">';
+        html += '<span class="font-mono-label text-mono-label bg-secondary-container text-on-secondary-container px-xs py-0.5 rounded uppercase mr-base">INFO</span>';
+        html += '<p class="font-body-sm text-body-sm text-on-surface-variant">Chat with the AI and it will save facts about you <strong class="text-primary font-semibold">automatically</strong>, or add one manually using the button above.</p>';
+        html += '</div>';
+        html += '</div>';
         html += '</div>';
       } else {
-        html += '<div style="display:grid;gap:8px">';
+        // Memories list
+        html += '<div class="space-y-sm">';
         mem.items.forEach(function(m) {
           var isEditing = mem.editingId === m.id;
-          html += '<div style="background:var(--card-bg);border:1px solid ' + (isEditing ? 'var(--primary)' : 'var(--border)') + ';border-radius:10px;padding:12px 14px;transition:border-color 0.15s">';
+          var borderStyle = isEditing ? 'border-primary shadow-md bg-white' : 'border-outline-variant bg-white hover:border-primary/50 shadow-sm';
+          html += '<div class="border rounded-xl p-md space-y-sm transition-all ' + borderStyle + '">';
+          
           if (isEditing) {
-            html += '<textarea id="edit-memory-' + escapeAttr(m.id) + '" onchange="updateMemoryEditContent(this.value)" oninput="updateMemoryEditContent(this.value)" style="width:100%;min-height:60px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit">' + escapeHtml(mem.editContent) + '</textarea>';
-            html += '<div style="display:flex;gap:8px;margin-top:8px">';
-            html += '<button class="btn btn-primary" onclick="saveEditMemory(\\'' + escapeAttr(m.id) + '\\')" style="font-size:12px;padding:5px 12px">Save</button>';
-            html += '<button class="btn btn-ghost" onclick="cancelEditMemory()" style="font-size:12px;padding:5px 12px">Cancel</button>';
+            html += '<textarea id="edit-memory-' + escapeAttr(m.id) + '" onchange="updateMemoryEditContent(this.value)" oninput="updateMemoryEditContent(this.value)" class="w-full bg-white border border-outline-variant rounded-lg p-md text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm min-h-[80px]" rows="2">' + escapeHtml(mem.editContent) + '</textarea>';
+            html += '<div class="flex gap-sm pt-xs">';
+            html += '<button onclick="saveEditMemory(\\'' + escapeAttr(m.id) + '\\')" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95">Save</button>';
+            html += '<button onclick="cancelEditMemory()" class="border border-outline text-on-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95">Cancel</button>';
             html += '</div>';
           } else {
-            html += '<div style="display:flex;align-items:flex-start;gap:10px">';
-            html += '<p style="flex:1;margin:0;font-size:14px;line-height:1.55;word-break:break-word">' + escapeHtml(m.content) + '</p>';
-            html += '<div style="display:flex;gap:4px;flex-shrink:0;margin-top:1px">';
-            html += '<button onclick="startEditMemory(\\'' + escapeAttr(m.id) + '\\')" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px;font-size:13px;line-height:1">';
-            html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
-            html += '</button>';
-            html += '<button onclick="deleteMemory(\\'' + escapeAttr(m.id) + '\\')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px;font-size:16px;line-height:1">×</button>';
+            html += '<div class="flex items-start justify-between gap-sm">';
+            html += '<p class="font-body-md text-body-md text-on-surface leading-relaxed flex-grow whitespace-pre-wrap break-words">' + escapeHtml(m.content) + '</p>';
+            html += '<div class="flex gap-xs items-center shrink-0">';
+            html += '<button onclick="startEditMemory(\\'' + escapeAttr(m.id) + '\\')" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-container-high text-on-surface-variant transition-colors" title="Edit"><span class="material-symbols-outlined text-[18px]">edit</span></button>';
+            html += '<button onclick="deleteMemory(\\'' + escapeAttr(m.id) + '\\')" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-container-high text-error transition-colors" title="Delete"><span class="material-symbols-outlined text-[18px]">close</span></button>';
             html += '</div>';
             html += '</div>';
-            html += '<p style="margin:4px 0 0;font-size:11px;color:var(--muted)">' + new Date(m.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) + '</p>';
+            html += '<span class="font-mono-label text-mono-label text-on-surface-variant block mt-base">' + new Date(m.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) + '</span>';
           }
+          
           html += '</div>';
         });
         html += '</div>';
       }
 
-      html += '</div>';
+      html += '</div></div>';
       return html;
     }
 
@@ -2373,11 +2435,13 @@ function getIndexHtml(): string {
     function renderAiTab() {
       var chat = state.chat;
       if (!chat.aiAvailable) {
-        return '<div class="card" style="max-width:420px;margin:40px auto;text-align:center;padding:32px">' +
-          '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5" style="margin-bottom:16px"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>' +
-          '<h3 style="margin:0 0 8px">AI Assistant not configured</h3>' +
-          '<p style="color:var(--muted);font-size:14px;margin:0 0 20px">Add an API key in Settings to get started.</p>' +
-          '<button class="btn btn-primary" onclick="switchTab(\\'settings\\')">Go to Settings</button>' +
+        return '<div class="flex-grow flex flex-col items-center justify-center p-xl text-center max-w-md mx-auto">' +
+          '<div class="w-20 h-20 bg-surface-container-low rounded-xl flex items-center justify-center mb-md border border-outline-variant">' +
+          '<span class="material-symbols-outlined text-primary text-4xl">smart_toy</span>' +
+          '</div>' +
+          '<h3 class="font-headline-md text-headline-md text-on-surface mb-xs">AI Assistant not configured</h3>' +
+          '<p class="font-body-sm text-body-sm text-on-surface-variant mb-lg">Add an API key in Settings to get started.</p>' +
+          '<button class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-6 py-2.5 rounded-xl transition-all active:scale-95 shadow-sm" onclick="switchTab(\\'settings\\')">Go to Settings</button>' +
           '</div>';
       }
 
@@ -2388,71 +2452,110 @@ function getIndexHtml(): string {
 
       var messagesHtml = '';
       if (!chat.messages.length) {
-        messagesHtml = '<div style="text-align:center;color:var(--muted);font-size:14px;padding:40px 20px">' +
-          'Ask me anything about your data — emails, calendar, GitHub, or SMS.' +
+        messagesHtml = '<div class="flex-grow flex flex-col items-center justify-center max-w-2xl mx-auto text-center px-margin py-xl">' +
+          '<div class="w-20 h-20 bg-surface-container-low rounded-xl flex items-center justify-center mb-md border border-outline-variant">' +
+          '<span class="material-symbols-outlined text-primary text-4xl">database</span>' +
+          '</div>' +
+          '<h2 class="font-headline-md text-headline-md text-on-surface mb-xs">How can I help with your data?</h2>' +
+          '<p class="font-body-sm text-body-sm text-on-surface-variant max-w-sm">Ask me anything about your data — emails, calendar, GitHub, or SMS.</p>' +
+          '<div class="grid grid-cols-2 gap-sm mt-xl w-full max-w-md">' +
+          '<button onclick="injectDemoQuestion(\\'Summarize my unread emails from the last 24h\\')" class="flex flex-col items-start p-md bg-white border border-outline-variant rounded-lg hover:border-primary transition-colors text-left group shadow-sm">' +
+          '<span class="material-symbols-outlined text-primary mb-base">mail</span>' +
+          '<span class="font-label-sm text-label-sm text-on-surface font-semibold">Summarize emails</span>' +
+          '<span class="font-body-sm text-body-sm text-on-surface-variant opacity-60 group-hover:opacity-100 transition-opacity">Last 24 hours</span>' +
+          '</button>' +
+          '<button onclick="injectDemoQuestion(\\'What is my schedule for today and tomorrow?\\')" class="flex flex-col items-start p-md bg-white border border-outline-variant rounded-lg hover:border-primary transition-colors text-left group shadow-sm">' +
+          '<span class="material-symbols-outlined text-primary mb-base">calendar_month</span>' +
+          '<span class="font-label-sm text-label-sm text-on-surface font-semibold">Check schedule</span>' +
+          '<span class="font-body-sm text-body-sm text-on-surface-variant opacity-60 group-hover:opacity-100 transition-opacity">Upcoming events</span>' +
+          '</button>' +
+          '<button onclick="injectDemoQuestion(\\'List open pull requests in my repositories\\')" class="flex flex-col items-start p-md bg-white border border-outline-variant rounded-lg hover:border-primary transition-colors text-left group shadow-sm">' +
+          '<span class="material-symbols-outlined text-primary mb-base">code</span>' +
+          '<span class="font-label-sm text-label-sm text-on-surface font-semibold">GitHub PRs</span>' +
+          '<span class="font-body-sm text-body-sm text-on-surface-variant opacity-60 group-hover:opacity-100 transition-opacity">Review status</span>' +
+          '</button>' +
+          '<button onclick="injectDemoQuestion(\\'Find my recent 2FA codes from SMS\\')" class="flex flex-col items-start p-md bg-white border border-outline-variant rounded-lg hover:border-primary transition-colors text-left group shadow-sm">' +
+          '<span class="material-symbols-outlined text-primary mb-base">sms</span>' +
+          '<span class="font-label-sm text-label-sm text-on-surface font-semibold">Find SMS codes</span>' +
+          '<span class="font-body-sm text-body-sm text-on-surface-variant opacity-60 group-hover:opacity-100 transition-opacity">Recent 2FA</span>' +
+          '</button>' +
+          '</div>' +
           '</div>';
       } else {
+        messagesHtml += '<div class="space-y-md">';
         chat.messages.forEach(function(msg) {
           var isUser = msg.role === 'user';
           var bubbleContent = isUser
-            ? '<span style="white-space:pre-wrap;word-break:break-word">' + escapeHtml(msg.content) + '</span>'
+            ? '<span class="whitespace-pre-wrap break-words">' + escapeHtml(msg.content) + '</span>'
             : renderMessageContent(msg);
-          messagesHtml += '<div style="display:flex;justify-content:' + (isUser ? 'flex-end' : 'flex-start') + ';margin-bottom:12px">' +
-            '<div style="max-width:85%;padding:10px 14px;border-radius:' + (isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px') + ';' +
-            'background:' + (isUser ? 'var(--primary)' : 'var(--card-bg)') + ';' +
-            'color:' + (isUser ? '#fff' : 'var(--fg)') + ';' +
-            'border:' + (isUser ? 'none' : '1px solid var(--border)') + ';' +
-            'font-size:14px;line-height:1.5">' +
+          messagesHtml += '<div class="flex ' + (isUser ? 'justify-end' : 'justify-start') + '">' +
+            '<div class="' + (isUser ? 'bg-primary text-on-primary rounded-2xl rounded-tr-sm' : 'bg-white border border-outline-variant text-on-background rounded-2xl rounded-tl-sm') + ' px-4 py-2.5 max-w-[85%] shadow-sm font-body-sm text-body-sm leading-relaxed">' +
             bubbleContent + '</div></div>';
         });
+        messagesHtml += '</div>';
       }
 
       var smsPendingHtml = '';
       if (smsPending.length) {
+        smsPendingHtml += '<div class="space-y-sm mt-md">';
         smsPending.forEach(function(a) {
           var data = typeof a.action_data === 'string' ? JSON.parse(a.action_data) : a.action_data;
           var safeId = a.action_id.replace(/'/g, "\\\\'");
           var safeTo = (data.to || '').replace(/'/g, "\\\\'");
           var safeBody = (data.body || '').replace(/'/g, "\\\\'");
-          smsPendingHtml += '<div style="margin:8px 0;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--card-bg)">' +
-            '<div style="font-size:12px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Staged SMS</div>' +
-            '<div style="font-size:14px;margin-bottom:4px"><strong>To:</strong> ' + escapeHtml(data.to || '') + '</div>' +
-            '<div style="font-size:14px;margin-bottom:12px;white-space:pre-wrap">' + escapeHtml(data.body || '') + '</div>' +
-            '<div style="display:flex;gap:8px">' +
-            '<button class="btn btn-outline btn-sm" style="color:var(--destructive);border-color:rgba(239,68,68,0.3)" onclick="rejectSmsAction(\\'' + safeId + '\\')">Deny</button>' +
-            '<button class="btn btn-sm" style="background:var(--primary);color:#fff" onclick="sendSmsAction(\\'' + safeId + '\\',\\'' + safeTo + '\\',\\'' + safeBody + '\\')">Send SMS</button>' +
+          smsPendingHtml += '<div class="bg-white border border-outline-variant rounded-xl p-md shadow-sm max-w-[85%] space-y-sm">' +
+            '<div class="font-mono-label text-mono-label text-on-surface-variant uppercase tracking-wider">Staged SMS</div>' +
+            '<div class="font-body-sm text-body-sm text-on-surface"><strong>To:</strong> ' + escapeHtml(data.to || '') + '</div>' +
+            '<div class="font-body-sm text-body-sm text-on-surface-variant whitespace-pre-wrap">' + escapeHtml(data.body || '') + '</div>' +
+            '<div class="flex gap-sm">' +
+            '<button class="border border-error/30 text-error hover:bg-error-container/20 px-4 py-1.5 rounded-lg font-label-caps text-label-caps transition-all active:scale-95" onclick="rejectSmsAction(\\'' + safeId + '\\')">Deny</button>' +
+            '<button class="bg-primary hover:bg-primary-hover text-on-primary px-4 py-1.5 rounded-lg font-label-caps text-label-caps transition-all active:scale-95 shadow-sm" onclick="sendSmsAction(\\'' + safeId + '\\',\\'' + safeTo + '\\',\\'' + safeBody + '\\')">Send SMS</button>' +
             '</div></div>';
         });
+        smsPendingHtml += '</div>';
       }
 
       var loadingHtml = chat.loading
-        ? '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;color:var(--muted);font-size:13px"><div class="spinner" style="width:16px;height:16px;border-width:2px"></div>Thinking…</div>'
+        ? '<div class="flex items-center gap-xs text-on-surface-variant/70 font-body-sm text-body-sm py-xs"><div class="spinner w-4 h-4 shrink-0"></div>Thinking…</div>'
         : '';
       var errorHtml = chat.error
-        ? '<div style="padding:8px 12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;color:var(--destructive);font-size:13px;margin-top:8px">' + escapeHtml(chat.error) + '</div>'
+        ? '<div class="p-md bg-error-container text-on-error-container border border-error/20 rounded-xl font-body-sm text-body-sm shadow-sm mt-md">' + escapeHtml(chat.error) + '</div>'
         : '';
 
-      return '<div class="chat-container">' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)">' +
-        '<h2 style="margin:0;display:flex;align-items:center;gap:8px">' +
-        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>' +
-        'Chat</h2>' +
-        '<button class="btn btn-outline btn-sm" onclick="clearChat()">Clear</button>' +
-        '</div>' +
-        '<div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px 20px">' +
-        messagesHtml + smsPendingHtml + loadingHtml + errorHtml +
-        '</div>' +
-        '<div style="padding:12px 20px;border-top:1px solid var(--border)">' +
-        '<div style="display:flex;gap:8px">' +
-        '<input id="chat-input" type="text" placeholder="Ask about your data…" ' +
-        'style="flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:var(--card-bg);color:var(--fg)" ' +
-        'onkeydown="if(event.key===\\'Enter\\'&&!event.shiftKey){event.preventDefault();sendChatMessage();}" ' +
-        (chat.loading ? 'disabled ' : '') + '/>' +
-        '<button id="voice-btn" title="Voice input" onclick="toggleVoiceInput()" style="padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card-bg);color:var(--muted);cursor:pointer;font-size:16px;display:flex;align-items:center">' +
-        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>' +
-        '</button>' +
-        '<button class="btn btn-primary" onclick="sendChatMessage()" ' + (chat.loading ? 'disabled ' : '') + 'style="padding:10px 18px">Send</button>' +
-        '</div></div></div>';
+      var mainLayout = '<div class="flex flex-col h-full bg-background">';
+      mainLayout += '  <header class="flex justify-between items-center px-margin h-16 border-b border-outline-variant bg-surface shrink-0">';
+      mainLayout += '    <div class="flex items-center gap-sm">';
+      mainLayout += '      <span class="material-symbols-outlined text-primary">smart_toy</span>';
+      mainLayout += '      <h1 class="font-headline-md text-headline-md font-bold text-primary">AI Studio</h1>';
+      mainLayout += '    </div>';
+      mainLayout += '    <button class="w-10 h-10 flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high rounded-full transition-colors" onclick="clearChat()" title="Clear conversation">';
+      mainLayout += '      <span class="material-symbols-outlined text-[20px]">delete</span>';
+      mainLayout += '    </button>';
+      mainLayout += '  </header>';
+      mainLayout += '  <div id="chat-messages" class="flex-grow overflow-y-auto px-margin py-md flex flex-col justify-between">';
+      mainLayout += '    <div class="flex-grow flex flex-col justify-center min-h-[70%]">';
+      mainLayout += '      ' + messagesHtml;
+      mainLayout += '    </div>';
+      mainLayout += '    <div class="shrink-0 space-y-sm">';
+      mainLayout += '      ' + smsPendingHtml;
+      mainLayout += '      ' + loadingHtml;
+      mainLayout += '      ' + errorHtml;
+      mainLayout += '    </div>';
+      mainLayout += '  </div>';
+      mainLayout += '  <div class="p-margin border-t border-outline-variant bg-surface shrink-0">';
+      mainLayout += '    <div class="max-w-3xl mx-auto flex gap-xs items-center bg-surface-container-low border border-outline-variant rounded-xl p-xs shadow-sm">';
+      mainLayout += '      <button id="voice-btn" title="Voice input" onclick="toggleVoiceInput()" class="w-10 h-10 flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high rounded-lg transition-colors">';
+      mainLayout += '        <span class="material-symbols-outlined">mic</span>';
+      mainLayout += '      </button>';
+      mainLayout += '      <input id="chat-input" type="text" placeholder="Ask about your data..." class="flex-grow bg-transparent border-none focus:ring-0 font-body-md text-body-md text-on-surface placeholder:text-on-surface-variant/60" onkeydown="if(event.key===\\'Enter\\'&&!event.shiftKey){event.preventDefault();sendChatMessage();}" ' + (chat.loading ? 'disabled' : '') + ' />';
+      mainLayout += '      <button onclick="sendChatMessage()" ' + (chat.loading ? 'disabled' : '') + ' class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-lg py-sm rounded-lg transition-all active:scale-95 flex items-center gap-xs shadow-md shrink-0">';
+      mainLayout += '        <span>Send</span>';
+      mainLayout += '        <span class="material-symbols-outlined text-sm">send</span>';
+      mainLayout += '      </button>';
+      mainLayout += '    </div>';
+      mainLayout += '  </div>';
+      mainLayout += '</div>';
+      return mainLayout;
     }
 
     var _voiceRecognition = null;
@@ -2563,7 +2666,10 @@ function getIndexHtml(): string {
       ];
       return providers.map(function(p) {
         var sel = state.settingsProvider === p.value;
-        return '<button onclick="selectProvider(\\'' + p.value + '\\')" style="padding:9px 16px;border:1px solid ' + (sel ? 'var(--primary)' : 'var(--border)') + ';border-radius:20px;background:' + (sel ? 'rgba(15,160,129,0.1)' : 'var(--card)') + ';color:' + (sel ? 'var(--primary)' : 'var(--fg)') + ';font-size:14px;font-weight:' + (sel ? '600' : '400') + ';cursor:pointer;font-family:inherit;white-space:nowrap">' + p.label + '</button>';
+        var btnClass = sel 
+          ? 'bg-primary text-on-primary font-semibold shadow-sm'
+          : 'bg-white text-on-surface-variant hover:bg-surface-container-high border border-outline-variant transition-colors';
+        return '<button onclick="selectProvider(\\'' + p.value + '\\')" class="px-4 py-1.5 rounded-full font-label-sm text-label-sm font-semibold shadow-sm ' + btnClass + '">' + p.label + '</button>';
       }).join('');
     }
 
@@ -2666,7 +2772,7 @@ function getIndexHtml(): string {
 
     function renderLogicalEditor(id, logicTree) {
       var isAdding = id === 'new';
-      var html = '<div style="display:flex;flex-direction:column;gap:8px;margin-top:6px">';
+      var html = '<div class="flex flex-col gap-sm mt-xs">';
       
       (logicTree || []).forEach(function(node, index) {
         var nodeId = escapeAttr(node.id || '');
@@ -2674,43 +2780,60 @@ function getIndexHtml(): string {
         var condition = node.condition || '';
         var action = node.action || '';
         
-        html += '<div style="display:flex;align-items:center;gap:6px;background:rgba(90,107,122,0.03);padding:8px 10px;border-radius:8px;border:1px solid var(--border);flex-wrap:wrap">';
+        var isElse = type === 'ELSE';
+        var isContext = type === 'CONTEXT';
+        var cardBorder = isElse ? 'border-2 border-primary-container/30' : 'border border-outline-variant';
         
-        // Node Type selector
-        html += '<select onchange="updateLogicNodeType(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'),' + index + ',this.value)" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:12px;width:75px">';
+        html += '<div class="bg-white rounded-xl ' + cardBorder + ' logic-card-shadow p-sm space-y-sm relative group">';
+        
+        // Remove button
+        if ((logicTree || []).length > 1) {
+          html += '<button onclick="removeLogicNode(\\'' + id + '\\',' + index + ')" class="absolute top-2 right-2 text-error opacity-40 group-hover:opacity-100 transition-opacity">' +
+            '<span class="material-symbols-outlined text-[18px]">close</span>' +
+            '</button>';
+        }
+        
+        // Header row
+        html += '<div class="flex items-center gap-xs flex-wrap">';
+        // Type select
+        html += '<div class="bg-surface-container-high rounded px-2 py-1 flex items-center gap-1">';
+        html += '<select onchange="updateLogicNodeType(\\'' + id + '\\',' + index + ',this.value)" class="text-label-sm font-label-sm font-bold text-on-surface bg-transparent border-none p-0 focus:ring-0 cursor-pointer">';
         html += '<option value="IF"' + (type === 'IF' ? ' selected' : '') + '>IF</option>';
         html += '<option value="ELIF"' + (type === 'ELIF' ? ' selected' : '') + '>ELIF</option>';
         html += '<option value="ELSE"' + (type === 'ELSE' ? ' selected' : '') + '>ELSE</option>';
         html += '<option value="CONTEXT"' + (type === 'CONTEXT' ? ' selected' : '') + '>CONTEXT</option>';
         html += '</select>';
+        html += '</div>';
         
         // Condition Input (hidden if ELSE or CONTEXT)
-        if (type === 'ELSE' || type === 'CONTEXT') {
-          html += '<div style="flex:1;font-size:12px;color:var(--muted);font-style:italic">' + (type === 'ELSE' ? 'otherwise' : 'background context') + '</div>';
+        if (isElse) {
+          html += '<div class="flex-grow italic text-on-surface-variant text-body-sm font-body-sm">otherwise</div>';
+        } else if (isContext) {
+          html += '<div class="flex-grow italic text-on-surface-variant text-body-sm font-body-sm">background context</div>';
         } else {
-          html += '<input type="text" value="' + escapeAttr(condition) + '" oninput="updateLogicNodeCondition(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'),' + index + ',this.value)" onblur="performSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" placeholder="e.g., user asks for pricing" style="flex:1;min-width:140px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:12px;box-sizing:border-box">';
+          html += '<div class="flex-grow border-b border-outline-variant pb-base">';
+          html += '<input type="text" value="' + escapeAttr(condition) + '" oninput="updateLogicNodeCondition(\\'' + id + '\\',' + index + ',this.value)" onblur="performSkillAutoSave(\\'' + id + '\\')" placeholder="e.g., user asks for pricing" class="w-full border-none focus:ring-0 p-0 text-body-sm font-body-sm italic text-on-surface bg-transparent">';
+          html += '</div>';
         }
+        
+        html += '<span class="text-mono-label font-mono-label text-on-surface-variant">' + (isContext ? 'INFO' : 'THEN') + '</span>';
+        html += '</div>';
         
         // Action Input
-        var actionPlaceholder = type === 'CONTEXT' ? 'e.g., check all calendars for conflicts' : 'e.g., send pricing PDF';
-        if (type !== 'CONTEXT') {
-          html += '<span style="font-size:11px;color:var(--muted);font-weight:600">THEN</span>';
-        } else {
-          html += '<span style="font-size:11px;color:var(--muted);font-weight:600">INFO</span>';
-        }
-        html += '<input type="text" value="' + escapeAttr(action) + '" oninput="updateLogicNodeAction(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'),' + index + ',this.value)" onblur="performSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" placeholder="' + actionPlaceholder + '" style="flex:1;min-width:140px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:12px;box-sizing:border-box">';
-        
-        // Delete Node Button
-        if ((logicTree || []).length > 1) {
-          html += '<button onclick="removeLogicNode(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'),' + index + ')" title="Remove rule" style="background:none;border:none;cursor:pointer;color:rgba(239,68,68,0.8);font-size:16px;line-height:1;padding:2px 6px;border-radius:4px;display:flex;align-items:center;justify-content:center">×</button>';
-        }
+        var actionPlaceholder = isContext ? 'e.g., check all calendars for conflicts' : 'e.g., send pricing PDF';
+        html += '<div class="bg-surface-container-lowest border border-outline-variant rounded-lg p-2 shadow-sm">';
+        html += '<textarea oninput="updateLogicNodeAction(\\'' + id + '\\',' + index + ',this.value)" onblur="performSkillAutoSave(\\'' + id + '\\')" placeholder="' + actionPlaceholder + '" class="w-full border-none focus:ring-0 p-0 text-body-sm font-body-sm text-on-surface bg-transparent resize-none" rows="1">' + escapeHtml(action) + '</textarea>';
+        html += '</div>';
         
         html += '</div>';
       });
       
       // Add Node Button
-      html += '<div style="display:flex;justify-content:flex-start;margin-top:2px">';
-      html += '<button class="btn btn-outline btn-sm" onclick="addLogicNode(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" style="font-size:11px;padding:3px 6px;height:auto;line-height:1">+ Add rule</button>';
+      html += '<div class="flex justify-start pt-base">';
+      html += '<button onclick="addLogicNode(\\'' + id + '\\')" class="w-full py-2 border-2 border-dashed border-outline-variant rounded-xl text-on-surface-variant font-label-sm text-label-sm hover:border-primary hover:text-primary transition-all flex items-center justify-center gap-1">';
+      html += '<span class="material-symbols-outlined text-[18px]">add</span>';
+      html += '<span>Add Logic Step</span>';
+      html += '</button>';
       html += '</div>';
       
       html += '</div>';
@@ -2940,13 +3063,13 @@ function getIndexHtml(): string {
       var safeId = escapeAttr(s.id);
       var isActive = !!s.enabled;
       var isTranslating = !!sk.isTranslating[s.id];
-      var borderColor = isEditing ? 'var(--primary)' : isActive ? 'rgba(15,160,129,0.4)' : 'var(--border)';
-      var html = '<div data-skill-id="' + safeId + '" style="position:relative;background:var(--card-bg);border:1px solid ' + borderColor + ';border-radius:10px;padding:14px;transition:border-color 0.15s">';
+      var borderStyle = isEditing ? 'border-primary shadow-md' : isActive ? 'border-primary/50 hover:border-primary shadow-sm bg-white' : 'border-outline-variant hover:border-primary/30 shadow-sm bg-white';
+      var html = '<div data-skill-id="' + safeId + '" class="border rounded-xl p-md transition-all relative ' + borderStyle + '">';
       
       if (isTranslating) {
-        html += '<div style="position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.7);z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;gap:8px">';
-        html += '<div style="border:3px solid var(--border);border-top:3px solid var(--primary);border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite"></div>';
-        html += '<span style="font-size:12px;font-weight:600;color:#000">Translating...</span>';
+        html += '<div class="absolute inset-0 bg-white/70 z-10 flex flex-col items-center justify-center rounded-xl gap-sm">';
+        html += '<div class="spinner w-6 h-6"></div>';
+        html += '<span class="font-label-sm text-label-sm font-bold text-on-surface">Translating...</span>';
         html += '</div>';
       }
 
@@ -2957,43 +3080,48 @@ function getIndexHtml(): string {
         
         var currentView = sk.editContent.current_view || 'SUMMARIZED';
 
-        html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px">';
-        html += '<span style="font-size:13px;font-weight:600;color:var(--muted)">Editing Skill</span>';
-        html += '<div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--input-bg,var(--bg))">';
-        html += '<button onclick="toggleEditSkillView(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" style="background:' + (currentView === 'LOGICAL' ? 'var(--primary)' : 'none') + ';color:' + (currentView === 'LOGICAL' ? '#fff' : 'var(--fg)') + ';border:none;padding:4px 8px;font-size:11px;font-weight:500;cursor:pointer">Logical</button>';
-        html += '<button onclick="toggleEditSkillView(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" style="background:' + (currentView === 'SUMMARIZED' ? 'var(--primary)' : 'none') + ';color:' + (currentView === 'SUMMARIZED' ? '#fff' : 'var(--fg)') + ';border:none;padding:4px 8px;font-size:11px;font-weight:500;cursor:pointer">Summarized</button>';
+        html += '<div class="flex items-center justify-between gap-sm mb-sm">';
+        html += '<span class="font-label-caps text-label-caps text-on-surface-variant">Editing Skill</span>';
+        html += '<div class="flex border border-outline-variant rounded-lg overflow-hidden bg-surface-container-low p-0.5">';
+        html += '<button onclick="toggleEditSkillView(\\'' + safeId + '\\')" class="font-label-sm text-label-sm px-3 py-1 rounded-md transition-colors ' + (currentView === 'LOGICAL' ? 'bg-primary text-on-primary font-semibold shadow-sm' : 'text-on-surface-variant hover:text-on-surface') + '">Logical</button>';
+        html += '<button onclick="toggleEditSkillView(\\'' + safeId + '\\')" class="font-label-sm text-label-sm px-3 py-1 rounded-md transition-colors ' + (currentView === 'SUMMARIZED' ? 'bg-primary text-on-primary font-semibold shadow-sm' : 'text-on-surface-variant hover:text-on-surface') + '">Summarized</button>';
         html += '</div>';
         html += '</div>';
 
-        html += '<div style="display:grid;gap:10px">';
-        html += '<div style="display:flex;gap:8px">';
-        html += '<input id="edit-skill-name-' + safeId + '" value="' + escapeAttr(sk.editContent.name) + '" oninput="state.skills.editContent.name=this.value; triggerSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" onblur="performSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" placeholder="Skill name" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;box-sizing:border-box">';
-        html += '<select id="edit-skill-trigger-' + safeId + '" onchange="state.skills.editContent.trigger_event=this.value; triggerSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\')); render()" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:13px">' + triggerOptions + '</select>';
+        html += '<div class="space-y-sm">';
+        html += '<div class="flex gap-sm">';
+        html += '<input id="edit-skill-name-' + safeId + '" value="' + escapeAttr(sk.editContent.name) + '" oninput="state.skills.editContent.name=this.value; triggerSkillAutoSave(\\'' + safeId + '\\')" onblur="performSkillAutoSave(\\'' + safeId + '\\')" placeholder="Skill name" class="flex-grow bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
+        html += '<select id="edit-skill-trigger-' + safeId + '" onchange="state.skills.editContent.trigger_event=this.value; triggerSkillAutoSave(\\'' + safeId + '\\'); render()" class="bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">' + triggerOptions + '</select>';
         html += '</div>';
         
         if (currentView === 'LOGICAL') {
           html += renderLogicalEditor(s.id, sk.editContent.logic_tree);
         } else {
-          html += '<textarea id="edit-skill-instructions-' + safeId + '" oninput="state.skills.editContent.instructions=this.value; triggerSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" onblur="performSkillAutoSave(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" placeholder="Describe what the AI should do when this trigger fires…" style="width:100%;min-height:120px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">' + escapeHtml(sk.editContent.instructions) + '</textarea>';
+          html += '<textarea id="edit-skill-instructions-' + safeId + '" oninput="state.skills.editContent.instructions=this.value; triggerSkillAutoSave(\\'' + safeId + '\\')" onblur="performSkillAutoSave(\\'' + safeId + '\\')" placeholder="Describe what the AI should do when this trigger fires…" class="w-full bg-white border border-outline-variant rounded-lg p-md text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm min-h-[120px]" rows="4">' + escapeHtml(sk.editContent.instructions) + '</textarea>';
         }
         
-        html += '</div><div style="display:flex;gap:8px;margin-top:12px">';
-        html += '<button class="btn btn-primary" onclick="saveEditSkill(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" style="font-size:13px">Save</button>';
-        html += '<button class="btn btn-ghost" onclick="cancelEditSkill()" style="font-size:13px">Cancel</button>';
+        html += '</div><div class="flex gap-sm mt-md">';
+        html += '<button onclick="saveEditSkill(\\'' + safeId + '\\')" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-6 py-2 rounded-xl transition-all active:scale-95 shadow-sm">Save</button>';
+        html += '<button onclick="cancelEditSkill()" class="border border-outline text-on-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps px-6 py-2 rounded-xl transition-all active:scale-95">Cancel</button>';
         html += '</div>';
       } else {
-        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">';
-        html += '<span style="font-size:14px;font-weight:600;flex:1">' + escapeHtml(s.name) + '</span>';
-        html += '<span style="font-size:11px;background:' + (isActive ? 'rgba(15,160,129,0.12)' : 'rgba(90,107,122,0.1)') + ';color:' + (isActive ? 'var(--primary)' : 'var(--muted)') + ';padding:2px 8px;border-radius:9999px;white-space:nowrap">' + (SKILL_TRIGGERS.find(function(t){return t.key===s.trigger_event;})||{label:s.trigger_event}).label + '</span>';
-        if (isActive) html += '<span style="font-size:11px;background:rgba(15,160,129,0.12);color:var(--primary);padding:2px 8px;border-radius:9999px">active</span>';
-        html += '<button onclick="startEditSkill(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px">';
-        html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>';
-        html += '<button onclick="deleteSkill(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:3px 5px;border-radius:5px;font-size:16px;line-height:1">×</button>';
+        html += '<div class="flex items-start justify-between gap-sm mb-xs">';
+        html += '<div class="flex items-center gap-xs flex-wrap">';
+        html += '<span class="font-body-md text-body-md font-bold text-on-surface">' + escapeHtml(s.name) + '</span>';
+        html += '<span class="font-mono-label text-mono-label bg-surface-container text-on-surface-variant px-xs py-0.5 rounded uppercase">' + (SKILL_TRIGGERS.find(function(t){return t.key===s.trigger_event;})||{label:s.trigger_event}).label + '</span>';
+        if (isActive) {
+          html += '<span class="font-mono-label text-mono-label bg-primary-container text-on-primary-container px-xs py-0.5 rounded uppercase font-semibold">active</span>';
+        }
+        html += '</div>';
+        html += '<div class="flex gap-xs items-center shrink-0">';
+        html += '<button onclick="startEditSkill(\\'' + safeId + '\\')" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-container-high text-on-surface-variant transition-colors" title="Edit"><span class="material-symbols-outlined text-[18px]">edit</span></button>';
+        html += '<button onclick="deleteSkill(\\'' + safeId + '\\')" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-container-high text-error transition-colors" title="Delete"><span class="material-symbols-outlined text-[18px]">close</span></button>';
+        html += '</div>';
         html += '</div>';
         
-        html += '<p style="margin:0 0 12px;font-size:13px;color:var(--fg);white-space:pre-wrap;word-break:break-word;line-height:1.6">' + escapeHtml(s.instructions) + '</p>';
+        html += '<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed whitespace-pre-wrap break-words mb-md">' + escapeHtml(s.instructions) + '</p>';
         if (!isActive) {
-          html += '<button onclick="activateSkill(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'),\\'' + escapeAttr(s.trigger_event) + '\\')" class="btn btn-outline btn-sm" style="font-size:12px">Set as active</button>';
+          html += '<button onclick="activateSkill(\\'' + safeId + '\\',\\'' + escapeAttr(s.trigger_event) + '\\')" class="border border-primary text-primary hover:bg-primary-container/10 font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 shadow-sm">Set as active</button>';
         }
       }
       html += '</div>';
@@ -3002,68 +3130,92 @@ function getIndexHtml(): string {
 
     function renderSkillTab() {
       var sk = state.skills;
-      var html = '<div style="max-width:680px;margin:0 auto;padding:16px">';
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">';
-      html += '<div><h2 style="margin:0 0 4px">Skills</h2>';
-      html += '<p style="margin:0;font-size:13px;color:var(--muted)">One active skill per trigger. Injected into the AI prompt when that event fires.</p></div>';
-      html += '<button class="btn ' + (sk.adding ? 'btn-ghost' : 'btn-primary') + '" onclick="toggleAddSkill()" style="font-size:13px">' + (sk.adding ? 'Cancel' : '+ New skill') + '</button>';
+      var html = '<div class="flex flex-col h-full bg-background">';
+
+      // TopBar
+      html += '<header class="flex justify-between items-center px-margin h-16 border-b border-outline-variant bg-surface shrink-0">';
+      html += '<div class="flex items-center gap-sm">';
+      html += '<span class="material-symbols-outlined text-primary">smart_toy</span>';
+      html += '<h1 class="font-headline-md text-headline-md font-bold text-primary">AI Studio</h1>';
       html += '</div>';
+      html += '</header>';
+
+      // Content area
+      html += '<div class="flex-grow overflow-y-auto px-margin py-md space-y-md max-w-2xl mx-auto w-full pb-24">';
+
+      // Title block
+      html += '<div class="flex justify-between items-end pb-xs border-b border-outline-variant/60">';
+      html += '<div class="flex flex-col gap-base">';
+      html += '<h2 class="font-headline-lg text-headline-lg text-on-surface">Skills</h2>';
+      html += '<p class="font-body-sm text-body-sm text-on-surface-variant">One active skill per trigger event. Injected into the AI prompt when that event fires.</p>';
+      html += '</div>';
+      html += '<button onclick="toggleAddSkill()" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-4 py-2 rounded-xl transition-all active:scale-95 flex items-center gap-xs shadow-sm">';
+      html += '<span class="material-symbols-outlined text-[18px]">add</span>';
+      html += '<span>' + (sk.adding ? 'Cancel' : 'New skill') + '</span>';
+      html += '</button>';
+      html += '</div>';
+
       if (sk.error) {
-        html += '<div style="padding:10px 14px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;color:#ef4444;font-size:14px;margin-bottom:12px">' + escapeHtml(sk.error) + '</div>';
+        html += '<div class="p-md bg-error-container text-on-error-container border border-error/20 rounded-xl font-body-sm text-body-sm shadow-sm">' + escapeHtml(sk.error) + '</div>';
       }
+
       if (sk.adding) {
         var triggerOpts = SKILL_TRIGGERS.map(function(t) { return '<option value="' + t.key + '">' + t.label + '</option>'; }).join('');
         var isTranslatingNew = !!sk.isTranslating['new'];
         var currentViewNew = sk.newCurrentView || 'SUMMARIZED';
         
-        html += '<div data-skill-id="new" style="position:relative;background:var(--card-bg);border:1px solid var(--primary);border-radius:10px;padding:14px;margin-bottom:16px">';
+        html += '<div data-skill-id="new" class="bg-surface-container-low border border-primary/40 rounded-xl p-md space-y-sm shadow-md relative">';
         
         if (isTranslatingNew) {
-          html += '<div style="position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.7);z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;gap:8px">';
-          html += '<div style="border:3px solid var(--border);border-top:3px solid var(--primary);border-radius:50%;width:24px;height:24px;animation:spin 1s linear infinite"></div>';
-          html += '<span style="font-size:12px;font-weight:600;color:#000">Translating...</span>';
+          html += '<div class="absolute inset-0 bg-white/70 z-10 flex flex-col items-center justify-center rounded-xl gap-sm">';
+          html += '<div class="spinner w-6 h-6"></div>';
+          html += '<span class="font-label-sm text-label-sm font-bold text-on-surface">Translating...</span>';
           html += '</div>';
         }
         
-        html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px">';
-        html += '<span style="font-size:13px;font-weight:600;color:var(--muted)">New Skill</span>';
-        html += '<div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--input-bg,var(--bg))">';
-        html += '<button onclick="toggleEditSkillView(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" style="background:' + (currentViewNew === 'LOGICAL' ? 'var(--primary)' : 'none') + ';color:' + (currentViewNew === 'LOGICAL' ? '#fff' : 'var(--fg)') + ';border:none;padding:4px 8px;font-size:11px;font-weight:500;cursor:pointer">Logical</button>';
-        html += '<button onclick="toggleEditSkillView(this.closest(\\'[data-skill-id]\\').getAttribute(\\'data-skill-id\\'))" style="background:' + (currentViewNew === 'SUMMARIZED' ? 'var(--primary)' : 'none') + ';color:' + (currentViewNew === 'SUMMARIZED' ? '#fff' : 'var(--fg)') + ';border:none;padding:4px 8px;font-size:11px;font-weight:500;cursor:pointer">Summarized</button>';
+        html += '<div class="flex items-center justify-between gap-sm mb-xs">';
+        html += '<span class="font-label-caps text-label-caps text-on-surface-variant">New Skill</span>';
+        html += '<div class="flex border border-outline-variant rounded-lg overflow-hidden bg-white p-0.5">';
+        html += '<button onclick="toggleEditSkillView(\\'new\\')" class="font-label-sm text-label-sm px-3 py-1 rounded-md transition-colors ' + (currentViewNew === 'LOGICAL' ? 'bg-primary text-on-primary font-semibold shadow-sm' : 'text-on-surface-variant hover:text-on-surface') + '">Logical</button>';
+        html += '<button onclick="toggleEditSkillView(\\'new\\')" class="font-label-sm text-label-sm px-3 py-1 rounded-md transition-colors ' + (currentViewNew === 'SUMMARIZED' ? 'bg-primary text-on-primary font-semibold shadow-sm' : 'text-on-surface-variant hover:text-on-surface') + '">Summarized</button>';
         html += '</div>';
         html += '</div>';
 
-        html += '<div style="display:grid;gap:10px">';
-        html += '<div style="display:flex;gap:8px">';
-        html += '<input id="new-skill-name" placeholder="Skill name" value="' + escapeAttr(sk.newName) + '" oninput="state.skills.newName=this.value" style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;box-sizing:border-box">';
-        html += '<select id="new-skill-trigger" onchange="state.skills.newTrigger=this.value; render()" style="padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:13px">' + triggerOpts + '</select>';
+        html += '<div class="space-y-sm">';
+        html += '<div class="flex gap-sm">';
+        html += '<input id="new-skill-name" placeholder="Skill name" value="' + escapeAttr(sk.newName) + '" oninput="state.skills.newName=this.value" class="flex-grow bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
+        html += '<select id="new-skill-trigger" onchange="state.skills.newTrigger=this.value; render()" class="bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">' + triggerOpts + '</select>';
         html += '</div>';
         
         if (currentViewNew === 'LOGICAL') {
           html += renderLogicalEditor('new', sk.newLogicTree);
         } else {
-          html += '<textarea id="new-skill-instructions" placeholder="Describe what the AI should do when this trigger fires — context to check, reply style, behavioral rules, anything." oninput="state.skills.newInstructions=this.value" style="width:100%;min-height:120px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--input-bg,var(--bg));color:var(--fg);font-size:14px;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.5">' + escapeHtml(sk.newInstructions) + '</textarea>';
+          html += '<textarea id="new-skill-instructions" placeholder="Describe what the AI should do when this trigger fires — context to check, reply style, behavioral rules, anything." oninput="state.skills.newInstructions=this.value" class="w-full bg-white border border-outline-variant rounded-lg p-md text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm min-h-[120px]" rows="4">' + escapeHtml(sk.newInstructions) + '</textarea>';
         }
         
-        html += '</div><div style="display:flex;gap:8px;margin-top:10px">';
-        html += '<button class="btn btn-primary" onclick="submitNewSkill()" style="font-size:13px">Save</button>';
-        html += '<button class="btn btn-ghost" onclick="toggleAddSkill()" style="font-size:13px">Cancel</button>';
+        html += '</div><div class="flex gap-sm mt-md">';
+        html += '<button onclick="submitNewSkill()" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-6 py-2 rounded-xl transition-all active:scale-95 shadow-sm">Save</button>';
+        html += '<button onclick="toggleAddSkill()" class="border border-outline text-on-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps px-6 py-2 rounded-xl transition-all active:scale-95">Cancel</button>';
         html += '</div></div>';
       }
+
       if (sk.loading && !sk.items.length) {
-        html += '<p style="color:var(--muted);text-align:center;padding:40px 0">Loading…</p>';
+        html += '<div class="flex items-center justify-center p-xl"><div class="spinner w-8 h-8"></div></div>';
       } else if (!sk.items.length && !sk.adding) {
-        html += '<div style="text-align:center;padding:60px 20px;color:var(--muted)">';
-        html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;margin-bottom:12px;opacity:0.4"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
-        html += '<p style="margin:0;font-size:15px;font-weight:500">No skills yet</p>';
-        html += '<p style="margin:8px 0 0;font-size:13px">Create a skill to guide the AI\\\'s behavior when a trigger fires.</p>';
+        html += '<div class="bg-surface-container-low border border-outline-variant rounded-xl p-xl flex flex-col items-center justify-center text-center min-h-[300px]">';
+        html += '<div class="w-16 h-16 bg-white border border-outline-variant rounded-2xl flex items-center justify-center mb-md shadow-sm">';
+        html += '<span class="material-symbols-outlined text-primary text-3xl">bolt</span>';
+        html += '</div>';
+        html += '<h3 class="font-headline-md text-headline-md text-on-surface mb-xs">No skills yet</h3>';
+        html += '<p class="font-body-sm text-body-sm text-on-surface-variant max-w-sm">Create a skill to guide the AI\\\'s behavior when a trigger fires.</p>';
         html += '</div>';
       } else {
-        html += '<div style="display:grid;gap:10px">';
+        html += '<div class="space-y-sm">';
         sk.items.forEach(function(s) { html += renderSkillCard(s); });
         html += '</div>';
       }
-      html += '</div>';
+
+      html += '</div></div>';
       return html;
     }
 
@@ -3311,7 +3463,7 @@ function getIndexHtml(): string {
     }
     window.activateSkill = activateSkill;
 
-    async function deleteSkill(id) {
+async function deleteSkill(id) {
       if (!confirm('Delete this skill?')) return;
       await fetch('/api/skills/' + id, { method: 'DELETE' });
       await loadSkillsAsync();
@@ -3320,97 +3472,248 @@ function getIndexHtml(): string {
 
     function renderSettingsTab() {
       var aiConfigured = state.chat.aiAvailable;
-      return \`
-        <div class="card">
-          <h2>AI Assistant</h2>
-          <p style="font-size:14px;color:var(--muted);margin-bottom:16px">Connect any OpenAI-compatible AI provider.</p>
-          <div style="display:grid;gap:12px;max-width:480px">
-            <div>
-              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:8px">Provider</label>
-              <div id="provider-pills" style="display:flex;flex-wrap:wrap;gap:8px">\${renderProviderPills()}</div>
-            </div>
-            <div>
-              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px">API Key</label>
-              <input type="password" id="ai-api-key" placeholder="sk-ant-..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg);color:var(--fg);font-size:14px;box-sizing:border-box">
-            </div>
-            <div>
-              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px">Model <span style="font-weight:400">(optional — uses provider default if blank)</span></label>
-              <input type="text" id="ai-model" placeholder="claude-sonnet-4-6" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg);color:var(--fg);font-size:14px;box-sizing:border-box">
-            </div>
-            <div>
-              <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px">Base URL <span style="font-weight:400">(optional — uses provider default if blank)</span></label>
-              <input type="text" id="ai-base-url" placeholder="https://api.anthropic.com/v1" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg);color:var(--fg);font-size:14px;box-sizing:border-box">
-            </div>
-            <div style="display:flex;align-items:center;gap:12px">
-              <button class="btn btn-primary" onclick="saveAiKey()">Save</button>
-              <span id="ai-flash" style="font-size:13px;color:var(--success);opacity:0;transition:opacity 0.3s">Saved</span>
-              <span style="font-size:13px;color:\${aiConfigured ? 'var(--success)' : 'var(--muted)'}">\${aiConfigured ? '● Connected' : '○ Not configured'}</span>
-            </div>
-          </div>
-        </div>
-        <div class="card">
-          <h2>SMS Auto-Reply</h2>
-          <p style="font-size:14px;color:var(--muted);margin-bottom:16px">AI automatically replies to incoming SMS while the app is running.</p>
-          <div style="display:flex;align-items:center;gap:14px">
-            <label style="position:relative;display:inline-block;width:44px;height:24px;margin:0;cursor:\${state.autoReply.loading ? 'wait' : 'pointer'}">
-              <input type="checkbox" \${state.autoReply.enabled ? 'checked' : ''} onchange="setAutoReply(this.checked)" \${state.autoReply.loading ? 'disabled' : ''} style="opacity:0;width:0;height:0">
-              <span style="position:absolute;inset:0;background:\${state.autoReply.enabled ? 'var(--primary)' : '#ccc'};border-radius:12px;transition:background 0.2s"></span>
-              <span style="position:absolute;left:\${state.autoReply.enabled ? '22px' : '2px'};top:2px;width:20px;height:20px;background:#fff;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.2)"></span>
-            </label>
-            <span style="font-size:14px;color:\${state.autoReply.enabled ? 'var(--fg)' : 'var(--muted)'}">
-              \${state.autoReply.enabled ? 'Enabled — AI will reply to incoming SMS' : 'Disabled'}
-            </span>
-          </div>
-          \${state.autoReply.enabled ? '<p style="font-size:12px;color:var(--muted);margin:10px 0 0">Replies within ~5 seconds while the app is running. Checks SMS history, Calendar, and Email before replying. Short codes are skipped. Check Audit Log for history.</p>' : ''}
-          \${!state.chat.aiAvailable && state.autoReply.enabled ? '<p style="font-size:12px;color:var(--warning,#f59e0b);margin:8px 0 0">AI key required — configure it above first.</p>' : ''}
-          <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
-            <label style="font-size:13px;color:var(--muted)">Context depth (tool rounds):</label>
-            <input type="number" min="1" max="10" value="\${state.autoReply.maxToolRounds}" onchange="saveMaxToolRounds(this.value)" style="width:56px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);color:var(--fg)">
-            <span style="font-size:12px;color:var(--muted)">(1 = fast, 3 = balanced, 5+ = thorough)</span>
-          </div>
-          <div style="margin-top:14px;display:flex;align-items:center;gap:12px">
-            <button class="btn" onclick="testAutoReply()" \${state.autoReply.testLoading ? 'disabled' : ''} style="font-size:13px;padding:7px 14px">\${state.autoReply.testLoading ? 'Testing...' : 'Test auto-reply'}</button>
-            \${state.autoReply.testResult ? '<span style="font-size:13px;color:' + (state.autoReply.testResult.ok ? 'var(--success)' : 'var(--danger,#ef4444)') + '">' + escapeHtml(state.autoReply.testResult.msg) + '</span>' : ''}
-          </div>
-        </div>
-        <div class="card">
-          <h2>Integrations</h2>
-          <p style="font-size:14px;color:var(--muted);margin-bottom:16px">Connect services to give the AI access to your data.</p>
-          <div style="display:grid;gap:10px">
-            \${state.sources.filter(s => ['gmail','google_calendar','github'].includes(s.name)).map(s => {
-              var icons = { gmail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>', google_calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>', github: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>' };
-              var labels = { gmail: 'Gmail', google_calendar: 'Calendar', github: 'GitHub' };
-              var tabNames = { gmail: 'gmail', google_calendar: 'google_calendar', github: 'github' };
-              var icon = icons[s.name] || '';
-              var label = labels[s.name] || s.name;
-              var accountLine = (s.accountInfo && s.accountInfo.email) ? (' — ' + escapeHtml(s.accountInfo.email)) : '';
-              return '<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--border);border-radius:9px;background:var(--card-bg)">' +
-                icon +
-                '<div style="flex:1;min-width:0"><p style="margin:0;font-size:14px;font-weight:500">' + label + '</p>' +
-                '<p style="margin:2px 0 0;font-size:12px;color:' + (s.connected ? 'var(--success)' : 'var(--muted)') + '">' + (s.connected ? ('Connected' + accountLine) : 'Not connected') + '</p></div>' +
-                (s.connected
-                  ? '<button class="btn btn-sm btn-outline" onclick="switchTab(\\'' + tabNames[s.name] + '\\')" style="font-size:12px;flex-shrink:0">Manage →</button>'
-                  : '<a href="/oauth/' + s.name + '/start" class="btn btn-sm btn-primary" style="font-size:12px;text-decoration:none;flex-shrink:0">Connect</a>') +
-                '</div>';
-            }).join('')}
-          </div>
-        </div>
-        <div class="card">
-          <h2>Activity Log</h2>
-          \${state.audit.length ? '<table><tr><th>Time</th><th>Event</th><th>Source</th><th>Details</th><th>Response</th></tr>' +
-            state.audit.map(e => {
-              const d = typeof e.details === 'string' ? JSON.parse(e.details) : e.details;
-              const resp = d.responseSummary || '';
-              const detailsCopy = Object.assign({}, d);
-              delete detailsCopy.responseSummary;
-              const respCell = resp
-                ? '<details style="font-size:13px;max-width:500px;cursor:pointer"><summary style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:400px">' + formatResponsePreview(resp) + '</summary>' + formatResponseDetails(resp) + '</details>'
-                : '-';
-              return '<tr><td style="font-size:14px">' + new Date(e.timestamp).toLocaleString() + '</td><td>' + e.event + '</td><td>' + (e.source || '-') + '</td><td style="font-size:14px;max-width:300px;overflow-wrap:break-word;word-break:break-word">' + JSON.stringify(detailsCopy).slice(0,200) + (JSON.stringify(detailsCopy).length > 200 ? '...' : '') + '</td><td>' + respCell + '</td></tr>';
-            }).join('') +
-            '</table>' : '<p class="empty">No activity yet.</p>'}
-        </div>
-      \`;
+      var activeSection = state.settingsSection || 'ai';
+
+      var html = '<div class="flex flex-col h-full bg-background">';
+
+      // TopBar
+      html += '<header class="flex justify-between items-center px-margin h-16 border-b border-outline-variant bg-surface shrink-0">';
+      html += '<div class="flex items-center gap-sm">';
+      html += '<span class="material-symbols-outlined text-primary">settings</span>';
+      html += '<h1 class="font-headline-md text-headline-md font-bold text-primary">Settings</h1>';
+      html += '</div>';
+      html += '</header>';
+
+      // Inner Layout
+      html += '<div class="flex-grow flex flex-col md:flex-row overflow-hidden pb-24 md:pb-0">';
+
+      // Settings Navigation (Sidebar on desktop, topbar scrollable strip on mobile)
+      html += '<aside class="flex md:flex-col md:w-56 border-b md:border-b-0 md:border-r border-outline-variant shrink-0 bg-surface p-sm gap-xs overflow-x-auto md:overflow-x-visible md:overflow-y-auto hide-scrollbar">';
+      
+      var sections = [
+        { key: 'ai', label: 'AI Settings', icon: 'smart_toy' },
+        { key: 'sms', label: 'SMS Auto-Reply', icon: 'sms' },
+        { key: 'integrations', label: 'Integrations', icon: 'extension' },
+        { key: 'audit', label: 'Activity Log', icon: 'list_alt' }
+      ];
+
+      sections.forEach(function(s) {
+        var isActive = activeSection === s.key;
+        var btnClass = isActive 
+          ? 'bg-surface-container-high text-primary font-semibold border-primary md:border-l-4 md:border-b-0 border-b-2' 
+          : 'text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface border-transparent';
+        html += '<button onclick="state.settingsSection=\\x27' + s.key + '\\x27; render()" class="flex items-center gap-sm px-md py-2.5 rounded-lg text-body-sm font-body-sm transition-colors whitespace-nowrap outline-none border-b-2 md:border-b-0 md:border-l-4 ' + btnClass + '">';
+        html += '<span class="material-symbols-outlined text-[18px] ' + (isActive ? 'text-primary' : '') + '">' + s.icon + '</span>';
+        html += '<span>' + s.label + '</span>';
+        html += '</button>';
+      });
+      html += '</aside>';
+
+      // Settings active view content
+      html += '<div class="flex-grow p-margin overflow-y-auto max-w-4xl w-full mx-auto">';
+
+      if (activeSection === 'ai') {
+        html += '<div class="space-y-lg">';
+        html += '  <div class="border-b border-outline-variant pb-xs">';
+        html += '    <h2 class="font-headline-lg text-headline-lg text-on-surface">AI Assistant</h2>';
+        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Connect any OpenAI-compatible AI provider.</p>';
+        html += '  </div>';
+
+        html += '  <div class="space-y-md max-w-md">';
+        html += '    <div class="space-y-xs">';
+        html += '      <label class="font-label-caps text-label-caps text-on-surface-variant">Provider</label>';
+        html += '      <div id="provider-pills" class="flex flex-wrap gap-xs">' + renderProviderPills() + '</div>';
+        html += '    </div>';
+
+        var aiPlaceholder = aiConfigured ? '•••••••••••• (Configured)' : 'sk-ant-...';
+        html += '    <div class="space-y-xs">';
+        html += '      <label class="font-label-caps text-label-caps text-on-surface-variant">API Key</label>';
+        html += '      <input type="password" id="ai-api-key" placeholder="' + aiPlaceholder + '" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
+        html += '    </div>';
+
+        var currentModel = state.chat.configuredModel || '';
+        html += '    <div class="space-y-xs">';
+        html += '      <label class="font-label-caps text-label-caps text-on-surface-variant">Model <span class="font-normal font-body-sm text-on-surface-variant/75">(optional — uses provider default if blank)</span></label>';
+        html += '      <input type="text" id="ai-model" value="' + escapeAttr(currentModel) + '" placeholder="claude-sonnet-4-6" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
+        html += '    </div>';
+
+        html += '    <div class="space-y-xs">';
+        html += '      <label class="font-label-caps text-label-caps text-on-surface-variant">Base URL <span class="font-normal font-body-sm text-on-surface-variant/75">(optional — uses provider default if blank)</span></label>';
+        html += '      <input type="text" id="ai-base-url" placeholder="https://api.anthropic.com/v1" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
+        html += '    </div>';
+
+        html += '    <div class="flex items-center gap-md pt-sm">';
+        html += '      <button onclick="saveAiKey()" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-6 py-2.5 rounded-xl transition-all active:scale-95 shadow-md">Save Configuration</button>';
+        html += '      <span id="ai-flash" class="text-success font-mono-label text-mono-label opacity-0">Saved</span>';
+        html += '      <div class="flex items-center gap-xs">';
+        html += '        <span class="status-dot ' + (aiConfigured ? 'status-dot-connected' : 'status-dot-disconnected') + '"></span>';
+        html += '        <span class="font-label-sm text-label-sm ' + (aiConfigured ? 'text-primary font-semibold' : 'text-on-surface-variant') + '">' + (aiConfigured ? 'Connected' : 'Not configured') + '</span>';
+        html += '      </div>';
+        html += '    </div>';
+        html += '  </div>';
+        html += '</div>';
+      }
+
+      else if (activeSection === 'sms') {
+        html += '<div class="space-y-lg">';
+        html += '  <div class="border-b border-outline-variant pb-xs">';
+        html += '    <h2 class="font-headline-lg text-headline-lg text-on-surface">SMS Auto-Reply</h2>';
+        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">AI automatically replies to incoming SMS while the app is running.</p>';
+        html += '  </div>';
+
+        html += '  <div class="space-y-md max-w-xl">';
+        html += '    <div class="flex items-center gap-sm bg-white border border-outline-variant rounded-xl p-md shadow-sm">';
+        html += '      <label class="relative inline-block w-12 h-6 shrink-0 cursor-' + (state.autoReply.loading ? 'wait' : 'pointer') + '">';
+        html += '        <input type="checkbox" ' + (state.autoReply.enabled ? 'checked' : '') + ' onchange="setAutoReply(this.checked)" ' + (state.autoReply.loading ? 'disabled' : '') + ' class="sr-only peer">';
+        html += '        <span class="absolute inset-0 bg-secondary rounded-full transition-colors peer-checked:bg-primary"></span>';
+        html += '        <span class="absolute left-[2px] top-[2px] w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-6 shadow-sm"></span>';
+        html += '      </label>';
+        html += '      <div class="flex flex-col gap-base">';
+        html += '        <span class="font-body-md text-body-md font-semibold text-on-surface">' + (state.autoReply.enabled ? 'Enabled' : 'Disabled') + '</span>';
+        html += '        <span class="font-body-sm text-body-sm text-on-surface-variant">Automatically handle incoming SMS notifications</span>';
+        html += '      </div>';
+        html += '    </div>';
+
+        if (state.autoReply.enabled) {
+          html += '    <div class="p-md bg-surface-container border border-outline-variant rounded-xl font-body-sm text-body-sm text-on-surface-variant space-y-xs shadow-sm">';
+          html += '      <div class="flex gap-xs items-center font-semibold text-primary"><span class="material-symbols-outlined text-[18px]">info</span><span>Behavior Note</span></div>';
+          html += '      <p>Replies within ~5 seconds while the app is running. Checks SMS history, Calendar, and Gmail before replying. Short codes (e.g., 2FA codes) are automatically skipped. Check the Audit Log for history.</p>';
+          html += '    </div>';
+        }
+
+        if (!state.chat.aiAvailable && state.autoReply.enabled) {
+          html += '    <div class="p-md bg-error-container text-on-error-container border border-error/20 rounded-xl font-body-sm text-body-sm flex gap-xs items-center shadow-sm">';
+          html += '      <span class="material-symbols-outlined text-[18px]">warning</span>';
+          html += '      <span>AI key required — please configure a provider and key above first.</span>';
+          html += '    </div>';
+        }
+
+        html += '    <div class="bg-white border border-outline-variant rounded-xl p-md shadow-sm space-y-xs">';
+        html += '      <label class="font-label-caps text-label-caps text-on-surface-variant">Context Depth (Tool Rounds)</label>';
+        html += '      <div class="flex items-center gap-md">';
+        html += '        <input type="number" min="1" max="10" value="' + state.autoReply.maxToolRounds + '" onchange="saveMaxToolRounds(this.value)" class="w-16 bg-white border border-outline-variant rounded-lg px-2 py-1.5 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
+        html += '        <span class="font-body-sm text-body-sm text-on-surface-variant">(1 = fast, 3 = balanced, 5+ = thorough)</span>';
+        html += '      </div>';
+        html += '    </div>';
+
+        html += '    <div class="flex items-center gap-md pt-sm">';
+        html += '      <button onclick="testAutoReply()" ' + (state.autoReply.testLoading ? 'disabled' : '') + ' class="bg-white hover:bg-surface-container-high border border-outline text-on-surface-variant font-label-caps text-label-caps px-4 py-2.5 rounded-xl transition-all active:scale-95 shadow-sm">' + (state.autoReply.testLoading ? 'Testing...' : 'Test auto-reply') + '</button>';
+        if (state.autoReply.testResult) {
+          var testColorClass = state.autoReply.testResult.ok ? 'text-primary' : 'text-error';
+          html += '      <span class="font-body-sm text-body-sm font-semibold ' + testColorClass + '">' + escapeHtml(state.autoReply.testResult.msg) + '</span>';
+        }
+        html += '    </div>';
+        html += '  </div>';
+        html += '</div>';
+      }
+
+      else if (activeSection === 'integrations') {
+        html += '<div class="space-y-lg">';
+        html += '  <div class="border-b border-outline-variant pb-xs">';
+        html += '    <h2 class="font-headline-lg text-headline-lg text-on-surface">Integrations</h2>';
+        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Connect services to give the AI access to your data.</p>';
+        html += '  </div>';
+
+        html += '  <div class="grid grid-cols-1 md:grid-cols-2 gap-md">';
+        state.sources.filter(function(s) { return ['gmail','google_calendar','github'].includes(s.name); }).forEach(function(s) {
+          var icons = {
+            gmail: 'mail',
+            google_calendar: 'calendar_month',
+            github: 'code'
+          };
+          var labels = { gmail: 'Gmail', google_calendar: 'Google Calendar', github: 'GitHub' };
+          var tabNames = { gmail: 'gmail', google_calendar: 'google_calendar', github: 'github' };
+          var iconName = icons[s.name] || 'extension';
+          var label = labels[s.name] || s.name;
+          var accountLine = (s.accountInfo && s.accountInfo.email) ? s.accountInfo.email : 'No account details';
+          
+          html += '  <div class="bg-white border border-outline-variant rounded-xl p-md shadow-sm flex flex-col justify-between gap-md">';
+          html += '    <div class="flex items-start gap-sm">';
+          html += '      <div class="w-10 h-10 bg-surface-container rounded-lg flex items-center justify-center border border-outline-variant shrink-0">';
+          html += '        <span class="material-symbols-outlined text-primary text-[20px]">' + iconName + '</span>';
+          html += '      </div>';
+          html += '      <div class="min-w-0">';
+          html += '        <h3 class="font-body-md text-body-md font-bold text-on-surface leading-tight">' + label + '</h3>';
+          html += '        <span class="font-body-sm text-body-sm text-on-surface-variant truncate block mt-0.5">' + accountLine + '</span>';
+          html += '      </div>';
+          html += '    </div>';
+          
+          html += '    <div class="flex items-center justify-between border-t border-outline-variant/60 pt-sm">';
+          html += '      <div class="flex items-center gap-xs">';
+          html += '        <span class="status-dot ' + (s.connected ? 'status-dot-connected' : 'status-dot-disconnected') + '"></span>';
+          html += '        <span class="font-label-sm text-label-sm ' + (s.connected ? 'text-primary font-semibold' : 'text-on-surface-variant') + '">' + (s.connected ? 'Connected' : 'Disconnected') + '</span>';
+          html += '      </div>';
+          
+          if (s.connected) {
+            html += '    <button onclick="switchTab(\\x27' + tabNames[s.name] + '\\x27)" class="border border-outline hover:bg-surface-container-high text-on-surface-variant font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 flex items-center gap-xs"><span>Manage</span><span class="material-symbols-outlined text-sm">arrow_forward</span></button>';
+          } else {
+            html += '    <a href="/oauth/' + s.name + '/start" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 text-center shadow-sm">Connect</a>';
+          }
+          html += '    </div>';
+          html += '  </div>';
+        });
+        html += '  </div>';
+        html += '</div>';
+      }
+
+      else if (activeSection === 'audit') {
+        html += '<div class="space-y-lg">';
+        html += '  <div class="border-b border-outline-variant pb-xs">';
+        html += '    <h2 class="font-headline-lg text-headline-lg text-on-surface">Activity Log</h2>';
+        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Inspect interactions, actions performed, and AI context evaluations.</p>';
+        html += '  </div>';
+
+        if (state.audit.length) {
+          html += '  <div class="bg-white border border-outline-variant rounded-xl shadow-sm overflow-hidden">';
+          html += '    <div class="overflow-x-auto">';
+          html += '      <table class="w-full border-collapse text-left text-body-sm font-body-sm">';
+          html += '        <thead>';
+          html += '          <tr class="bg-surface-container border-b border-outline-variant">';
+          html += '            <th class="px-md py-3 font-semibold text-on-surface-variant uppercase text-xs tracking-wider">Time</th>';
+          html += '            <th class="px-md py-3 font-semibold text-on-surface-variant uppercase text-xs tracking-wider">Event</th>';
+          html += '            <th class="px-md py-3 font-semibold text-on-surface-variant uppercase text-xs tracking-wider">Source</th>';
+          html += '            <th class="px-md py-3 font-semibold text-on-surface-variant uppercase text-xs tracking-wider">Details</th>';
+          html += '            <th class="px-md py-3 font-semibold text-on-surface-variant uppercase text-xs tracking-wider">Response</th>';
+          html += '          </tr>';
+          html += '        </thead>';
+          html += '        <tbody class="divide-y divide-outline-variant/60">';
+          
+          state.audit.forEach(function(e) {
+            var d = typeof e.details === 'string' ? JSON.parse(e.details) : e.details;
+            var resp = d.responseSummary || '';
+            var detailsCopy = Object.assign({}, d);
+            delete detailsCopy.responseSummary;
+            
+            var respCell = resp
+              ? '<details class="text-body-sm max-w-md cursor-pointer outline-none"><summary class="overflow-hidden text-ellipsis whitespace-nowrap max-w-[280px] text-primary hover:underline font-semibold focus:outline-none">' + formatResponsePreview(resp) + '</summary><div class="mt-base bg-surface-container-low p-2 rounded-lg text-body-sm font-mono-label">' + formatResponseDetails(resp) + '</div></details>'
+              : '<span class="text-on-surface-variant/50">-</span>';
+              
+            html += '      <tr class="hover:bg-surface-container-lowest transition-colors">';
+            html += '        <td class="px-md py-3 whitespace-nowrap font-mono-label text-on-surface-variant">' + new Date(e.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + '</td>';
+            html += '        <td class="px-md py-3 whitespace-nowrap font-semibold text-on-surface">' + escapeHtml(e.event) + '</td>';
+            html += '        <td class="px-md py-3 whitespace-nowrap"><span class="font-mono-label text-mono-label bg-surface-container px-xs py-0.5 rounded uppercase">' + escapeHtml(e.source || '-') + '</span></td>';
+            html += '        <td class="px-md py-3 max-w-[250px] truncate font-mono-label text-[11px] text-on-surface-variant" title="' + escapeAttr(JSON.stringify(detailsCopy)) + '">' + escapeHtml(JSON.stringify(detailsCopy).slice(0, 120)) + (JSON.stringify(detailsCopy).length > 120 ? '...' : '') + '</td>';
+            html += '        <td class="px-md py-3">' + respCell + '</td>';
+            html += '      </tr>';
+          });
+          
+          html += '        </tbody>';
+          html += '      </table>';
+          html += '    </div>';
+          html += '  </div>';
+        } else {
+          html += '  <div class="bg-surface-container-low border border-outline-variant rounded-xl p-xl flex flex-col items-center justify-center text-center min-h-[250px]">';
+          html += '    <span class="material-symbols-outlined text-primary text-3xl mb-xs">list_alt</span>';
+          html += '    <p class="font-body-sm text-body-sm text-on-surface-variant">No activity has been logged yet.</p>';
+          html += '  </div>';
+        }
+        html += '</div>';
+      }
+
+      html += '</div>'; // End content area
+      html += '</div>'; // End inner layout
+      html += '</div>'; // End main container
+      return html;
     }
 
     function toggleEmailExpand(emailId) {

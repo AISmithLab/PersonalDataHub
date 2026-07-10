@@ -395,7 +395,7 @@ describe('Action Review — deny / save-to-draft / send', () => {
     expect(res.status).toBe(200);
 
     expect(executedActions).toHaveLength(1);
-    expect(executedActions[0].actionType).toBe('draft_email');
+    expect(executedActions[0].actionType).toBe('send_email');
     expect(executedActions[0].actionData.send).toBe(true);
     expect(executedActions[0].actionData.to).toBe('carol@co.com');
 
