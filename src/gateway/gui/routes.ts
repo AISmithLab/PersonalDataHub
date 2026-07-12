@@ -1071,6 +1071,7 @@ function getIndexHtml(): string {
       eventsLoading: false,
       eventsError: null,
       filterTypes: {},
+      contacts: { data: {}, loading: false, error: null },
       sms: { messages: null, loading: false, error: null, box: 'inbox', contextMenu: null, autoReplying: false },
       chat: { messages: [], loading: false, error: null, aiAvailable: false, stagedSmsIds: [], codeBlocks: {}, configuredModel: '' },
       memories: { items: [], loading: false, loaded: false, editingId: null, editContent: '', adding: false, newContent: '', error: null },
@@ -1319,7 +1320,7 @@ function getIndexHtml(): string {
         case 'gmail': content.innerHTML = renderGmailTab(); break;
         case 'github': content.innerHTML = renderGitHubTab(); break;
         case 'google_calendar': content.innerHTML = renderCalendarTab(); break;
-        case 'sms': content.innerHTML = renderSmsTab(); loadSmsMessages(); break;
+        case 'sms': content.innerHTML = renderSmsTab(); loadContacts(); loadSmsMessages(); break;
         case 'ai': content.innerHTML = renderAiTab(); var _cm = document.getElementById('chat-messages'); if (_cm) _cm.scrollTop = _cm.scrollHeight; break;
         case 'skill': content.innerHTML = renderSkillTab(); loadSkills(); break;
         case 'memory': content.innerHTML = renderMemoryTab(); loadMemories(); break;
@@ -2019,7 +2020,7 @@ function getIndexHtml(): string {
             (unread ? '<div style="width:6px;height:6px;border-radius:50%;background:var(--primary);flex-shrink:0;margin-top:5px"></div>' : '<div style="width:6px;flex-shrink:0"></div>') +
             '<div style="flex:1;min-width:0">' +
             '<div style="display:flex;justify-content:space-between;align-items:baseline">' +
-            '<span class="email-row-sender">' + escapeHtml(msg.address || 'Unknown') + '</span>' +
+            '<span class="email-row-sender">' + escapeHtml(formatContact(msg.address) || 'Unknown') + '</span>' +
             '<span class="email-row-date">' + escapeHtml(dateStr) + '</span>' +
             '</div>' +
             '<div class="email-row-snippet">' + escapeHtml(snippet) + '</div>' +
@@ -2125,6 +2126,45 @@ function getIndexHtml(): string {
       window.AndroidSms.getMessages(reqId, state.sms.box, 100);
     }
     window.loadSmsMessages = loadSmsMessages;
+
+    window._contactsCbs = {};
+    window._contactsDeliver = function(callbackId, contactsList, error) {
+      var cb = window._contactsCbs[callbackId];
+      if (cb) { delete window._contactsCbs[callbackId]; cb(contactsList, error); }
+    };
+
+    function loadContacts(force) {
+      if (!force && Object.keys(state.contacts.data).length > 0) return;
+      if (state.contacts.loading) return;
+      if (!window.AndroidSms || !window.AndroidSms.getContacts) return;
+
+      state.contacts.loading = true;
+      var reqId = 'contacts_' + Date.now();
+      window._contactsCbs[reqId] = function(contactsList, err) {
+        state.contacts.loading = false;
+        if (!err && contactsList) {
+          contactsList.forEach(function(c) {
+            state.contacts.data[c.number] = c.name;
+            var stripped = c.number.replace(/\\D/g, '');
+            if (stripped.length >= 7) state.contacts.data[stripped] = c.name;
+          });
+          if (currentTab === 'sms') render();
+        }
+      };
+      window.AndroidSms.getContacts(reqId);
+    }
+    window.loadContacts = loadContacts;
+
+    function formatContact(addr) {
+      if (!addr) return addr;
+      var name = state.contacts.data[addr];
+      if (!name) {
+        var stripped = addr.replace(/\\D/g, '');
+        if (stripped.length >= 7) name = state.contacts.data[stripped];
+      }
+      return name ? name + ' (' + addr + ')' : addr;
+    }
+    window.formatContact = formatContact;
 
     // ---- AI chat ----
 
@@ -2602,7 +2642,12 @@ function getIndexHtml(): string {
       if (currentTab === 'ai') render();
 
       var msgs = state.chat.messages.slice(-50);
-      var sms = state.sms.messages;
+      var sms = null;
+      if (state.sms.messages) {
+        sms = state.sms.messages.map(function(m) {
+          return { id: m.id, address: window.formatContact ? window.formatContact(m.address) : m.address, body: m.body, date: m.date, type: m.type, read: m.read };
+        });
+      }
 
       try {
         var res = await fetch('/api/chat', {

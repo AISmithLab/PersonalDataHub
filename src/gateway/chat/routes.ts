@@ -1061,10 +1061,12 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     }
 
     const body = await c.req.json();
-    const from: string = body.from ?? '';
+    const fromRaw: string = body.from ?? '';
+    const contactName: string = body.contactName;
+    const fromLabel = contactName ? `${contactName} (${fromRaw})` : fromRaw;
     const smsBody: string = body.body ?? '';
     const history: SmsHistoryEntry[] = Array.isArray(body.history) ? body.history : [];
-    if (!from || !smsBody) {
+    if (!fromRaw || !smsBody) {
       return c.json({ ok: false, error: 'from and body required' }, 400);
     }
 
@@ -1073,19 +1075,19 @@ export function createChatRoutes(deps: ServerDeps): Hono {
       timestamp: new Date().toISOString(),
       event: 'sms_received',
       source: 'sms',
-      details: JSON.stringify({ from, body: smsBody.slice(0, 100) }),
+      details: JSON.stringify({ from: fromRaw, contactName, body: smsBody.slice(0, 100) }),
     });
 
     // Skip purely numeric short codes (< 5 digits, no letters)
-    const hasAlpha = /[a-zA-Z]/.test(from);
-    const digits = from.replace(/\D/g, '');
+    const hasAlpha = /[a-zA-Z]/.test(fromRaw);
+    const digits = fromRaw.replace(/\D/g, '');
     if (!hasAlpha && digits.length < 5) {
       return c.json({ ok: true, enabled: true, skipped: true, reason: 'short_code' });
     }
 
     try {
       const maxRounds = deps.config.autoReply?.maxToolRounds ?? 3;
-      const reply = await runAutoReplyLoop(deps, from, smsBody, history, maxRounds);
+      const reply = await runAutoReplyLoop(deps, fromLabel, smsBody, history, maxRounds);
       if (!reply) {
         return c.json({ ok: false, error: 'No reply generated' });
       }
@@ -1094,7 +1096,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
         timestamp: new Date().toISOString(),
         event: 'sms_auto_reply',
         source: 'sms',
-        details: JSON.stringify({ from, incomingBody: smsBody, reply }),
+        details: JSON.stringify({ from: fromRaw, incomingBody: smsBody, reply }),
       });
 
       // For the drain path (?drain=true): android.ts replays queued SMS when Node.js
@@ -1102,10 +1104,10 @@ export function createChatRoutes(deps: ServerDeps): Hono {
       // can pick it up and send via AndroidSms (Node.js has no direct SmsManager access).
       // For the live path (SmsReceiver calling directly): return the reply in the response
       // so SmsReceiver can send it immediately via SmsManager without needing the WebView.
-      const isDrain = c.req.query('drain') === 'true';
-      if (isDrain) {
-        const replyId = `ar_${randomUUID().slice(0, 8)}`;
-        pendingAutoReplies.set(replyId, { to: from, body: reply, createdAt: Date.now() });
+      if (c.req.query('drain') === 'true') {
+        const replyId = crypto.randomUUID();
+        pendingAutoReplies.set(replyId, { to: fromRaw, body: reply, createdAt: Date.now() });
+        return c.json({ ok: true, pending: true });
       }
 
       return c.json({ ok: true, enabled: true, reply });

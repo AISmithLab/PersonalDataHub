@@ -7,6 +7,9 @@ import android.provider.Telephony;
 import android.telephony.SmsManager;
 import android.telephony.SmsMessage;
 import android.util.Log;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.ContactsContract;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -65,8 +68,23 @@ public class SmsReceiver extends BroadcastReceiver {
         }).start();
     }
 
+    private String getContactName(Context context, String phoneNumber) {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_CONTACTS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            return null;
+        }
+        Uri uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(phoneNumber));
+        try (Cursor cursor = context.getContentResolver().query(uri, new String[]{ContactsContract.PhoneLookup.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                return cursor.getString(0);
+            }
+        } catch (Exception e) {}
+        return null;
+    }
+
     private void callAutoReply(Context context, String from, String body) {
-        String json = "{\"from\":\"" + escJson(from) + "\",\"body\":\"" + escJson(body) + "\"}";
+        String contactName = getContactName(context, from);
+        String nameStr = contactName != null ? ",\"contactName\":\"" + escJson(contactName) + "\"" : "";
+        String json = "{\"from\":\"" + escJson(from) + "\",\"body\":\"" + escJson(body) + "\"" + nameStr + "}";
 
         File queueFile = writeQueue(context, json);
 

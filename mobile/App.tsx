@@ -21,6 +21,9 @@ interface SmsMsg { id: string; address: string; body: string; date: number; type
 interface ISmsModule { getMessages(box: string, limit: number): Promise<SmsMsg[]>; sendMessage(to: string, body: string): Promise<void>; }
 const SmsNative: ISmsModule | null = Platform.OS === 'android' ? (NativeModules.SmsModule as ISmsModule) : null;
 
+interface IContactsModule { getContacts(): Promise<{name: string, number: string}[]>; }
+const ContactsNative: IContactsModule | null = Platform.OS === 'android' ? (NativeModules.ContactsModule as IContactsModule) : null;
+
 // Injected before page scripts: defines window.AndroidSms bridging postMessage → RN
 const SMS_BRIDGE = `(function(){
   if(window._pdhBridge)return;
@@ -31,11 +34,15 @@ const SMS_BRIDGE = `(function(){
     },
     sendMessage:function(id,to,body){
       window.ReactNativeWebView.postMessage(JSON.stringify({t:'sms_send',id:id,to:to,body:body}));
+    },
+    getContacts:function(id){
+      window.ReactNativeWebView.postMessage(JSON.stringify({t:'contacts_get',id:id}));
     }
   };
   window._pdhRN=function(m){
     if(m.t==='sms_r')window._smsDeliver&&window._smsDeliver(m.id,m.msgs,m.err||null);
     else if(m.t==='sms_sr')window._smsSendDeliver&&window._smsSendDeliver(m.id,m.err||null);
+    else if(m.t==='contacts_r')window._contactsDeliver&&window._contactsDeliver(m.id,m.contacts,m.err||null);
   };
 })();true;`;
 
@@ -84,6 +91,13 @@ export default function App() {
       SmsNative.sendMessage(msg.to as string, msg.body as string)
         .then(() => inject({ t: 'sms_sr', id: msg.id, err: null }))
         .catch((err: Error) => inject({ t: 'sms_sr', id: msg.id, err: err.message }));
+    } else if (msg.t === 'contacts_get') {
+      const granted = await requestPerm(PermissionsAndroid.PERMISSIONS.READ_CONTACTS);
+      if (!granted) { inject({ t: 'contacts_r', id: msg.id, contacts: null, err: 'PERMISSION_DENIED' }); return; }
+      if (!ContactsNative) return;
+      ContactsNative.getContacts()
+        .then(contacts => inject({ t: 'contacts_r', id: msg.id, contacts, err: null }))
+        .catch((err: Error) => inject({ t: 'contacts_r', id: msg.id, contacts: null, err: err.message }));
     }
   }, [inject]);
 
