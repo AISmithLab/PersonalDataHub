@@ -8,8 +8,8 @@
     "pdh": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc && chmod +x dist/cli.js",
-    "dev": "tsc --watch",
+    "build": "node scripts/build-frontend.mjs && tsc && chmod +x dist/cli.js",
+    "dev": "node scripts/build-frontend.mjs && tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src/",

@@ -1,0 +1,179 @@
+:root {
+      --primary: #006b5a;
+      --primary-hover: #005144;
+      --bg: #f7f9ff;
+      --card: #ffffff;
+      --card-bg: #ffffff;
+      --input-bg: #ffffff;
+      --sidebar-bg: #f1f4f9;
+      --sidebar-border: #bccac4;
+      --fg: #181c20;
+      --muted: #5c5f61;
+      --destructive: #ba1a1a;
+      --destructive-hover: #93000a;
+      --warning: #f59e0b;
+      --success: #006b5a;
+      --border: #bccac4;
+      --input-border: #bccac4;
+      --ring: #006b5a;
+      --radius: 12px;
+      --sidebar-width: 240px;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      user-select: none;
+      display: inline-block;
+      line-height: 1;
+      text-transform: none;
+      letter-spacing: normal;
+      word-wrap: normal;
+      white-space: nowrap;
+      direction: ltr;
+    }
+    body {
+      font-family: 'Hanken Grotesk', sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      background-color: var(--bg);
+      color: var(--fg);
+      padding-top: env(safe-area-inset-top, 0px);
+    }
+    @media (max-width: 768px) {
+      #bottom-nav {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+    }
+    .logic-card-shadow {
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+    .hide-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .hide-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      border: 2px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .nav-item.active {
+      background-color: var(--sidebar-bg);
+      color: var(--primary) !important;
+      border-left-color: var(--primary);
+      font-weight: 600;
+    }
+    .nav-item.active .material-symbols-outlined {
+      font-variation-settings: 'FILL' 1;
+    }
+    #bottom-nav a.active {
+      color: var(--primary) !important;
+      font-weight: 600;
+    }
+    #bottom-nav a.active .material-symbols-outlined {
+      font-variation-settings: 'FILL' 1;
+    }
+    .chat-bubble-user {
+      border-bottom-right-radius: 4px;
+    }
+    .chat-bubble-ai {
+      border-bottom-left-radius: 4px;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot-connected {
+      background: var(--success);
+      box-shadow: 0 0 6px rgba(0,107,90,0.5);
+    }
+    .status-dot-disconnected {
+      background: #c4c7c9;
+    }
+    .status-dot-pending {
+      background: var(--warning);
+      box-shadow: 0 0 6px rgba(245,158,11,0.5);
+    }
+    /* Fallback styles for inline elements of non-redesigned tabs */
+    .card { background: var(--card); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .card h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--fg); }
+    .card h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; color: var(--muted); }
+    .status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+    .status.connected { background: rgba(0,107,90,0.1); color: var(--success); }
+    .status.disconnected { background: rgba(239,68,68,0.08); color: var(--destructive); }
+    .status.pending { background: rgba(245,158,11,0.1); color: #b45309; }
+    .status.approved { background: rgba(0,107,90,0.1); color: var(--success); }
+    .status.rejected { background: rgba(239,68,68,0.08); color: var(--destructive); }
+    .status.committed { background: rgba(0,107,90,0.1); color: var(--success); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 18px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; font-family: inherit; transition: all 0.15s; line-height: 1; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-outline { background: var(--card); color: var(--fg); border: 1px solid var(--border); }
+    .btn-outline:hover { background: #f1f4f9; }
+    .btn-sm { padding: 6px 12px; font-size: 13px; }
+    .btn-ghost { background: transparent; color: var(--muted); border: none; }
+    .btn-ghost:hover { background: rgba(0,0,0,0.04); color: var(--fg); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 14px; }
+    th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    input[type="text"], input[type="number"], select { padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; font-family: inherit; width: 100%; outline: none; transition: border-color 0.15s; background: var(--card); color: var(--fg); }
+    input[type="text"]:focus, input[type="number"]:focus, select:focus { border-color: var(--primary); }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; color: var(--muted); }
+    .actions { display: flex; gap: 8px; margin-top: 14px; }
+    .empty { text-align: center; color: var(--muted); padding: 24px; font-size: 14px; }
+    .ac-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .ac-row label { font-size: 14px; white-space: nowrap; }
+    .ac-row input[type="datetime-local"] { width: auto; flex: 1; max-width: 220px; }
+    .ac-row input[type="text"] { flex: 1; }
+    .checkbox-group { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+    .checkbox-group .toggle { margin: 2px 0; position: relative; }
+    .filter-panel { margin-left: 26px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; display: none; }
+    .filter-panel.show { display: block; }
+    .filter-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .filter-row:last-child { margin-bottom: 0; }
+    .filter-label { font-size: 14px; color: var(--fg); min-width: 110px; }
+    .filter-row input[type="text"] { flex: 1; }
+    .filter-row input[type="date"] { flex: 1; }
+    .filter-row select { border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; background: var(--card); font-size: 14px; }
+    .filter-row input[type="number"] { width: 100px; }
+    .expand-link { font-size: 13px; color: var(--primary); cursor: pointer; text-decoration: none; }
+    .sel-links { font-size: 12px; }
+    .sel-links a { color: var(--primary); text-decoration: none; cursor: pointer; }
+    .repo-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+    .repo-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; background: var(--sidebar-bg); }
+    .repo-name { font-family: 'JetBrains Mono', monospace; font-size: 14px; flex: 1; }
+    .repo-chevron { font-size: 13px; color: var(--muted); }
+    .repo-perms { padding: 12px 14px 4px; border-top: 1px solid var(--border); display: none; }
+    .repo-perms.show { display: block; }
+    .perm-grid { display: flex; gap: 24px; }
+    .perm-col h4 { font-size: 13px; font-weight: 700; color: var(--fg); margin-bottom: 6px; }
+    .email-card { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 14px; overflow: hidden; background: var(--card); }
+    .email-card-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+    .email-card-title { font-size: 15px; font-weight: 600; color: var(--fg); }
+    .email-card-meta { padding: 12px 18px 0; }
+    .email-field { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; font-size: 14px; }
+    .email-field-label { font-weight: 600; color: var(--muted); min-width: 55px; font-size: 12px; text-transform: uppercase; }
+    .email-card-body { padding: 10px 18px 14px; }
+    .email-body-display { white-space: pre-wrap; word-wrap: break-word; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.7; margin: 0; background: #f1f4f9; border-radius: 8px; padding: 14px 16px; color: var(--fg); }
+    .email-card-actions { display: flex; gap: 8px; padding: 0 18px 14px; justify-content: flex-end; }
+    .resolved-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; font-size: 14px; border-bottom: 1px solid var(--border); }
+    .gmail-grid { display: grid; grid-template-columns: 1fr 400px; gap: 24px; }
+    .summary-bar { display: flex; align-items: center; gap: 20px; padding: 10px 16px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; }
+    .summary-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+    .summary-stat-value { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--fg); }
+    .summary-stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+    .summary-divider { width: 1px; height: 28px; background: var(--border); }
+    .field-pill { display: inline-block; font-size: 13px; padding: 4px 12px; border-radius: 9999px; border: 1px solid; cursor: pointer; background: none; }
+    .field-pill-on { border-color: rgba(0,107,90,0.4); background: rgba(0,107,90,0.08); color: var(--primary); }
+    .field-pill-off { border-color: var(--border); color: var(--muted); text-decoration: line-through; opacity: 0.5; }
+    .email-list-header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--sidebar-bg); border-bottom: 1px solid var(--border); }
+    .email-row { border-bottom: 1px solid var(--border); }
+    .email-row-btn { display: block; width: 100%; text-align: left; padding: 14px 20px; background: none; border: none; cursor: pointer; }
+    .email-row-btn:hover { background: rgba(0,107,90,0.03); }
+    .email-row-sender { font-size: 14px; font-weight: 600; color: var(--fg); }
