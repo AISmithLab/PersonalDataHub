@@ -19,14 +19,8 @@ function renderSkillCard(s) {
           return '<option value="' + t.key + '"' + (sk.editContent.trigger_event === t.key ? ' selected' : '') + '>' + t.label + '</option>';
         }).join('');
         
-        var currentView = sk.editContent.current_view || 'SUMMARIZED';
-
         html += '<div class="flex items-center justify-between gap-sm mb-sm">';
         html += '<span class="font-label-caps text-label-caps text-on-surface-variant">Editing Skill</span>';
-        html += '<div class="flex border border-outline-variant rounded-lg overflow-hidden bg-surface-container-low p-0.5">';
-        html += '<button onclick="toggleEditSkillView(\'' + safeId + '\')" class="font-label-sm text-label-sm px-3 py-1 rounded-md transition-colors ' + (currentView === 'LOGICAL' ? 'bg-primary text-on-primary font-semibold shadow-sm' : 'text-on-surface-variant hover:text-on-surface') + '">Logical</button>';
-        html += '<button onclick="toggleEditSkillView(\'' + safeId + '\')" class="font-label-sm text-label-sm px-3 py-1 rounded-md transition-colors ' + (currentView === 'SUMMARIZED' ? 'bg-primary text-on-primary font-semibold shadow-sm' : 'text-on-surface-variant hover:text-on-surface') + '">Summarized</button>';
-        html += '</div>';
         html += '</div>';
 
         html += '<div class="space-y-sm">';
@@ -35,11 +29,7 @@ function renderSkillCard(s) {
         html += '<select id="edit-skill-trigger-' + safeId + '" onchange="state.skills.editContent.trigger_event=this.value; triggerSkillAutoSave(\'' + safeId + '\'); render()" class="bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">' + triggerOptions + '</select>';
         html += '</div>';
         
-        if (currentView === 'LOGICAL') {
-          html += renderLogicalEditor(s.id, sk.editContent.logic_tree);
-        } else {
-          html += '<textarea id="edit-skill-instructions-' + safeId + '" oninput="state.skills.editContent.instructions=this.value; triggerSkillAutoSave(\'' + safeId + '\')" onblur="performSkillAutoSave(\'' + safeId + '\')" placeholder="Describe what the AI should do when this trigger fires…" class="w-full bg-white border border-outline-variant rounded-lg p-md text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm min-h-[120px]" rows="4">' + escapeHtml(sk.editContent.instructions) + '</textarea>';
-        }
+        html += '<textarea id="edit-skill-instructions-' + safeId + '" oninput="state.skills.editContent.instructions=this.value; triggerSkillAutoSave(\'' + safeId + '\')" onblur="performSkillAutoSave(\'' + safeId + '\')" placeholder="Describe what the AI should do when this trigger fires…" class="w-full bg-white border border-outline-variant rounded-lg p-md text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm min-h-[120px]" rows="4">' + escapeHtml(sk.editContent.instructions) + '</textarea>';
         
         html += '</div><div class="flex gap-sm mt-md">';
         html += '<button onclick="saveEditSkill(\'' + safeId + '\')" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-6 py-2 rounded-xl transition-all active:scale-95 shadow-sm">Save</button>';
@@ -53,6 +43,12 @@ function renderSkillCard(s) {
         if (isActive) {
           html += '<span class="font-mono-label text-mono-label bg-primary-container text-on-primary-container px-xs py-0.5 rounded uppercase font-semibold">active</span>';
         }
+        if (s.primitive_type) {
+          html += '<span class="font-mono-label text-mono-label bg-secondary-container text-on-secondary-container px-xs py-0.5 rounded uppercase">' + escapeHtml(s.primitive_type) + '</span>';
+        }
+        if (s.label_tag) {
+          html += '<span class="font-mono-label text-mono-label border border-outline-variant text-on-surface-variant px-xs py-0.5 rounded uppercase">' + escapeHtml(s.label_tag) + '</span>';
+        }
         html += '</div>';
         html += '<div class="flex gap-xs items-center shrink-0">';
         html += '<button onclick="startEditSkill(\'' + safeId + '\')" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-container-high text-on-surface-variant transition-colors" title="Edit"><span class="material-symbols-outlined text-[18px]">edit</span></button>';
@@ -60,7 +56,20 @@ function renderSkillCard(s) {
         html += '</div>';
         html += '</div>';
         
-        html += '<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed whitespace-pre-wrap break-words mb-md">' + escapeHtml(s.instructions) + '</p>';
+        var displaySummary = s.summary ? s.summary : (s.instructions || 'No summary available.');
+        html += '<p class="font-body-md text-body-md font-medium text-on-surface leading-relaxed mb-xs">' + escapeHtml(displaySummary) + '</p>';
+        
+        if (s.summary && s.instructions) {
+          html += '<details class="group mt-2 mb-md">';
+          html += '<summary class="cursor-pointer font-label-sm text-primary select-none list-none flex items-center gap-1 opacity-80 hover:opacity-100 transition-opacity"><span class="material-symbols-outlined text-[16px] group-open:rotate-90 transition-transform">chevron_right</span>View Details</summary>';
+          html += '<div class="mt-2 pl-6">';
+          html += '<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed whitespace-pre-wrap break-words">' + escapeHtml(s.instructions) + '</p>';
+          html += '</div>';
+          html += '</details>';
+        } else if (!s.summary) {
+          html += '<div class="mb-md"></div>';
+        }
+        
         if (!isActive) {
           html += '<button onclick="activateSkill(\'' + safeId + '\',\'' + escapeAttr(s.trigger_event) + '\')" class="border border-primary text-primary hover:bg-primary-container/10 font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 shadow-sm">Set as active</button>';
         }

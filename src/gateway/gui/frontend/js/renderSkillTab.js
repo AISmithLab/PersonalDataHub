@@ -45,10 +45,6 @@ function renderSkillTab() {
         
         html += '<div class="flex items-center justify-between gap-sm mb-xs">';
         html += '<span class="font-label-caps text-label-caps text-on-surface-variant">New Skill</span>';
-        html += '<div class="flex border border-outline-variant rounded-lg overflow-hidden bg-white p-0.5">';
-        html += '<button onclick="toggleEditSkillView(\'new\')" class="font-label-sm text-label-sm px-3 py-1 rounded-md transition-colors ' + (currentViewNew === 'LOGICAL' ? 'bg-primary text-on-primary font-semibold shadow-sm' : 'text-on-surface-variant hover:text-on-surface') + '">Logical</button>';
-        html += '<button onclick="toggleEditSkillView(\'new\')" class="font-label-sm text-label-sm px-3 py-1 rounded-md transition-colors ' + (currentViewNew === 'SUMMARIZED' ? 'bg-primary text-on-primary font-semibold shadow-sm' : 'text-on-surface-variant hover:text-on-surface') + '">Summarized</button>';
-        html += '</div>';
         html += '</div>';
 
         html += '<div class="space-y-sm">';
@@ -57,11 +53,7 @@ function renderSkillTab() {
         html += '<select id="new-skill-trigger" onchange="state.skills.newTrigger=this.value; render()" class="bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">' + triggerOpts + '</select>';
         html += '</div>';
         
-        if (currentViewNew === 'LOGICAL') {
-          html += renderLogicalEditor('new', sk.newLogicTree);
-        } else {
-          html += '<textarea id="new-skill-instructions" placeholder="Describe what the AI should do when this trigger fires — context to check, reply style, behavioral rules, anything." oninput="state.skills.newInstructions=this.value" class="w-full bg-white border border-outline-variant rounded-lg p-md text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm min-h-[120px]" rows="4">' + escapeHtml(sk.newInstructions) + '</textarea>';
-        }
+        html += '<textarea id="new-skill-instructions" placeholder="Describe what the AI should do when this trigger fires — context to check, reply style, behavioral rules, anything." oninput="state.skills.newInstructions=this.value" class="w-full bg-white border border-outline-variant rounded-lg p-md text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm min-h-[120px]" rows="4">' + escapeHtml(sk.newInstructions) + '</textarea>';
         
         html += '</div><div class="flex gap-sm mt-md">';
         html += '<button onclick="submitNewSkill()" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-6 py-2 rounded-xl transition-all active:scale-95 shadow-sm">Save</button>';

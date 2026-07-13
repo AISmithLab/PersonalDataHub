@@ -84,65 +84,78 @@ async function seedDefaultSkills(store: DataStore): Promise<void> {
   // Delete any stale seeds from previous schema iterations
   for (const s of existing) await store.deleteSkill(s.id);
 
-  const id = `skill_${randomUUID().slice(0, 12)}`;
-  await store.insertSkill({
-    id,
-    name: 'SMS Auto Reply',
-    trigger_event: 'sms_received',
-    current_view: 'LOGICAL',
-    logic_tree: JSON.stringify([
-      {
-        id: 'node_1',
-        type: 'CONTEXT',
-        condition: null,
-        action: 'Check the SMS thread history with this contact for prior scheduling or commitments.'
-      },
-      {
-        id: 'node_2',
-        type: 'CONTEXT',
-        condition: null,
-        action: 'Check the calendar for conflicts before replying to anything time-sensitive.'
-      },
-      {
-        id: 'node_3',
-        type: 'CONTEXT',
-        condition: null,
-        action: 'If the sender references a meeting or event by name, check email for related threads.'
-      },
-      {
-        id: 'node_4',
-        type: 'IF',
-        condition: 'the sender is an automated short code or a delivery notification',
-        action: 'Do not reply to the message.'
-      },
-      {
-        id: 'node_5',
-        type: 'ELIF',
-        condition: 'the calendar shows conflicts or a commitment cannot be confirmed',
-        action: 'Do not commit to a specific time or meeting.'
-      },
-      {
-        id: 'node_6',
-        type: 'ELIF',
-        condition: 'the sender shares a new fact about themselves or their preferences',
-        action: 'Save the fact to memory.'
-      },
-      {
-        id: 'node_7',
-        type: 'ELSE',
-        condition: null,
-        action: 'Reply naturally in 1-3 sentences as the phone owner, using the sender\'s first name if known, and do not identify as AI unless directly asked.'
-      }
-    ]),
-    instructions: [
-      'Context: Check the SMS thread history with this contact for prior scheduling or commitments.',
-      'Context: Check the calendar for conflicts before replying to anything time-sensitive.',
-      'Context: If the sender references a meeting or event by name, check email for related threads.',
-      'If the sender is an automated short code or a delivery notification, do not reply to the message.',
-      'Alternatively, if the calendar shows conflicts or a commitment cannot be confirmed, do not commit to a specific time or meeting.',
-      'Alternatively, if the sender shares a new fact about themselves or their preferences, save the fact to memory.',
-      'Otherwise, reply naturally in 1-3 sentences as the phone owner, using the sender\'s first name if known, and do not identify as AI unless directly asked.'
-    ].join('\n'),
-    enabled: 1,
-  });
+  const defaultPrimitives = [
+    {
+      name: 'Identify Automated Messages',
+      instructions: 'If the sender is an automated short code or a delivery notification, label the message as Automated.',
+      summary: 'Label messages from short codes or delivery notifications as Automated.',
+      primitive_type: 'label',
+      label_tag: 'Automated'
+    },
+    {
+      name: 'Ignore Automated Messages',
+      instructions: 'If the message is labeled Automated, do not reply to the message.',
+      summary: 'Do not reply to messages labeled as Automated.',
+      primitive_type: 'action',
+      label_tag: null
+    },
+    {
+      name: 'Check SMS History',
+      instructions: 'Check the SMS thread history with this contact for prior scheduling or commitments.',
+      summary: 'Check the SMS thread history for prior scheduling.',
+      primitive_type: 'action',
+      label_tag: null
+    },
+    {
+      name: 'Check Calendar',
+      instructions: 'Check the calendar for conflicts before replying to anything time-sensitive.',
+      summary: 'Check the calendar for conflicts.',
+      primitive_type: 'action',
+      label_tag: null
+    },
+    {
+      name: 'Check Email for Meetings',
+      instructions: 'If the sender references a meeting or event by name, check email for related threads.',
+      summary: 'Check email if a meeting is referenced.',
+      primitive_type: 'action',
+      label_tag: null
+    },
+    {
+      name: 'Avoid Conflicting Commitments',
+      instructions: 'If the calendar shows conflicts or a commitment cannot be confirmed, do not commit to a specific time or meeting.',
+      summary: 'Do not commit to a specific time if there are conflicts.',
+      primitive_type: 'action',
+      label_tag: null
+    },
+    {
+      name: 'Save Preferences',
+      instructions: 'If the sender shares a new fact about themselves or their preferences, save the fact to memory.',
+      summary: 'Save new facts or preferences to memory.',
+      primitive_type: 'action',
+      label_tag: null
+    },
+    {
+      name: 'Default Natural Reply',
+      instructions: 'Unless otherwise handled, reply naturally in 1-3 sentences as the phone owner, using the sender\'s first name if known, and do not identify as AI unless directly asked.',
+      summary: 'Reply naturally as the phone owner.',
+      primitive_type: 'action',
+      label_tag: null
+    }
+  ];
+
+  for (const primitive of defaultPrimitives) {
+    const id = `skill_${randomUUID().slice(0, 12)}`;
+    await store.insertSkill({
+      id,
+      name: primitive.name,
+      trigger_event: 'sms_received',
+      current_view: 'SUMMARIZED',
+      logic_tree: '[]',
+      instructions: primitive.instructions,
+      summary: primitive.summary,
+      primitive_type: primitive.primitive_type,
+      label_tag: primitive.label_tag,
+      enabled: 1,
+    });
+  }
 }

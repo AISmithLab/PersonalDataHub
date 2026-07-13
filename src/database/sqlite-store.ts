@@ -350,19 +350,22 @@ export class SqliteDataStore implements DataStore {
     return this.db.prepare('SELECT * FROM agent_skills ORDER BY trigger_event ASC, created_at ASC').all() as import('./datastore.js').SkillRow[];
   }
 
-  insertSkill(skill: { id: string; name: string; instructions: string; trigger_event: string; enabled?: number; current_view?: string; logic_tree?: string }): void {
-    this.db.prepare('INSERT INTO agent_skills (id, name, instructions, trigger_event, enabled, current_view, logic_tree) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+  insertSkill(skill: { id: string; name: string; instructions: string; trigger_event: string; enabled?: number; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null }): void {
+    this.db.prepare('INSERT INTO agent_skills (id, name, instructions, trigger_event, enabled, current_view, logic_tree, summary, primitive_type, label_tag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
       skill.id,
       skill.name,
       skill.instructions,
       skill.trigger_event,
       skill.enabled ?? 0,
       skill.current_view ?? 'SUMMARIZED',
-      skill.logic_tree ?? '[]'
+      skill.logic_tree ?? '[]',
+      skill.summary ?? '',
+      skill.primitive_type ?? 'action',
+      skill.label_tag ?? null
     );
   }
 
-  updateSkill(id: string, fields: { name?: string; instructions?: string; trigger_event?: string; enabled?: number; current_view?: string; logic_tree?: string }): void {
+  updateSkill(id: string, fields: { name?: string; instructions?: string; trigger_event?: string; enabled?: number; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null }): void {
     const sets: string[] = [];
     const vals: unknown[] = [];
     if (fields.name !== undefined) { sets.push('name = ?'); vals.push(fields.name); }
@@ -371,6 +374,9 @@ export class SqliteDataStore implements DataStore {
     if (fields.enabled !== undefined) { sets.push('enabled = ?'); vals.push(fields.enabled); }
     if (fields.current_view !== undefined) { sets.push('current_view = ?'); vals.push(fields.current_view); }
     if (fields.logic_tree !== undefined) { sets.push('logic_tree = ?'); vals.push(fields.logic_tree); }
+    if (fields.summary !== undefined) { sets.push('summary = ?'); vals.push(fields.summary); }
+    if (fields.primitive_type !== undefined) { sets.push('primitive_type = ?'); vals.push(fields.primitive_type); }
+    if (fields.label_tag !== undefined) { sets.push('label_tag = ?'); vals.push(fields.label_tag); }
     if (sets.length === 0) return;
     sets.push("updated_at = datetime('now')");
     this.db.prepare(`UPDATE agent_skills SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id);

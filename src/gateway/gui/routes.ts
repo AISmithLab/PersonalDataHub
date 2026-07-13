@@ -259,7 +259,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   });
 
   app.post('/api/skills', async (c) => {
-    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; current_view?: string; logic_tree?: string };
+    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null };
     if (!body.name?.trim()) return c.json({ ok: false, error: 'name is required' }, 400);
     const id = `skill_${randomUUID().slice(0, 12)}`;
     await deps.store.insertSkill({
@@ -269,14 +269,17 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
       trigger_event: body.trigger_event ?? 'sms_received',
       enabled: 0,
       current_view: body.current_view ?? 'SUMMARIZED',
-      logic_tree: body.logic_tree ?? '[]'
+      logic_tree: body.logic_tree ?? '[]',
+      summary: body.summary ?? '',
+      primitive_type: body.primitive_type ?? 'action',
+      label_tag: body.label_tag ?? null
     });
     return c.json({ ok: true, id });
   });
 
   app.put('/api/skills/:id', async (c) => {
     const id = c.req.param('id');
-    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; activate?: boolean; current_view?: string; logic_tree?: string };
+    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; activate?: boolean; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null };
     if (body.activate) {
       const skill = (await deps.store.listSkills()).find(s => s.id === id);
       if (skill) await deps.store.activateSkill(id, body.trigger_event ?? skill.trigger_event);
@@ -286,7 +289,10 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
         instructions: body.instructions,
         trigger_event: body.trigger_event,
         current_view: body.current_view,
-        logic_tree: body.logic_tree
+        logic_tree: body.logic_tree,
+        summary: body.summary,
+        primitive_type: body.primitive_type,
+        label_tag: body.label_tag
       });
     }
     return c.json({ ok: true });
