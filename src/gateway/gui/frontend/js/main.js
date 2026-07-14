@@ -1271,11 +1271,11 @@ var currentTab = 'ai';
     }
     window.saveEditSkill = saveEditSkill;
 
-    async function activateSkill(id, trigger_event) {
-      await fetch('/api/skills/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activate: true, trigger_event: trigger_event }) });
+    async function toggleSkillActive(id, enabled) {
+      await fetch('/api/skills/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enabled }) });
       await loadSkillsAsync();
     }
-    window.activateSkill = activateSkill;
+    window.toggleSkillActive = toggleSkillActive;
 
 async function deleteSkill(id) {
       if (!confirm('Delete this skill?')) return;

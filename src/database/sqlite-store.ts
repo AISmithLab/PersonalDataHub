@@ -382,9 +382,8 @@ export class SqliteDataStore implements DataStore {
     this.db.prepare(`UPDATE agent_skills SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id);
   }
 
-  activateSkill(id: string, trigger_event: string): void {
-    this.db.prepare("UPDATE agent_skills SET enabled = 0, updated_at = datetime('now') WHERE trigger_event = ? AND id != ?").run(trigger_event, id);
-    this.db.prepare("UPDATE agent_skills SET enabled = 1, updated_at = datetime('now') WHERE id = ?").run(id);
+  setSkillEnabled(id: string, enabled: number): void {
+    this.db.prepare("UPDATE agent_skills SET enabled = ?, updated_at = datetime('now') WHERE id = ?").run(enabled, id);
   }
 
   deleteSkill(id: string): void {

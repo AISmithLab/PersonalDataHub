@@ -279,10 +279,9 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
 
   app.put('/api/skills/:id', async (c) => {
     const id = c.req.param('id');
-    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; activate?: boolean; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null };
-    if (body.activate) {
-      const skill = (await deps.store.listSkills()).find(s => s.id === id);
-      if (skill) await deps.store.activateSkill(id, body.trigger_event ?? skill.trigger_event);
+    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; enabled?: boolean; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null };
+    if (body.enabled !== undefined) {
+      await deps.store.setSkillEnabled(id, body.enabled ? 1 : 0);
     } else {
       await deps.store.updateSkill(id, {
         name: body.name,

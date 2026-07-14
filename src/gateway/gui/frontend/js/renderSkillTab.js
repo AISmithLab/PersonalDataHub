@@ -17,7 +17,7 @@ function renderSkillTab() {
       html += '<div class="flex justify-between items-end pb-xs border-b border-outline-variant/60">';
       html += '<div class="flex flex-col gap-base">';
       html += '<h2 class="font-headline-lg text-headline-lg text-on-surface">Skills</h2>';
-      html += '<p class="font-body-sm text-body-sm text-on-surface-variant">One active skill per trigger event. Injected into the AI prompt when that event fires.</p>';
+      html += '<p class="font-body-sm text-body-sm text-on-surface-variant">Primitive rules (labels and actions) injected dynamically when trigger events fire.</p>';
       html += '</div>';
       html += '<button onclick="toggleAddSkill()" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-4 py-2 rounded-xl transition-all active:scale-95 flex items-center gap-xs shadow-sm">';
       html += '<span class="material-symbols-outlined text-[18px]">add</span>';
@@ -72,8 +72,41 @@ function renderSkillTab() {
         html += '<p class="font-body-sm text-body-sm text-on-surface-variant max-w-sm">Create a skill to guide the AI\'s behavior when a trigger fires.</p>';
         html += '</div>';
       } else {
+        html += '<div class="flex items-center gap-sm mt-md mb-xs">';
+        html += '<select onchange="state.skills.filterType=this.value; render()" class="bg-surface border border-outline-variant rounded-lg px-2 py-1 text-label-sm font-label-sm focus:outline-none focus:border-primary shadow-sm">';
+        html += '<option value="">All Types</option>';
+        html += '<option value="label"' + (sk.filterType === 'label' ? ' selected' : '') + '>Labels</option>';
+        html += '<option value="action"' + (sk.filterType === 'action' ? ' selected' : '') + '>Actions</option>';
+        html += '</select>';
+        
+        var uniqueTags = [];
+        sk.items.forEach(function(i) {
+          if (i.label_tag && uniqueTags.indexOf(i.label_tag) === -1) uniqueTags.push(i.label_tag);
+        });
+        if (uniqueTags.length > 0) {
+          html += '<select onchange="state.skills.filterTag=this.value; render()" class="bg-surface border border-outline-variant rounded-lg px-2 py-1 text-label-sm font-label-sm focus:outline-none focus:border-primary shadow-sm">';
+          html += '<option value="">All Tags</option>';
+          uniqueTags.forEach(function(tag) {
+            html += '<option value="' + escapeAttr(tag) + '"' + (sk.filterTag === tag ? ' selected' : '') + '>[' + escapeHtml(tag) + ']</option>';
+          });
+          html += '</select>';
+        }
+        html += '</div>';
+        
+        var filteredItems = sk.items.filter(function(s) {
+          if (sk.filterType && s.primitive_type !== sk.filterType) return false;
+          if (sk.filterTag) {
+            if (s.primitive_type === 'label') {
+              if (s.label_tag !== sk.filterTag) return false;
+            } else {
+              if (s.instructions.toLowerCase().indexOf(sk.filterTag.toLowerCase()) === -1) return false;
+            }
+          }
+          return true;
+        });
+        
         html += '<div class="space-y-sm">';
-        sk.items.forEach(function(s) { html += renderSkillCard(s); });
+        filteredItems.forEach(function(s) { html += renderSkillCard(s); });
         html += '</div>';
       }
 

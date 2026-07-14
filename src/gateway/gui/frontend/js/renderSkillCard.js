@@ -70,9 +70,39 @@ function renderSkillCard(s) {
           html += '<div class="mb-md"></div>';
         }
         
-        if (!isActive) {
-          html += '<button onclick="activateSkill(\'' + safeId + '\',\'' + escapeAttr(s.trigger_event) + '\')" class="border border-primary text-primary hover:bg-primary-container/10 font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 shadow-sm">Set as active</button>';
+        var relatedHtml = '';
+        if (s.primitive_type === 'label' && s.label_tag) {
+          var acts = sk.items.filter(function(i) { return i.primitive_type === 'action' && i.instructions.toLowerCase().indexOf(s.label_tag.toLowerCase()) > -1; });
+          if (acts.length > 0) {
+            relatedHtml += '<div class="mt-xs mb-md p-3 bg-surface-container-lowest border border-outline-variant rounded-lg">';
+            relatedHtml += '<div class="font-label-sm text-label-sm text-on-surface-variant mb-2">Triggers Actions:</div>';
+            relatedHtml += '<div class="flex items-center gap-2 flex-wrap">';
+            relatedHtml += '<span class="px-2 py-1 bg-secondary-container text-on-secondary-container rounded text-xs font-mono font-medium border border-secondary/20">[' + escapeHtml(s.label_tag) + ']</span>';
+            relatedHtml += '<span class="material-symbols-outlined text-[16px] text-outline">arrow_forward</span>';
+            acts.forEach(function(a) {
+              relatedHtml += '<span class="px-2 py-1 bg-primary-container text-on-primary-container rounded text-xs font-mono font-medium border border-primary/20">' + escapeHtml(a.name) + '</span>';
+            });
+            relatedHtml += '</div></div>';
+          }
+        } else if (s.primitive_type === 'action') {
+          var lbls = sk.items.filter(function(i) { return i.primitive_type === 'label' && i.label_tag && s.instructions.toLowerCase().indexOf(i.label_tag.toLowerCase()) > -1; });
+          if (lbls.length > 0) {
+            relatedHtml += '<div class="mt-xs mb-md p-3 bg-surface-container-lowest border border-outline-variant rounded-lg">';
+            relatedHtml += '<div class="font-label-sm text-label-sm text-on-surface-variant mb-2">Depends on Labels:</div>';
+            relatedHtml += '<div class="flex items-center gap-2 flex-wrap">';
+            lbls.forEach(function(l) {
+              relatedHtml += '<span class="px-2 py-1 bg-secondary-container text-on-secondary-container rounded text-xs font-mono font-medium border border-secondary/20">[' + escapeHtml(l.label_tag) + ']</span>';
+            });
+            relatedHtml += '<span class="material-symbols-outlined text-[16px] text-outline">arrow_forward</span>';
+            relatedHtml += '<span class="px-2 py-1 bg-primary-container text-on-primary-container rounded text-xs font-mono font-medium border border-primary/20">' + escapeHtml(s.name) + '</span>';
+            relatedHtml += '</div></div>';
+          }
         }
+        
+        html += relatedHtml;
+        
+        
+        html += '<button onclick="toggleSkillActive(\'' + safeId + '\', ' + (isActive ? 'false' : 'true') + ')" class="border border-primary text-primary hover:bg-primary-container/10 font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 shadow-sm">' + (isActive ? 'Disable' : 'Enable') + '</button>';
       }
       html += '</div>';
       return html;

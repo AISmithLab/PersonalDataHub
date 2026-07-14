@@ -252,17 +252,20 @@ async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]
     type: 'function',
     function: {
       name: 'save_skill',
-      description: 'Create or update an agent skill. Each trigger_event can have one active skill at a time. Pass id to update an existing skill, omit id to create a new one. Activating a skill automatically deactivates any other skill with the same trigger.',
+      description: 'Create or update an agent skill primitive. Primitives can be labels (to classify context) or actions (to execute logic based on context). Multiple primitives can be enabled at once.',
       parameters: {
         type: 'object',
         properties: {
           id: { type: 'string', description: 'Skill ID to update (omit to create new)' },
           name: { type: 'string', description: 'Short name for this skill' },
-          instructions: { type: 'string', description: 'Full behavior instructions as plain text. Can include what context to check, reply style, and behavioral rules.' },
+          summary: { type: 'string', description: 'A single sentence summarizing the rule' },
+          instructions: { type: 'string', description: 'Full behavioral instructions. For labels: state the condition to match. For actions: state what to do if conditions are met.' },
           trigger_event: { type: 'string', description: 'When this skill fires. Currently supported: sms_received' },
-          activate: { type: 'boolean', description: 'If true, make this skill the active one for its trigger (default false)' },
+          primitive_type: { type: 'string', enum: ['label', 'action'], description: 'Type of primitive' },
+          label_tag: { type: 'string', description: 'If primitive_type is label, the tag string to append when matched (e.g., "Spam")' },
+          enabled: { type: 'boolean', description: 'If true, enable this skill (default false)' },
         },
-        required: ['name', 'instructions', 'trigger_event'],
+        required: ['name', 'summary', 'instructions', 'trigger_event', 'primitive_type'],
       },
     },
   });
@@ -326,7 +329,7 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
   }
 
   lines.push('', 'Memory: Use save_memory() to record important facts the user shares (preferences, ongoing projects, personal context). Use update_memory(id) when a fact changes. Use delete_memory(id) for stale facts. Be proactive but concise — one clear sentence per memory.');
-  lines.push('', 'Skills: Use list_skills() to see agent skills (one active per trigger). Use save_skill(name, instructions, trigger_event, activate?) to create/update a skill — set activate=true to make it the active one for that trigger, which deactivates any other. Use delete_skill(id) to remove one. Currently supported trigger: sms_received.');
+  lines.push('', 'Skills: Skills are primitive rules (labels and actions). Use list_skills() to view them. Use save_skill(name, instructions, trigger_event, enabled) to create/update a primitive. Labels classify incoming events and append tags to the context ground truth. Actions define how to respond based on the context. Ensure one primitive per rule. Do not disable other skills for the same trigger unless explicitly replacing them, as multiple primitives compose together. Currently supported trigger: sms_received.');
   lines.push('', 'Code execution: Use run_code() to run JavaScript on this device. Supports top-level await, fetch, require (fs, path, etc.), Buffer, and __dataDir (path to app data). Use console.log() to emit output — return values are ignored. Each call is a fresh context; write files at __dataDir to persist data between calls.');
 
   if (sms && sms.length > 0) {
@@ -484,21 +487,23 @@ async function executeTool(
 
     case 'save_skill': {
       const name = String(input.name ?? '').trim();
+      const summary = String(input.summary ?? '').trim();
       const instructions = String(input.instructions ?? '').trim();
       const trigger_event = String(input.trigger_event ?? 'sms_received').trim();
-      const activate = Boolean(input.activate);
+      const primitive_type = String(input.primitive_type ?? 'action').trim();
+      const label_tag = input.label_tag ? String(input.label_tag).trim() : null;
+      const enabled = Boolean(input.enabled);
       if (!name || !instructions) return JSON.stringify({ error: 'name and instructions are required' });
       const existingId = String(input.id ?? '').trim();
       if (existingId) {
-        await deps.store.updateSkill(existingId, { name, instructions, trigger_event });
-        if (activate) await deps.store.activateSkill(existingId, trigger_event);
-        await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_skill_updated', source: null, details: JSON.stringify({ id: existingId, name, trigger_event, activate }) });
+        await deps.store.updateSkill(existingId, { name, summary, instructions, trigger_event, primitive_type, label_tag });
+        if (input.enabled !== undefined) await deps.store.setSkillEnabled(existingId, enabled ? 1 : 0);
+        await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_skill_updated', source: null, details: JSON.stringify({ id: existingId, name, primitive_type }) });
         return JSON.stringify({ ok: true, id: existingId });
       }
       const skillId = `skill_${randomUUID().slice(0, 12)}`;
-      await deps.store.insertSkill({ id: skillId, name, instructions, trigger_event, enabled: 0 });
-      if (activate) await deps.store.activateSkill(skillId, trigger_event);
-      await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_skill_created', source: null, details: JSON.stringify({ id: skillId, name, trigger_event, activate }) });
+      await deps.store.insertSkill({ id: skillId, name, summary, instructions, trigger_event, primitive_type, label_tag, enabled: enabled ? 1 : 0 });
+      await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_skill_created', source: null, details: JSON.stringify({ id: skillId, name, primitive_type }) });
       return JSON.stringify({ ok: true, id: skillId });
     }
 
@@ -789,6 +794,45 @@ async function executeAutoReplyTool(
   }
 }
 
+async function evaluateLabels(
+  client: OpenAI,
+  model: string,
+  from: string,
+  smsBody: string,
+  labelSkills: any[]
+): Promise<string[]> {
+  if (labelSkills.length === 0) return [];
+  const prompt = [
+    `You are a text classifier. Evaluate this incoming SMS against the following rules.`,
+    `Message from ${from}: "${smsBody}"`,
+    `\nRules:`,
+    ...labelSkills.map(s => `- [${s.label_tag}] ${s.instructions}`),
+    `\nRespond with a JSON object containing a "tags" array of the label tags that apply (e.g. {"tags": ["Tag1", "Tag2"]}).`
+  ].join('\n');
+
+  try {
+    const response = await client.chat.completions.create({
+      model,
+      messages: [{ role: 'system', content: prompt }],
+      response_format: { type: 'json_object' }
+    });
+    const content = response.choices[0]?.message.content?.trim();
+    if (!content) return [];
+    
+    let tags: string[] = [];
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed.tags && Array.isArray(parsed.tags)) tags = parsed.tags;
+    } catch (e) {
+      tags = labelSkills.map(s => s.label_tag).filter(tag => tag && content.includes(tag));
+    }
+    return tags.filter(Boolean) as string[];
+  } catch (err) {
+    console.error('[evaluateLabels] error:', err);
+    return [];
+  }
+}
+
 async function runAutoReplyLoop(
   deps: ServerDeps,
   from: string,
@@ -816,10 +860,15 @@ async function runAutoReplyLoop(
     '- save_memory / update_memory / delete_memory: persist facts about contacts',
   ];
 
-  // Inject the active skill for this trigger — one enabled skill per trigger_event
-  const activeSkill = skills.find(s => s.trigger_event === 'sms_received' && s.enabled);
-  if (activeSkill) {
-    systemLines.push('', '--- Behavior instructions ---', activeSkill.instructions);
+  const activeLabelSkills = skills.filter(s => s.trigger_event === 'sms_received' && s.enabled && s.primitive_type === 'label');
+  const activeActionSkills = skills.filter(s => s.trigger_event === 'sms_received' && s.enabled && s.primitive_type !== 'label');
+
+  const appliedLabels = await evaluateLabels(client, model, from, smsBody, activeLabelSkills);
+
+  if (activeActionSkills.length > 0) {
+    systemLines.push('', '--- Behavior Actions ---');
+    systemLines.push('Dynamically select which action rules to run based on the context ground truth (including labels). Only execute actions whose conditions are met.');
+    activeActionSkills.forEach(s => systemLines.push(`- ${s.name}: ${s.instructions}`));
   }
 
   if (memories.length > 0) {
@@ -836,9 +885,10 @@ async function runAutoReplyLoop(
     });
   }
 
+  const labelTagsStr = appliedLabels.length > 0 ? ` [Labels: ${appliedLabels.join(', ')}]` : '';
   const chatMessages: OpenAI.ChatCompletionMessageParam[] = [
     { role: 'system', content: systemLines.join('\n') },
-    { role: 'user', content: `Incoming SMS from ${from}: "${smsBody}"` },
+    { role: 'user', content: `Incoming SMS from ${from}: "${smsBody}"${labelTagsStr}` },
   ];
 
   for (let round = 0; round < maxRounds; round++) {

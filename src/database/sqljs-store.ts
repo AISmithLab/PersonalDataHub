@@ -406,9 +406,8 @@ export class SqlJsDataStore implements DataStore {
     this.run(`UPDATE agent_skills SET ${sets.join(', ')} WHERE id = ?`, [...vals, id]);
   }
 
-  activateSkill(id: string, trigger_event: string): void {
-    this.run('UPDATE agent_skills SET enabled = 0, updated_at = ? WHERE trigger_event = ? AND id != ?', [this.now(), trigger_event, id]);
-    this.run('UPDATE agent_skills SET enabled = 1, updated_at = ? WHERE id = ?', [this.now(), id]);
+  setSkillEnabled(id: string, enabled: number): void {
+    this.run('UPDATE agent_skills SET enabled = ?, updated_at = ? WHERE id = ?', [enabled, this.now(), id]);
   }
 
   deleteSkill(id: string): void {
