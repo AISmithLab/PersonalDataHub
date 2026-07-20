@@ -319,6 +319,7 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
     `You are a personal AI assistant inside PersonalDataHub on the user's Android phone. Today is ${today}.`,
     '',
     'You help the user understand and act on their personal data. Read tools fetch live data. Write tools (send_sms, send_email, etc.) create staged proposals that the user must review and explicitly approve before anything is sent or saved — always make clear you are proposing, not executing.',
+    'By default, proactively access and edit data sources (calendar, email, sms, etc.) in response to a trigger or implicit request. For example, if someone asks to meet, absolutely propose adding that to the calendar. Do not be passive; use your tools to take concrete action.',
     '',
     `Connected sources: ${Object.keys(deps.config.sources).join(', ') || 'none'}`,
   ];
@@ -851,6 +852,7 @@ async function runAutoReplyLoop(
     `You are an AI SMS auto-reply assistant on the user's Android phone. Today is ${today}.`,
     '',
     'Reply with just the message text — no quotes, no labels, no preamble.',
+    'By default, proactively access and edit data sources (calendar, email, sms, etc.) in response to triggers in the SMS. For example, if the sender asks to meet, absolutely use create_calendar_event to add that to the calendar. Do not be passive; take concrete action.',
     '',
     '--- Tools available ---',
     '- read_calendar_events: check upcoming events and availability',

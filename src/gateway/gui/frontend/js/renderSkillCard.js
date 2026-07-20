@@ -5,7 +5,7 @@ function renderSkillCard(s) {
       var isActive = !!s.enabled;
       var isTranslating = !!sk.isTranslating[s.id];
       var borderStyle = isEditing ? 'border-primary shadow-md' : isActive ? 'border-primary/50 hover:border-primary shadow-sm bg-white' : 'border-outline-variant hover:border-primary/30 shadow-sm bg-white';
-      var html = '<div data-skill-id="' + safeId + '" class="border rounded-xl p-md transition-all relative ' + borderStyle + '">';
+      var html = '<div data-skill-id="' + safeId + '" class="border rounded-xl p-2 md:p-sm transition-all relative ' + borderStyle + '">';
       
       if (isTranslating) {
         html += '<div class="absolute inset-0 bg-white/70 z-10 flex flex-col items-center justify-center rounded-xl gap-sm">';
@@ -36,9 +36,31 @@ function renderSkillCard(s) {
         html += '<button onclick="cancelEditSkill()" class="border border-outline text-on-surface-variant hover:bg-surface-container-high font-label-caps text-label-caps px-6 py-2 rounded-xl transition-all active:scale-95">Cancel</button>';
         html += '</div>';
       } else {
-        html += '<div class="flex items-start justify-between gap-sm mb-xs">';
-        html += '<div class="flex items-center gap-xs flex-wrap">';
+        html += '<details class="group">';
+        html += '<summary class="flex items-start justify-between gap-sm cursor-pointer list-none select-none [&::-webkit-details-marker]:hidden">';
+        
+        // Chevron + Title
+        html += '<div class="flex items-center gap-2 flex-wrap mt-[2px]">';
+        html += '<span class="material-symbols-outlined text-[20px] text-on-surface-variant group-open:rotate-90 transition-transform">chevron_right</span>';
         html += '<span class="font-body-md text-body-md font-bold text-on-surface">' + escapeHtml(s.name) + '</span>';
+        html += '</div>';
+
+        // Toggle + Edit + Delete (with stopPropagation)
+        html += '<div class="flex gap-xs items-center shrink-0" onclick="event.stopPropagation()">';
+        html += '<label class="relative inline-flex items-center cursor-pointer mr-1 md:mr-2">';
+        html += '<input type="checkbox" class="sr-only peer" ' + (isActive ? 'checked' : '') + ' onchange="toggleSkillActive(\'' + safeId + '\', this.checked)">';
+        html += '<div class="w-9 h-5 bg-surface-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[\'\'] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-outline-variant after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>';
+        html += '</label>';
+        html += '<button onclick="startEditSkill(\'' + safeId + '\')" class="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center hover:bg-surface-container-high text-on-surface-variant transition-colors" title="Edit"><span class="material-symbols-outlined text-[16px] md:text-[18px]">edit</span></button>';
+        html += '<button onclick="deleteSkill(\'' + safeId + '\')" class="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center hover:bg-surface-container-high text-error transition-colors" title="Delete"><span class="material-symbols-outlined text-[16px] md:text-[18px]">close</span></button>';
+        html += '</div>';
+        
+        html += '</summary>';
+        
+        html += '<div class="pl-[28px] mt-2 flex flex-col gap-3">';
+        
+        // Badges
+        html += '<div class="flex flex-wrap gap-xs">';
         html += '<span class="font-mono-label text-mono-label bg-surface-container text-on-surface-variant px-xs py-0.5 rounded uppercase">' + (SKILL_TRIGGERS.find(function(t){return t.key===s.trigger_event;})||{label:s.trigger_event}).label + '</span>';
         if (isActive) {
           html += '<span class="font-mono-label text-mono-label bg-primary-container text-on-primary-container px-xs py-0.5 rounded uppercase font-semibold">active</span>';
@@ -50,31 +72,22 @@ function renderSkillCard(s) {
           html += '<span class="font-mono-label text-mono-label border border-outline-variant text-on-surface-variant px-xs py-0.5 rounded uppercase">' + escapeHtml(s.label_tag) + '</span>';
         }
         html += '</div>';
-        html += '<div class="flex gap-xs items-center shrink-0">';
-        html += '<button onclick="startEditSkill(\'' + safeId + '\')" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-container-high text-on-surface-variant transition-colors" title="Edit"><span class="material-symbols-outlined text-[18px]">edit</span></button>';
-        html += '<button onclick="deleteSkill(\'' + safeId + '\')" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-container-high text-error transition-colors" title="Delete"><span class="material-symbols-outlined text-[18px]">close</span></button>';
-        html += '</div>';
-        html += '</div>';
         
+        // Summary & Instructions
         var displaySummary = s.summary ? s.summary : (s.instructions || 'No summary available.');
-        html += '<p class="font-body-md text-body-md font-medium text-on-surface leading-relaxed mb-xs">' + escapeHtml(displaySummary) + '</p>';
+        html += '<p class="font-body-sm md:font-body-md text-body-sm md:text-body-md font-medium text-on-surface leading-relaxed">' + escapeHtml(displaySummary) + '</p>';
         
         if (s.summary && s.instructions) {
-          html += '<details class="group mt-2 mb-md">';
-          html += '<summary class="cursor-pointer font-label-sm text-primary select-none list-none flex items-center gap-1 opacity-80 hover:opacity-100 transition-opacity"><span class="material-symbols-outlined text-[16px] group-open:rotate-90 transition-transform">chevron_right</span>View Details</summary>';
-          html += '<div class="mt-2 pl-6">';
+          html += '<div class="p-3 bg-surface-container-lowest border border-outline-variant/50 rounded-lg">';
           html += '<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed whitespace-pre-wrap break-words">' + escapeHtml(s.instructions) + '</p>';
           html += '</div>';
-          html += '</details>';
-        } else if (!s.summary) {
-          html += '<div class="mb-md"></div>';
         }
         
         var relatedHtml = '';
         if (s.primitive_type === 'label' && s.label_tag) {
           var acts = sk.items.filter(function(i) { return i.primitive_type === 'action' && i.instructions.toLowerCase().indexOf(s.label_tag.toLowerCase()) > -1; });
           if (acts.length > 0) {
-            relatedHtml += '<div class="mt-xs mb-md p-3 bg-surface-container-lowest border border-outline-variant rounded-lg">';
+            relatedHtml += '<div class="p-3 bg-surface-container-lowest border border-outline-variant rounded-lg">';
             relatedHtml += '<div class="font-label-sm text-label-sm text-on-surface-variant mb-2">Triggers Actions:</div>';
             relatedHtml += '<div class="flex items-center gap-2 flex-wrap">';
             relatedHtml += '<span class="px-2 py-1 bg-secondary-container text-on-secondary-container rounded text-xs font-mono font-medium border border-secondary/20">[' + escapeHtml(s.label_tag) + ']</span>';
@@ -87,7 +100,7 @@ function renderSkillCard(s) {
         } else if (s.primitive_type === 'action') {
           var lbls = sk.items.filter(function(i) { return i.primitive_type === 'label' && i.label_tag && s.instructions.toLowerCase().indexOf(i.label_tag.toLowerCase()) > -1; });
           if (lbls.length > 0) {
-            relatedHtml += '<div class="mt-xs mb-md p-3 bg-surface-container-lowest border border-outline-variant rounded-lg">';
+            relatedHtml += '<div class="p-3 bg-surface-container-lowest border border-outline-variant rounded-lg">';
             relatedHtml += '<div class="font-label-sm text-label-sm text-on-surface-variant mb-2">Depends on Labels:</div>';
             relatedHtml += '<div class="flex items-center gap-2 flex-wrap">';
             lbls.forEach(function(l) {
@@ -100,9 +113,8 @@ function renderSkillCard(s) {
         }
         
         html += relatedHtml;
-        
-        
-        html += '<button onclick="toggleSkillActive(\'' + safeId + '\', ' + (isActive ? 'false' : 'true') + ')" class="border border-primary text-primary hover:bg-primary-container/10 font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 shadow-sm">' + (isActive ? 'Disable' : 'Enable') + '</button>';
+        html += '</div>';
+        html += '</details>';
       }
       html += '</div>';
       return html;

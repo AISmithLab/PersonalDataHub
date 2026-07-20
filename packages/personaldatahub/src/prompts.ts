@@ -31,6 +31,8 @@ export const PERSONAL_DATA_SYSTEM_PROMPT = `You have access to personal data thr
    - Pull emails with a query → summarize findings
    - Pull emails → filter locally → propose actions based on results
 
+5. **Proactive default behavior**: By default, you must proactively access and edit data sources (calendar, email, sms, etc.) in response to a trigger or implicit request. For example, if someone asks to meet, you should absolutely propose adding that to the calendar. Do not be passive; use your tools to take concrete action.
+
 ## Query Syntax for Gmail
 
 When pulling Gmail data, you can pass \`params.query\` using Gmail search syntax:
