@@ -90,7 +90,7 @@ var currentTab = 'ai';
           .then(function(r) { return r.json(); })
           .then(function(data) {
             state.emailsLoading = false;
-            state.realEmails = data.messages || [];
+            state.realEmails = data.emails || [];
             if (currentTab === 'gmail') render();
           })
           .catch(function(err) {
@@ -105,7 +105,7 @@ var currentTab = 'ai';
       if (cal && cal.connected && !state.realEvents && !state.eventsLoading) {
         state.eventsLoading = true;
         state.eventsError = null;
-        fetch('/api/google_calendar/preview?limit=20&t=' + Date.now())
+        fetch('/api/calendar/preview?limit=20&t=' + Date.now())
           .then(function(r) { return r.json(); })
           .then(function(data) {
             state.eventsLoading = false;

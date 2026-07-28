@@ -40,7 +40,7 @@ function renderSkillCard(s) {
         html += '<summary class="flex items-start justify-between gap-sm cursor-pointer list-none select-none [&::-webkit-details-marker]:hidden">';
         
         // Chevron + Title
-        html += '<div class="flex items-center gap-2 flex-wrap mt-[2px]">';
+        html += '<div class="flex items-start gap-2 flex-1 min-w-0 mt-[2px]">';
         html += '<span class="material-symbols-outlined text-[20px] text-on-surface-variant group-open:rotate-90 transition-transform">chevron_right</span>';
         html += '<span class="font-body-md text-body-md font-bold text-on-surface">' + escapeHtml(s.name) + '</span>';
         html += '</div>';
