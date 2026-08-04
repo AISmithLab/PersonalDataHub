@@ -8,6 +8,7 @@ import type { ServerDeps } from '../server.js';
 import { applyFilters, type QuickFilter } from '../filters.js';
 import type { MemoryRow, SkillRow } from '../../database/datastore.js';
 import { runCode } from '../code-runner/runner.js';
+import { setContacts, labelWithContact } from './contacts-cache.js';
 
 type SmsMessage = { address: string; body: string; date: number };
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
@@ -349,7 +350,7 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
     memories.forEach(m => lines.push(`  [id:${m.id}] ${m.content}`));
   }
 
-  lines.push('', 'Memory: Use save_memory() to record important facts the user shares (preferences, ongoing projects, personal context). Use update_memory(id) when a fact changes. Use delete_memory(id) for stale facts. Be proactive but concise — one clear sentence per memory.');
+  lines.push('', 'Memory: Use save_memory() to record important facts the user shares (preferences, ongoing projects, personal context). Use update_memory(id) when a fact changes. Use delete_memory(id) for stale facts. Be proactive but concise — one clear sentence per memory. If a memory is about someone in an SMS conversation, refer to them by their contact name (shown in the conversation header) rather than their phone number.');
   lines.push('', 'Skills: Skills are primitive rules (labels and actions). Use list_skills() to view them. Use save_skill(name, instructions, trigger_event, enabled) to create/update a primitive. Labels classify incoming events and append tags to the context ground truth. Actions define how to respond based on the context. Ensure one primitive per rule. Do not disable other skills for the same trigger unless explicitly replacing them, as multiple primitives compose together. Currently supported triggers: sms_received, photo_added, email_received, calendar_event_starting, manual_shortcut. Specify allowed_sources to scope permissions.');
   lines.push('', 'Code execution: Use run_code() to run JavaScript on this device. Supports top-level await, fetch, require (fs, path, etc.), Buffer, and __dataDir (path to app data). Use console.log() to emit output — return values are ignored. Each call is a fresh context; write files at __dataDir to persist data between calls. When asked to find photos matching some criteria, or to clean up duplicates/clutter, prefer writing this logic yourself in run_code over guessing from read_photos summaries alone — see the run_code tool description for the __photos bindings.');
 
@@ -357,7 +358,7 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
     lines.push('', 'Recent SMS messages (newest first):');
     sms.slice(0, 50).forEach(msg => {
       const d = new Date(msg.date).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-      lines.push(`  [${d}] ${msg.address}: ${msg.body.slice(0, 200)}`);
+      lines.push(`  [${d}] ${labelWithContact(msg.address)}: ${msg.body.slice(0, 200)}`);
     });
   } else if (sms === null) {
     lines.push('', 'SMS context: not loaded. If the user asks about SMS messages, suggest they open the SMS tab first.');
@@ -1037,7 +1038,7 @@ async function runAutoReplyLoop(
     '- read_emails: scan recent email threads for context',
     '- create_calendar_event: create a new event (requires explicit time from sender)',
     '- read_sms_thread: review conversation history with this contact',
-    '- save_memory / update_memory / delete_memory: persist facts about contacts',
+    '- save_memory / update_memory / delete_memory: persist facts about contacts (use the contact\'s name, not their phone number, when one is known)',
   ];
 
   const appliedLabels = await evaluateLabels(client, model, from, smsBody, activeLabelSkills);
@@ -1277,6 +1278,17 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     return c.json({ ok: true, enabled, maxToolRounds });
   });
 
+  // Contact list sync — called by the RN app (App.tsx) whenever it (re)reads the device
+  // contact list, so backend prompt-building code can resolve phone numbers to names
+  // synchronously, in-process, with no extra tool/API call per SMS reply or memory.
+  // Uses /device/ prefix (not /api/) to bypass session middleware, same reasoning as /sms/*.
+  app.post('/device/contacts-sync', async (c) => {
+    const body = await c.req.json();
+    const contacts = Array.isArray(body.contacts) ? body.contacts : [];
+    setContacts(contacts);
+    return c.json({ ok: true, count: contacts.length });
+  });
+
   // Auto-reply execute — called by Android SmsReceiver.
   // Uses /sms/ prefix (not /api/) to bypass session middleware; safe because server only binds to 127.0.0.1.
   app.post('/sms/auto-reply', async (c) => {
@@ -1290,7 +1302,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     const body = await c.req.json();
     const fromRaw: string = body.from ?? '';
     const contactName: string = body.contactName;
-    const fromLabel = contactName ? `${contactName} (${fromRaw})` : fromRaw;
+    const fromLabel = labelWithContact(fromRaw, contactName);
     const smsBody: string = body.body ?? '';
     const history: SmsHistoryEntry[] = Array.isArray(body.history) ? body.history : [];
     if (!fromRaw || !smsBody) {
@@ -1351,9 +1363,10 @@ export function createChatRoutes(deps: ServerDeps): Hono {
       return c.json({ ok: false, error: 'AI not configured — add an API key in Settings.' }, 400);
     }
     const body = await c.req.json();
-    const from: string = body.from ?? '';
+    const fromRaw: string = body.from ?? '';
+    const from = labelWithContact(fromRaw);
     const smsBody: string = body.body ?? '';
-    if (!from || !smsBody) {
+    if (!fromRaw || !smsBody) {
       return c.json({ ok: false, error: 'from and body required' }, 400);
     }
     try {
@@ -1384,7 +1397,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
         timestamp: new Date().toISOString(),
         event: 'sms_manual_reply',
         source: 'sms',
-        details: JSON.stringify({ from, incomingBody: smsBody, reply }),
+        details: JSON.stringify({ from: fromRaw, incomingBody: smsBody, reply }),
       });
       return c.json({ ok: true, reply });
     } catch (err) {
