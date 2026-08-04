@@ -38,6 +38,10 @@ local.properties
 # node.js
 #
 node_modules/
+
+# nodejs-mobile bundled backend (built artifact, contains embedded secrets)
+nodejs-assets/nodejs-project/*.js
+nodejs-assets/nodejs-project/*.json
 npm-debug.log
 yarn-error.log
 

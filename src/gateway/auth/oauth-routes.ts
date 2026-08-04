@@ -36,6 +36,26 @@ export function getBaseUrl(config: HubConfigParsed): string {
   return `http://127.0.0.1:${port}`;
 }
 
+// On the mobile app, OAuth start/callback happens in the system browser (WebViews are
+// blocked by Google/GitHub). It must hand control back to the app via the pdh:// deep
+// link (caught by MainActivity's intent-filter). On desktop/browser deployments there's
+// no separate app to return to, so we stay on the same page via query params.
+function oauthSuccessUrl(baseUrl: string, source: string): string {
+  return process.env.PDH_MOBILE === 'true'
+    ? `pdh://oauth?success=${encodeURIComponent(source)}`
+    : `${baseUrl}/?oauth_success=${encodeURIComponent(source)}`;
+}
+
+function oauthErrorUrl(baseUrl: string, message: string): string {
+  return oauthErrorUrlPrefix(baseUrl) + encodeURIComponent(message);
+}
+
+// Prefix only — used client-side in buildExchangePage where the error message isn't
+// known until the browser catches an exception during token exchange.
+function oauthErrorUrlPrefix(baseUrl: string): string {
+  return process.env.PDH_MOBILE === 'true' ? 'pdh://oauth?error=' : `${baseUrl}/?oauth_error=`;
+}
+
 /**
  * Serve an HTML page that does the OAuth token exchange in the browser.
  *
@@ -53,9 +73,9 @@ function buildExchangePage(opts: {
   userinfoUrl?: string;
   storeUrl: string;
   successScheme: string;
+  errorUrlPrefix: string;
   baseUrl: string;
 }): string {
-  const errorRedirect = `${opts.baseUrl}/?oauth_error=`;
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -106,7 +126,7 @@ p{font-size:16px;line-height:1.5}
   }catch(e){
     msg.textContent='Error: '+e.message+'. Returning to app…';
     setTimeout(function(){
-      window.location.href=${JSON.stringify(errorRedirect)}+encodeURIComponent(e.message);
+      window.location.href=${JSON.stringify(opts.errorUrlPrefix)}+encodeURIComponent(e.message);
     },2000);
   }
 })();
@@ -122,14 +142,15 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
   // --- Gmail OAuth ---
 
   app.get('/gmail/start', async (c) => {
+    const baseUrl = getBaseUrl(deps.config);
     const gmailConfig = deps.config.sources.gmail;
     if (!gmailConfig) {
-      return c.redirect('/?oauth_error=gmail_not_configured');
+      return c.redirect(oauthErrorUrl(baseUrl, 'gmail_not_configured'));
     }
 
     const { clientId, clientSecret } = getGmailCredentials(deps.config);
     if (!clientId || !clientSecret) {
-      return c.redirect('/?oauth_error=gmail_missing_credentials');
+      return c.redirect(oauthErrorUrl(baseUrl, 'gmail_missing_credentials'));
     }
 
     const codeVerifier = generateCodeVerifier();
@@ -141,7 +162,7 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
     const oauth2Client = new google.auth.OAuth2(
       clientId,
       clientSecret,
-      `${getBaseUrl(deps.config)}/oauth/gmail/callback`,
+      `${baseUrl}/oauth/gmail/callback`,
     );
 
     const authUrl = oauth2Client.generateAuthUrl({
@@ -164,16 +185,16 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
     const state = c.req.query('state');
     const error = c.req.query('error');
 
-    if (error) return c.redirect(`/?oauth_error=${encodeURIComponent(error)}`);
-    if (!code || !state) return c.redirect('/?oauth_error=missing_code_or_state');
+    const baseUrl = getBaseUrl(deps.config);
+    if (error) return c.redirect(oauthErrorUrl(baseUrl, error));
+    if (!code || !state) return c.redirect(oauthErrorUrl(baseUrl, 'missing_code_or_state'));
 
     const pending = await deps.store.getAndDeleteOAuthState(state);
     if (!pending || pending.source !== 'gmail') {
-      return c.redirect('/?oauth_error=invalid_state');
+      return c.redirect(oauthErrorUrl(baseUrl, 'invalid_state'));
     }
 
     const { clientId, clientSecret } = getGmailCredentials(deps.config);
-    const baseUrl = getBaseUrl(deps.config);
 
     return c.html(buildExchangePage({
       tokenUrl: 'https://oauth2.googleapis.com/token',
@@ -187,7 +208,8 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
       },
       userinfoUrl: 'https://www.googleapis.com/oauth2/v2/userinfo',
       storeUrl: `${baseUrl}/oauth/gmail/store-tokens`,
-      successScheme: 'pdh://oauth?success=gmail',
+      successScheme: oauthSuccessUrl(baseUrl, 'gmail'),
+      errorUrlPrefix: oauthErrorUrlPrefix(baseUrl),
       baseUrl,
     }));
   });
@@ -255,14 +277,15 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
   // --- Google Calendar OAuth ---
 
   app.get('/google_calendar/start', async (c) => {
+    const baseUrl = getBaseUrl(deps.config);
     const calConfig = deps.config.sources.google_calendar;
     if (!calConfig) {
-      return c.redirect('/?oauth_error=calendar_not_configured');
+      return c.redirect(oauthErrorUrl(baseUrl, 'calendar_not_configured'));
     }
 
     const { clientId, clientSecret } = getCalendarCredentials(deps.config);
     if (!clientId || !clientSecret) {
-      return c.redirect('/?oauth_error=calendar_missing_credentials');
+      return c.redirect(oauthErrorUrl(baseUrl, 'calendar_missing_credentials'));
     }
 
     const codeVerifier = generateCodeVerifier();
@@ -274,7 +297,7 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
     const oauth2Client = new google.auth.OAuth2(
       clientId,
       clientSecret,
-      `${getBaseUrl(deps.config)}/oauth/google_calendar/callback`,
+      `${baseUrl}/oauth/google_calendar/callback`,
     );
 
     const authUrl = oauth2Client.generateAuthUrl({
@@ -295,16 +318,16 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
     const state = c.req.query('state');
     const error = c.req.query('error');
 
-    if (error) return c.redirect(`/?oauth_error=${encodeURIComponent(error)}`);
-    if (!code || !state) return c.redirect('/?oauth_error=missing_code_or_state');
+    const baseUrl = getBaseUrl(deps.config);
+    if (error) return c.redirect(oauthErrorUrl(baseUrl, error));
+    if (!code || !state) return c.redirect(oauthErrorUrl(baseUrl, 'missing_code_or_state'));
 
     const pending = await deps.store.getAndDeleteOAuthState(state);
     if (!pending || pending.source !== 'google_calendar') {
-      return c.redirect('/?oauth_error=invalid_state');
+      return c.redirect(oauthErrorUrl(baseUrl, 'invalid_state'));
     }
 
     const { clientId, clientSecret } = getCalendarCredentials(deps.config);
-    const baseUrl = getBaseUrl(deps.config);
 
     return c.html(buildExchangePage({
       tokenUrl: 'https://oauth2.googleapis.com/token',
@@ -317,7 +340,8 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
         code_verifier: pending.codeVerifier,
       },
       storeUrl: `${baseUrl}/oauth/google_calendar/store-tokens`,
-      successScheme: 'pdh://oauth?success=google_calendar',
+      successScheme: oauthSuccessUrl(baseUrl, 'google_calendar'),
+      errorUrlPrefix: oauthErrorUrlPrefix(baseUrl),
       baseUrl,
     }));
   });
@@ -377,14 +401,15 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
   // --- GitHub OAuth ---
 
   app.get('/github/start', async (c) => {
+    const baseUrl = getBaseUrl(deps.config);
     const githubConfig = deps.config.sources.github;
     if (!githubConfig) {
-      return c.redirect('/?oauth_error=github_not_configured');
+      return c.redirect(oauthErrorUrl(baseUrl, 'github_not_configured'));
     }
 
     const { clientId } = getGitHubCredentials(deps.config);
     if (!clientId) {
-      return c.redirect('/?oauth_error=github_missing_credentials');
+      return c.redirect(oauthErrorUrl(baseUrl, 'github_missing_credentials'));
     }
 
     const codeVerifier = generateCodeVerifier();
@@ -393,7 +418,7 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
     const state = randomBytes(32).toString('hex');
     await deps.store.setOAuthState(state, { source: 'github', createdAt: Date.now(), codeVerifier });
 
-    const redirectUri = `${getBaseUrl(deps.config)}/oauth/github/callback`;
+    const redirectUri = `${baseUrl}/oauth/github/callback`;
     const authUrl =
       `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
@@ -409,16 +434,16 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
     const state = c.req.query('state');
     const error = c.req.query('error');
 
-    if (error) return c.redirect(`/?oauth_error=${encodeURIComponent(error)}`);
-    if (!code || !state) return c.redirect('/?oauth_error=missing_code_or_state');
+    const baseUrl = getBaseUrl(deps.config);
+    if (error) return c.redirect(oauthErrorUrl(baseUrl, error));
+    if (!code || !state) return c.redirect(oauthErrorUrl(baseUrl, 'missing_code_or_state'));
 
     const pending = await deps.store.getAndDeleteOAuthState(state);
     if (!pending || pending.source !== 'github') {
-      return c.redirect('/?oauth_error=invalid_state');
+      return c.redirect(oauthErrorUrl(baseUrl, 'invalid_state'));
     }
 
     const { clientId, clientSecret } = getGitHubCredentials(deps.config);
-    const baseUrl = getBaseUrl(deps.config);
 
     return c.html(buildExchangePage({
       tokenUrl: 'https://github.com/login/oauth/access_token',
@@ -431,7 +456,8 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
       tokenHeaders: { Accept: 'application/json' },
       userinfoUrl: 'https://api.github.com/user',
       storeUrl: `${baseUrl}/oauth/github/store-tokens`,
-      successScheme: 'pdh://oauth?success=github',
+      successScheme: oauthSuccessUrl(baseUrl, 'github'),
+      errorUrlPrefix: oauthErrorUrlPrefix(baseUrl),
       baseUrl,
     }));
   });

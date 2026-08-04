@@ -56,6 +56,18 @@ function renderOverviewTab() {
             <div style="display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Open <span style="font-size:14px">&rarr;</span></div>
           </div>
 
+          <div class="card source-tile" style="cursor:pointer" onclick="switchTab('photo')">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                <span style="font-weight:600;font-size:15px">Photos</span>
+              </div>
+              <span class="status-dot status-dot-connected"></span>
+            </div>
+            <p style="font-size:14px;color:var(--muted);margin-bottom:8px">EXIF stripping ON by default</p>
+            <div style="display:flex;align-items:center;gap:4px;font-size:14px;color:var(--primary);font-weight:500">Open <span style="font-size:14px">&rarr;</span></div>
+          </div>
+
           <div class="card source-tile" style="cursor:pointer" onclick="switchTab('gmail')">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
               <div style="display:flex;align-items:center;gap:8px">

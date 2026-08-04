@@ -562,8 +562,8 @@ export class DynamoDataStore implements DataStore {
 
   // --- Agent Skills (not implemented for DynamoDB) ---
   async listSkills(): Promise<SkillRow[]> { return []; }
-  async insertSkill(_skill: { id: string; name: string; instructions: string; trigger_event: string; enabled?: number; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null }): Promise<void> {}
-  async updateSkill(_id: string, _fields: { name?: string; instructions?: string; trigger_event?: string; enabled?: number; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null }): Promise<void> {}
+  async insertSkill(_skill: { id: string; name: string; instructions: string; trigger_event: string; enabled?: number; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null; allowed_sources?: string | null }): Promise<void> {}
+  async updateSkill(_id: string, _fields: { name?: string; instructions?: string; trigger_event?: string; enabled?: number; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null; allowed_sources?: string | null }): Promise<void> {}
   async setSkillEnabled(_id: string, _enabled: number): Promise<void> {}
   async deleteSkill(_id: string): Promise<void> {}
 

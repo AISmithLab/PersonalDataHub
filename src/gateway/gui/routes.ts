@@ -9,6 +9,7 @@ import { AuditLog } from '../audit/log.js';
 import { GmailConnector } from '../connectors/gmail/connector.js';
 import { GoogleCalendarConnector } from '../connectors/calendar/connector.js';
 import { GitHubConnector } from '../connectors/github/connector.js';
+import { PhotoConnector } from '../connectors/photo/connector.js';
 import { Octokit } from 'octokit';
 import { FILTER_TYPES, applyFilters, type QuickFilter } from '../filters.js';
 import { getClient, getModel } from '../chat/routes.js';
@@ -259,7 +260,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   });
 
   app.post('/api/skills', async (c) => {
-    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null };
+    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null; allowed_sources?: string | null };
     if (!body.name?.trim()) return c.json({ ok: false, error: 'name is required' }, 400);
     const id = `skill_${randomUUID().slice(0, 12)}`;
     await deps.store.insertSkill({
@@ -272,14 +273,15 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
       logic_tree: body.logic_tree ?? '[]',
       summary: body.summary ?? '',
       primitive_type: body.primitive_type ?? 'action',
-      label_tag: body.label_tag ?? null
+      label_tag: body.label_tag ?? null,
+      allowed_sources: body.allowed_sources ?? null
     });
     return c.json({ ok: true, id });
   });
 
   app.put('/api/skills/:id', async (c) => {
     const id = c.req.param('id');
-    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; enabled?: boolean; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null };
+    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; enabled?: boolean; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null; allowed_sources?: string | null };
     if (body.enabled !== undefined) {
       await deps.store.setSkillEnabled(id, body.enabled ? 1 : 0);
     } else {
@@ -291,7 +293,8 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
         logic_tree: body.logic_tree,
         summary: body.summary,
         primitive_type: body.primitive_type,
-        label_tag: body.label_tag
+        label_tag: body.label_tag,
+        allowed_sources: body.allowed_sources
       });
     }
     return c.json({ ok: true });
@@ -634,6 +637,110 @@ Rules:
         totalFetched: rows.length,
         afterFilters: filtered.length,
       });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'unknown_error';
+      return c.json({ ok: false, error: message }, 500);
+    }
+  });
+
+  // Device photos endpoint
+  app.get('/api/photos', async (c) => {
+    const connector = deps.connectorRegistry.get('photo');
+    if (!connector || !(connector instanceof PhotoConnector)) {
+      return c.json({ ok: false, error: 'Photo not connected' }, 401);
+    }
+
+    try {
+      const boundary = {};
+      const limit = parseInt(c.req.query('limit') ?? '20', 10);
+      const rows = await connector.fetch(boundary, { limit });
+      const photos = rows.map((row) => {
+        const d = row.data as Record<string, unknown>;
+        return {
+          id: row.source_item_id,
+          title: d.title || 'Photo.jpg',
+          album: d.album || 'Gallery',
+          date: row.timestamp,
+          width: d.width || 4032,
+          height: d.height || 3024,
+          dataUrl: d.dataUrl || '',
+          uri: d.uri || '',
+        };
+      });
+
+      return c.json({ ok: true, photos });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'unknown_error';
+      return c.json({ ok: false, error: message }, 500);
+    }
+  });
+
+  // Preview photos with EXIF stripped / filters applied
+  app.get('/api/photos/preview', async (c) => {
+    const connector = deps.connectorRegistry.get('photo');
+    if (!connector || !(connector instanceof PhotoConnector)) {
+      return c.json({ ok: false, error: 'Photo not connected' }, 401);
+    }
+
+    try {
+      const boundary = {};
+      const limit = parseInt(c.req.query('limit') ?? '20', 10);
+      const rows = await connector.fetch(boundary, { limit });
+
+      const filters = await deps.store.getEnabledFiltersBySource('photo') as QuickFilter[];
+      const filtered = applyFilters(rows, filters);
+
+      const photos = filtered.map((row) => {
+        const d = row.data as Record<string, unknown>;
+        return {
+          id: row.source_item_id,
+          title: d.title || 'Photo.jpg',
+          album: d.album || 'Gallery',
+          date: row.timestamp,
+          width: d.width || 4032,
+          height: d.height || 3024,
+          dataUrl: d.dataUrl || '',
+          uri: d.uri || '',
+        };
+      });
+
+      return c.json({
+        ok: true,
+        photos,
+        totalFetched: rows.length,
+        afterFilters: filtered.length,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'unknown_error';
+      return c.json({ ok: false, error: message }, 500);
+    }
+  });
+
+  app.post('/api/photos/sync', async (c) => {
+    const connector = deps.connectorRegistry.get('photo');
+    if (!connector || !(connector instanceof PhotoConnector)) {
+      return c.json({ ok: false, error: 'Photo not connected' }, 401);
+    }
+    try {
+      const body = await c.req.json() as { photos: Array<Record<string, unknown>> };
+      if (Array.isArray(body.photos) && body.photos.length > 0) {
+        const rows = body.photos.map((p, idx) => ({
+          source: 'photo',
+          source_item_id: String(p.id || `photo-${idx}`),
+          type: 'image',
+          timestamp: String(p.timestamp || p.date || new Date().toISOString()),
+          data: {
+            title: String(p.title || p.displayName || 'Photo.jpg'),
+            album: String(p.album || 'Camera'),
+            width: Number(p.width || 1080),
+            height: Number(p.height || 1080),
+            dataUrl: String(p.dataUrl || p.uri || ''),
+            uri: String(p.uri || ''),
+          },
+        }));
+        connector.setMemoryPhotos(rows);
+      }
+      return c.json({ ok: true, count: body.photos?.length || 0 });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unknown_error';
       return c.json({ ok: false, error: message }, 500);

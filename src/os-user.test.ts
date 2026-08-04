@@ -122,9 +122,10 @@ describe('os-user', () => {
       lockdownFiles(['/tmp/test.db', '/tmp/.env']);
 
       const calls = mockExecSync.mock.calls.map((c: unknown[]) => c[0]);
-      expect(calls).toContain(`sudo chown ${PDH_USER}:staff "/tmp/test.db"`);
+      const expectedGroup = process.platform === 'darwin' ? 'staff' : PDH_USER;
+      expect(calls).toContain(`sudo chown ${PDH_USER}:${expectedGroup} "/tmp/test.db"`);
       expect(calls).toContain('sudo chmod 600 "/tmp/test.db"');
-      expect(calls).toContain(`sudo chown ${PDH_USER}:staff "/tmp/.env"`);
+      expect(calls).toContain(`sudo chown ${PDH_USER}:${expectedGroup} "/tmp/.env"`);
       expect(calls).toContain('sudo chmod 600 "/tmp/.env"');
     });
 

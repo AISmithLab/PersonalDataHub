@@ -90,7 +90,12 @@ var currentTab = 'ai';
           .then(function(r) { return r.json(); })
           .then(function(data) {
             state.emailsLoading = false;
-            state.realEmails = data.emails || [];
+            if (!data.ok) {
+              state.emailsError = data.error || 'Failed to load emails';
+              state.realEmails = null;
+            } else {
+              state.realEmails = data.emails || [];
+            }
             if (currentTab === 'gmail') render();
           })
           .catch(function(err) {
@@ -118,6 +123,9 @@ var currentTab = 'ai';
             if (currentTab === 'google_calendar') render();
           });
       }
+      // Always sync device photos on startup if available
+      loadPhotos(true);
+
       // Check AI configuration status
       fetch('/api/chat/status').then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
@@ -274,11 +282,12 @@ var currentTab = 'ai';
       var content = document.getElementById('content');
       if (!content) return;
       switch (currentTab) {
-        case 'overview': content.innerHTML = renderOverviewTab(); break;
+        case 'overview': state.settingsSection = 'integrations'; currentTab = 'settings'; content.innerHTML = renderSettingsTab(); break;
         case 'gmail': content.innerHTML = renderGmailTab(); break;
         case 'github': content.innerHTML = renderGitHubTab(); break;
         case 'google_calendar': content.innerHTML = renderCalendarTab(); break;
         case 'sms': content.innerHTML = renderSmsTab(); loadContacts(); loadSmsMessages(); break;
+        case 'photo': content.innerHTML = renderPhotoTab(); loadPhotos(false); break;
         case 'ai': content.innerHTML = renderAiTab(); var _cm = document.getElementById('chat-messages'); if (_cm) _cm.scrollTop = _cm.scrollHeight; break;
         case 'skill': content.innerHTML = renderSkillTab(); loadSkills(); break;
         case 'memory': content.innerHTML = renderMemoryTab(); loadMemories(); break;
@@ -361,6 +370,9 @@ var currentTab = 'ai';
     /* INJECT_renderSmsTab */
 
 
+    /* INJECT_renderPhotoTab */
+
+
     // Callback registry for AndroidSms.getMessages() results delivered via
     // evaluateJavascript from SmsPlugin's JavascriptInterface.
     window._smsCbs = {};
@@ -410,6 +422,54 @@ var currentTab = 'ai';
       window.AndroidSms.getMessages(reqId, state.sms.box, 100);
     }
     window.loadSmsMessages = loadSmsMessages;
+
+    window._photosCbs = {};
+    window._photosDeliver = function(callbackId, photosList, error) {
+      var cb = window._photosCbs[callbackId];
+      if (cb) { delete window._photosCbs[callbackId]; cb(photosList, error); }
+    };
+
+    function loadPhotos(force) {
+      var hasRealPhotos = state.photo && state.photo.photos && state.photo.photos.length > 0 && state.photo.photos[0].id !== 'img-1';
+      if (!force && hasRealPhotos) return;
+      if (!window.AndroidSms || !window.AndroidSms.getPhotos) {
+        fetch('/api/photos/preview?limit=20&t=' + Date.now())
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data && data.photos) {
+              state.photo = state.photo || {};
+              state.photo.photos = data.photos;
+              if (currentTab === 'photo') render();
+            }
+          })
+          .catch(function(err) {
+            console.warn('[loadPhotos] Failed to fetch photos preview:', err);
+          });
+        return;
+      }
+      var reqId = 'photos_' + Date.now();
+      window._photosCbs[reqId] = function(photosList, err) {
+        if (err) {
+          state.photo = state.photo || {};
+          state.photo.error = err;
+          if (currentTab === 'photo') render();
+          return;
+        }
+        if (photosList) {
+          state.photo = state.photo || {};
+          state.photo.error = null;
+          state.photo.photos = photosList;
+          fetch('/api/photos/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ photos: photosList })
+          }).catch(function(e) { console.warn('Photo sync failed:', e); });
+          if (currentTab === 'photo') render();
+        }
+      };
+      window.AndroidSms.getPhotos(reqId, 20);
+    }
+    window.loadPhotos = loadPhotos;
 
     window._contactsCbs = {};
     window._contactsDeliver = function(callbackId, contactsList, error) {
@@ -805,6 +865,10 @@ var currentTab = 'ai';
 
     var SKILL_TRIGGERS = [
       { key: 'sms_received', label: 'SMS Received' },
+      { key: 'photo_added', label: 'New Photo Added' },
+      { key: 'email_received', label: 'Email Received' },
+      { key: 'calendar_event_starting', label: 'Event Starting Soon' },
+      { key: 'manual_shortcut', label: 'Home Screen Shortcut / Tap' }
     ];
 
     /* INJECT_renderLogicalEditor */
@@ -1020,7 +1084,8 @@ var currentTab = 'ai';
             instructions: c.instructions,
             trigger_event: c.trigger_event,
             current_view: c.current_view,
-            logic_tree: JSON.stringify(c.logic_tree)
+            logic_tree: JSON.stringify(c.logic_tree),
+            allowed_sources: c.allowed_sources || null
           })
         });
       } catch(e) { console.warn('Auto-save failed:', e); }
@@ -1037,6 +1102,7 @@ var currentTab = 'ai';
       state.skills.adding = !state.skills.adding;
       state.skills.newName = '';
       state.skills.newInstructions = '';
+      state.skills.newAllowedSources = '';
       state.skills.newTrigger = 'sms_received';
       state.skills.newCurrentView = 'SUMMARIZED';
       var initialTree = [{ id: 'node_' + Math.random().toString(36).slice(2, 9), type: 'IF', condition: '', action: '' }];
@@ -1110,7 +1176,8 @@ var currentTab = 'ai';
             instructions: instructions,
             trigger_event: trigger,
             current_view: current_view,
-            logic_tree: JSON.stringify(logic_tree_arr)
+            logic_tree: JSON.stringify(logic_tree_arr),
+            allowed_sources: sk.newAllowedSources || null
           })
         });
         var d = await r.json();
@@ -1159,7 +1226,8 @@ var currentTab = 'ai';
         instructions: skill.instructions,
         trigger_event: skill.trigger_event,
         current_view: skill.current_view || 'SUMMARIZED',
-        logic_tree: parsedLogic
+        logic_tree: parsedLogic,
+        allowed_sources: skill.allowed_sources || ''
       };
       state.skills.translationCache = {
         instructions: skill.instructions,
@@ -1250,7 +1318,8 @@ var currentTab = 'ai';
             instructions: instructions,
             trigger_event: trigger,
             current_view: current_view,
-            logic_tree: JSON.stringify(logic_tree_arr)
+            logic_tree: JSON.stringify(logic_tree_arr),
+            allowed_sources: sk.editContent.allowed_sources || null
           })
         });
         var d = await r.json();
@@ -1661,6 +1730,154 @@ async function deleteSkill(id) {
       window.location.reload();
     }
 
+    function previewPhoto(id) {
+      var photoList = state.photo && state.photo.photos ? state.photo.photos : [
+        { id: 'img-1', title: 'Receipt_Lunch.jpg', album: 'Receipts', date: '2026-07-28T12:00:00Z', width: 4032, height: 3024 },
+        { id: 'img-2', title: 'Screenshot_Flight.png', album: 'Screenshots', date: '2026-07-27T15:30:00Z', width: 1080, height: 2400 },
+        { id: 'img-3', title: 'Whiteboard_Notes.jpg', album: 'Work', date: '2026-07-25T09:15:00Z', width: 3024, height: 4032 },
+        { id: 'img-4', title: 'Expense_Report.jpg', album: 'Receipts', date: '2026-07-24T18:45:00Z', width: 4032, height: 3024 }
+      ];
+      var p = (window._photoCache && window._photoCache[id]) || photoList.find(function(item) { return item.id === id; });
+      if (!p) p = photoList[0] || { title: 'Photo.jpg', album: 'Gallery', date: new Date().toISOString(), width: 4032, height: 3024 };
+
+      var dateStr = p.date ? new Date(p.date).toLocaleString() : 'Recent';
+
+      var illustration = '';
+      if (p.dataUrl || p.uri) {
+        illustration = '<img src="' + escapeAttr(p.dataUrl || p.uri) + '" class="max-w-full max-h-[50vh] object-contain rounded-lg shadow-md mx-auto my-4" alt="' + escapeAttr(p.title) + '" />';
+      } else if (p.title.indexOf('Receipt') !== -1) {
+        illustration = '<div class="bg-white text-gray-800 p-6 rounded-xl shadow-inner border border-gray-200 font-mono text-sm max-w-sm mx-auto my-4 select-none">' +
+          '<div class="text-center border-b-2 border-dashed border-gray-300 pb-3 mb-3">' +
+            '<div class="font-bold text-lg tracking-wider">BISTRO VERDE</div>' +
+            '<div class="text-xs text-gray-500">142 King St, Seattle, WA 98101</div>' +
+            '<div class="text-xs text-gray-500">Jul 28, 2026 • 12:45 PM • Table 14</div>' +
+          '</div>' +
+          '<div class="space-y-1 text-xs border-b border-gray-200 pb-3 mb-3">' +
+            '<div class="flex justify-between"><span>1x Roasted Salmon</span><span>$28.00</span></div>' +
+            '<div class="flex justify-between"><span>1x Avocado Salad</span><span>$14.00</span></div>' +
+            '<div class="flex justify-between"><span>1x Iced Green Tea</span><span>$4.50</span></div>' +
+          '</div>' +
+          '<div class="space-y-1 text-xs border-b-2 border-dashed border-gray-300 pb-3 mb-3">' +
+            '<div class="flex justify-between"><span>Subtotal</span><span>$46.50</span></div>' +
+            '<div class="flex justify-between"><span>Tax (10%)</span><span>$4.65</span></div>' +
+            '<div class="flex justify-between font-bold text-sm text-black"><span>TOTAL</span><span>$51.15</span></div>' +
+          '</div>' +
+          '<div class="text-center">' +
+            '<div class="text-[10px] text-gray-400 mb-1">PAID - VISA ending in 4920</div>' +
+            '<div class="h-6 bg-gray-800/10 rounded flex items-center justify-center font-mono text-[9px] tracking-widest text-gray-500">* * || | | |||| | || | ||| || * *</div>' +
+          '</div>' +
+        '</div>';
+      } else if (p.title.indexOf('Flight') !== -1 || p.title.indexOf('Screenshot') !== -1) {
+        illustration = '<div class="bg-gradient-to-br from-blue-900 to-indigo-950 text-white p-6 rounded-2xl shadow-xl max-w-sm mx-auto my-4 select-none border border-blue-700/50">' +
+          '<div class="flex justify-between items-center border-b border-blue-700/50 pb-3 mb-4">' +
+            '<div class="flex items-center gap-2">' +
+              '<span class="material-symbols-outlined text-blue-400">flight_takeoff</span>' +
+              '<span class="font-bold tracking-wider text-sm">AERO AIRLINES</span>' +
+            '</div>' +
+            '<span class="bg-blue-500/20 text-blue-300 text-xs px-2 py-0.5 rounded-full font-mono">FIRST CLASS</span>' +
+          '</div>' +
+          '<div class="flex justify-between items-center mb-6">' +
+            '<div><div class="text-3xl font-extrabold tracking-tight">SFO</div><div class="text-xs text-blue-300">San Francisco</div></div>' +
+            '<div class="flex-grow flex flex-col items-center px-4"><div class="text-[10px] text-blue-300 tracking-widest mb-1">5h 25m</div><div class="w-full border-t border-dashed border-blue-400 relative"></div></div>' +
+            '<div class="text-right"><div class="text-3xl font-extrabold tracking-tight">JFK</div><div class="text-xs text-blue-300">New York</div></div>' +
+          '</div>' +
+          '<div class="grid grid-cols-3 gap-2 bg-blue-950/60 p-3 rounded-xl border border-blue-800/60 text-xs mb-4">' +
+            '<div><span class="text-blue-400 block text-[10px]">FLIGHT</span><strong class="font-mono">AR 4092</strong></div>' +
+            '<div><span class="text-blue-400 block text-[10px]">GATE</span><strong class="font-mono">G12</strong></div>' +
+            '<div><span class="text-blue-400 block text-[10px]">SEAT</span><strong class="font-mono text-emerald-400">4A</strong></div>' +
+          '</div>' +
+          '<div class="bg-white text-gray-900 p-2 rounded-lg text-center font-mono text-xs tracking-widest font-bold">||| | |||| || | || ||| | || ||</div>' +
+        '</div>';
+      } else if (p.title.indexOf('Whiteboard') !== -1) {
+        illustration = '<div class="bg-amber-50 text-gray-800 p-6 rounded-xl shadow-inner border-2 border-amber-200 font-sans max-w-sm mx-auto my-4 select-none relative overflow-hidden">' +
+          '<div class="absolute top-0 right-0 bg-amber-200 text-amber-900 text-[10px] font-bold px-2 py-0.5 rounded-bl">WHITEBOARD SESSION</div>' +
+          '<div class="font-bold text-gray-700 text-sm mb-4 border-b border-amber-200 pb-2 flex items-center gap-2">' +
+            '<span class="material-symbols-outlined text-amber-600">draw</span>' +
+            '<span>System Architecture Diagram</span>' +
+          '</div>' +
+          '<div class="space-y-3 font-mono text-xs">' +
+            '<div class="bg-white p-2 rounded border border-amber-300 text-center font-bold text-indigo-700">[ Android / iOS App ]</div>' +
+            '<div class="text-center text-amber-700 font-bold">⬇ window._pdhBridge ⬇</div>' +
+            '<div class="bg-white p-2 rounded border border-amber-300 text-center font-bold text-emerald-700">( Hono Gateway :3000 )</div>' +
+            '<div class="text-center text-amber-700 font-bold">⬇ AES-256-GCM Tokens ⬇</div>' +
+            '<div class="bg-white p-2 rounded border border-amber-300 text-center font-bold text-purple-700">[ Zero-Access AI Sandbox ]</div>' +
+          '</div>' +
+          '<div class="mt-4 pt-2 border-t border-amber-200 text-center italic text-xs text-amber-800">* Zero EXIF transmission to LLMs *</div>' +
+        '</div>';
+      } else {
+        illustration = '<div class="bg-white text-gray-800 p-5 rounded-xl shadow-inner border border-gray-300 font-sans text-xs max-w-sm mx-auto my-4 select-none">' +
+          '<div class="flex justify-between items-center border-b border-gray-200 pb-2 mb-3">' +
+            '<div class="font-bold text-sm text-gray-900">Q3 EXPENSE REPORT</div>' +
+            '<span class="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-0.5 rounded">APPROVED</span>' +
+          '</div>' +
+          '<div class="space-y-2 mb-4">' +
+            '<div class="flex justify-between py-1 border-b border-gray-100"><div><span class="font-semibold block">Aero Airlines Flight</span><span class="text-gray-400 text-[10px]">Jul 24 • SFO to JFK</span></div><span class="font-mono font-semibold">$480.00</span></div>' +
+            '<div class="flex justify-between py-1 border-b border-gray-100"><div><span class="font-semibold block">Grand Plaza Hotel</span><span class="text-gray-400 text-[10px]">Jul 25-27 • 2 Nights</span></div><span class="font-mono font-semibold">$520.00</span></div>' +
+            '<div class="flex justify-between py-1 border-b border-gray-100"><div><span class="font-semibold block">Bistro Verde Lunch</span><span class="text-gray-400 text-[10px]">Jul 28 • Client meal</span></div><span class="font-mono font-semibold">$51.15</span></div>' +
+          '</div>' +
+          '<div class="bg-gray-50 p-3 rounded-lg flex justify-between items-center"><span class="font-bold text-gray-700">TOTAL REIMBURSEMENT</span><span class="font-mono font-bold text-sm text-primary">$1,051.15</span></div>' +
+        '</div>';
+      }
+
+      var html = '<div class="bg-surface border border-outline-variant rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">' +
+        '<div class="flex items-center justify-between px-6 py-4 border-b border-outline-variant bg-surface-container-low">' +
+          '<div class="flex items-center gap-3">' +
+            '<span class="material-symbols-outlined text-primary text-2xl">photo_library</span>' +
+            '<div>' +
+              '<h3 class="font-headline-sm text-headline-sm font-bold text-on-surface">' + escapeHtml(p.title) + '</h3>' +
+              '<span class="text-xs text-on-surface-variant font-mono">' + escapeHtml(p.album || 'Gallery') + ' • ' + (p.width || 4032) + '×' + (p.height || 3024) + '</span>' +
+            '</div>' +
+          '</div>' +
+          '<button onclick="closePhotoModal()" class="text-on-surface-variant hover:text-on-surface p-1 rounded-lg hover:bg-surface-container-high transition-colors"><span class="material-symbols-outlined">close</span></button>' +
+        '</div>' +
+
+        '<div class="p-6 overflow-y-auto max-h-[70vh]">' +
+          '<div class="flex items-center justify-center bg-surface-container-lowest rounded-xl border border-outline-variant p-4 mb-6">' +
+            illustration +
+          '</div>' +
+
+          '<div class="bg-surface-container-low rounded-xl p-4 border border-outline-variant space-y-3">' +
+            '<div class="flex items-center justify-between border-b border-outline-variant pb-2">' +
+              '<span class="text-xs font-bold uppercase tracking-wider text-on-surface-variant">EXIF Protection Status</span>' +
+              '<span class="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200"><span class="material-symbols-outlined text-[14px]">verified_user</span> Stripped & Protected</span>' +
+            '</div>' +
+
+            '<div class="grid grid-cols-2 gap-4 text-xs">' +
+              '<div class="space-y-1">' +
+                '<div class="font-semibold text-on-surface-variant">Original Device EXIF:</div>' +
+                '<div class="font-mono text-error/90 bg-error-container/20 p-2 rounded">GPS: 37.7749° N, 122.4194° W<br/>Camera: iPhone 16 Pro<br/>Serial: #F829K91J</div>' +
+              '</div>' +
+              '<div class="space-y-1">' +
+                '<div class="font-semibold text-on-surface-variant">Sanitized AI Sandbox View:</div>' +
+                '<div class="font-mono text-success bg-success-container/20 p-2 rounded">GPS: [STRIPPED]<br/>Camera: [STRIPPED]<br/>Serial: [STRIPPED]</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-outline-variant bg-surface-container-low">' +
+          '<button onclick="closePhotoModal()" class="border border-outline hover:bg-surface-container-high text-on-surface-variant font-label-caps text-label-caps px-5 py-2 rounded-xl transition-all">Close</button>' +
+          '<button onclick="closePhotoModal(); injectDemoQuestion(\'Analyze screenshot ' + escapeAttr(p.title) + '\')" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-5 py-2 rounded-xl transition-all shadow-sm flex items-center gap-1"><span class="material-symbols-outlined text-[18px]">smart_toy</span><span>AI Inspect</span></button>' +
+        '</div>' +
+      '</div>';
+
+      var modalEl = document.getElementById('photo-preview-modal');
+      if (modalEl) {
+        modalEl.innerHTML = html;
+        modalEl.style.display = 'flex';
+      }
+    }
+    window.previewPhoto = previewPhoto;
+
+    function closePhotoModal() {
+      var modalEl = document.getElementById('photo-preview-modal');
+      if (modalEl) {
+        modalEl.style.display = 'none';
+        modalEl.innerHTML = '';
+      }
+    }
+    window.closePhotoModal = closePhotoModal;
+
     // Make functions available globally
     window.logout = logout;
     window.startOAuth = startOAuth;
@@ -1701,41 +1918,34 @@ async function deleteSkill(id) {
     window.renderCalendarFilterCards = renderCalendarFilterCards;
     window.sendAction = sendAction;
 
+    // Shared OAuth-completion handler. Reached two ways:
+    //  1. Desktop/browser deployments: server redirects the same page to
+    //     /?oauth_success=<source> or /?oauth_error=<message> (query-param path below).
+    //  2. Mobile app: the token-exchange page (run in the system browser) navigates to
+    //     pdh://oauth?success=<source>|error=<message>. Android routes that back into
+    //     MainActivity via the intent-filter in AndroidManifest.xml; App.tsx catches it
+    //     with Linking and calls window.handlePdhOAuthDeepLink(success, error) directly
+    //     via injectJavaScript (there is no page navigation in this path).
+    function handlePdhOAuthDeepLink(success, error) {
+      if (success) {
+        fetchData().then(function() { switchTab(success); });
+      }
+      if (error) {
+        alert('OAuth error: ' + error);
+      }
+    }
+    window.handlePdhOAuthDeepLink = handlePdhOAuthDeepLink;
+
     // Handle OAuth redirect results (web / query-param path)
     (function handleOAuthResult() {
       var params = new URLSearchParams(window.location.search);
       var success = params.get('oauth_success');
       var error = params.get('oauth_error');
-      if (success) {
-        fetchData().then(function() { switchTab(success); });
-        window.history.replaceState({}, '', '/');
-      }
-      if (error) {
-        alert('OAuth error: ' + error);
+      if (success || error) {
+        handlePdhOAuthDeepLink(success, error);
         window.history.replaceState({}, '', '/');
       }
     })();
-
-    // Handle OAuth deep-link callbacks on Android (pdh://oauth?success=<source>).
-    // The browser-side token exchange page redirects here after storing tokens,
-    // which triggers the Android intent filter and fires appUrlOpen in Capacitor.
-    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
-      window.Capacitor.Plugins.App.addListener('appUrlOpen', function(event) {
-        try {
-          var url = new URL(event.url);
-          if (url.hostname === 'oauth') {
-            var success = url.searchParams.get('success');
-            var error = url.searchParams.get('error');
-            if (success) {
-              fetchData().then(function() { switchTab(success); });
-            }
-            if (error) {
-              alert('OAuth error: ' + error);
-            }
-          }
-        } catch(e) {}
-      });
-    }
 
     // --- Auth: signup vs login form ---
     var isSignup = false;

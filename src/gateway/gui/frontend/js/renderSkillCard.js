@@ -28,8 +28,12 @@ function renderSkillCard(s) {
         html += '<input id="edit-skill-name-' + safeId + '" value="' + escapeAttr(sk.editContent.name) + '" oninput="state.skills.editContent.name=this.value; triggerSkillAutoSave(\'' + safeId + '\')" onblur="performSkillAutoSave(\'' + safeId + '\')" placeholder="Skill name" class="flex-grow bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
         html += '<select id="edit-skill-trigger-' + safeId + '" onchange="state.skills.editContent.trigger_event=this.value; triggerSkillAutoSave(\'' + safeId + '\'); render()" class="bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">' + triggerOptions + '</select>';
         html += '</div>';
+        html += '<div class="flex items-center gap-xs mt-1">';
+        html += '<span class="text-xs text-on-surface-variant font-semibold">Allowed Sources:</span>';
+        html += '<input id="edit-skill-sources-' + safeId + '" value="' + escapeAttr(sk.editContent.allowed_sources || '') + '" oninput="state.skills.editContent.allowed_sources=this.value" placeholder="e.g. [&quot;photo&quot;, &quot;emails&quot;] (blank = all)" class="flex-grow bg-white border border-outline-variant rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-primary shadow-sm">';
+        html += '</div>';
         
-        html += '<textarea id="edit-skill-instructions-' + safeId + '" oninput="state.skills.editContent.instructions=this.value; triggerSkillAutoSave(\'' + safeId + '\')" onblur="performSkillAutoSave(\'' + safeId + '\')" placeholder="Describe what the AI should do when this trigger fires…" class="w-full bg-white border border-outline-variant rounded-lg p-md text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm min-h-[120px]" rows="4">' + escapeHtml(sk.editContent.instructions) + '</textarea>';
+        html += '<textarea id="edit-skill-instructions-' + safeId + '" oninput="state.skills.editContent.instructions=this.value; triggerSkillAutoSave(\'' + safeId + '\')" onblur="performSkillAutoSave(\'' + safeId + '\')" placeholder="Describe what the AI should do when this trigger fires…" class="w-full bg-white border border-outline-variant rounded-lg p-md text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm min-h-[120px] mt-2" rows="4">' + escapeHtml(sk.editContent.instructions) + '</textarea>';
         
         html += '</div><div class="flex gap-sm mt-md">';
         html += '<button onclick="saveEditSkill(\'' + safeId + '\')" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-6 py-2 rounded-xl transition-all active:scale-95 shadow-sm">Save</button>';
@@ -70,6 +74,17 @@ function renderSkillCard(s) {
         }
         if (s.label_tag) {
           html += '<span class="font-mono-label text-mono-label border border-outline-variant text-on-surface-variant px-xs py-0.5 rounded uppercase">' + escapeHtml(s.label_tag) + '</span>';
+        }
+        if (s.allowed_sources && s.allowed_sources !== 'null') {
+          try {
+            var srcList = JSON.parse(s.allowed_sources);
+            if (Array.isArray(srcList)) {
+              srcList.forEach(function(src) {
+                var icon = src === 'photo' ? '🖼️ Photos' : src === 'emails' || src === 'gmail' ? '✉️ Emails' : src === 'sms' ? '💬 SMS' : src === 'calendar' ? '📅 Calendar' : src;
+                html += '<span class="font-mono-label text-mono-label bg-tertiary-container text-on-tertiary-container px-xs py-0.5 rounded font-semibold">' + escapeHtml(icon) + '</span>';
+              });
+            }
+          } catch (_) {}
         }
         html += '</div>';
         

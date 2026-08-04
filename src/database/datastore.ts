@@ -68,6 +68,7 @@ export interface SkillRow {
   summary: string;
   primitive_type: string;
   label_tag: string | null;
+  allowed_sources?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -179,8 +180,8 @@ export interface DataStore {
 
   // --- Agent Skills ---
   listSkills(): MaybePromise<SkillRow[]>;
-  insertSkill(skill: { id: string; name: string; instructions: string; trigger_event: string; enabled?: number; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null }): MaybePromise<void>;
-  updateSkill(id: string, fields: { name?: string; instructions?: string; trigger_event?: string; enabled?: number; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null }): MaybePromise<void>;
+  insertSkill(skill: { id: string; name: string; instructions: string; trigger_event: string; enabled?: number; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null; allowed_sources?: string | null }): MaybePromise<void>;
+  updateSkill(id: string, fields: { name?: string; instructions?: string; trigger_event?: string; enabled?: number; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null; allowed_sources?: string | null }): MaybePromise<void>;
   setSkillEnabled(id: string, enabled: number): MaybePromise<void>;
   deleteSkill(id: string): MaybePromise<void>;
 }

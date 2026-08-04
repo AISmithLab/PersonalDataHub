@@ -143,39 +143,56 @@ function renderSettingsTab() {
         html += '  </div>';
 
         html += '  <div class="grid grid-cols-1 md:grid-cols-2 gap-md">';
+        var integrationsList = [
+          { name: 'sms', label: 'SMS (Android)', icon: 'sms', subtitle: 'Messages via Android bridge', connected: true, isNative: true, tab: 'sms' },
+          { name: 'photo', label: 'Photos & Gallery', icon: 'photo_library', subtitle: 'EXIF stripping ON by default', connected: true, isNative: true, tab: 'photo' }
+        ];
+
         state.sources.filter(function(s) { return ['gmail','google_calendar','github'].includes(s.name); }).forEach(function(s) {
-          var icons = {
-            gmail: 'mail',
-            google_calendar: 'calendar_month',
-            github: 'code'
-          };
+          var icons = { gmail: 'mail', google_calendar: 'calendar_month', github: 'code' };
           var labels = { gmail: 'Gmail', google_calendar: 'Google Calendar', github: 'GitHub' };
           var tabNames = { gmail: 'gmail', google_calendar: 'google_calendar', github: 'github' };
-          var iconName = icons[s.name] || 'extension';
-          var label = labels[s.name] || s.name;
-          var accountLine = (s.accountInfo && s.accountInfo.email) ? s.accountInfo.email : 'No account details';
-          
+          var accountLine = 'Not connected';
+          if (s.accountInfo && s.accountInfo.email) {
+            accountLine = s.accountInfo.email;
+          } else if (s.accountInfo && s.accountInfo.login) {
+            accountLine = '@' + s.accountInfo.login;
+          } else if (s.connected) {
+            accountLine = 'Connected';
+          }
+          integrationsList.push({
+            name: s.name,
+            label: labels[s.name] || s.name,
+            icon: icons[s.name] || 'extension',
+            subtitle: accountLine,
+            connected: !!s.connected,
+            isNative: false,
+            tab: tabNames[s.name] || s.name
+          });
+        });
+
+        integrationsList.forEach(function(item) {
           html += '  <div class="bg-white border border-outline-variant rounded-xl p-md shadow-sm flex flex-col justify-between gap-md">';
           html += '    <div class="flex items-start gap-sm">';
           html += '      <div class="w-10 h-10 bg-surface-container rounded-lg flex items-center justify-center border border-outline-variant shrink-0">';
-          html += '        <span class="material-symbols-outlined text-primary text-[20px]">' + iconName + '</span>';
+          html += '        <span class="material-symbols-outlined text-primary text-[20px]">' + item.icon + '</span>';
           html += '      </div>';
           html += '      <div class="min-w-0">';
-          html += '        <h3 class="font-body-md text-body-md font-bold text-on-surface leading-tight">' + label + '</h3>';
-          html += '        <span class="font-body-sm text-body-sm text-on-surface-variant truncate block mt-0.5">' + accountLine + '</span>';
+          html += '        <h3 class="font-body-md text-body-md font-bold text-on-surface leading-tight">' + item.label + '</h3>';
+          html += '        <span class="font-body-sm text-body-sm text-on-surface-variant truncate block mt-0.5">' + escapeHtml(item.subtitle) + '</span>';
           html += '      </div>';
           html += '    </div>';
           
           html += '    <div class="flex items-center justify-between border-t border-outline-variant/60 pt-sm">';
           html += '      <div class="flex items-center gap-xs">';
-          html += '        <span class="status-dot ' + (s.connected ? 'status-dot-connected' : 'status-dot-disconnected') + '"></span>';
-          html += '        <span class="font-label-sm text-label-sm ' + (s.connected ? 'text-primary font-semibold' : 'text-on-surface-variant') + '">' + (s.connected ? 'Connected' : 'Disconnected') + '</span>';
+          html += '        <span class="status-dot ' + (item.connected ? 'status-dot-connected' : 'status-dot-disconnected') + '"></span>';
+          html += '        <span class="font-label-sm text-label-sm ' + (item.connected ? 'text-primary font-semibold' : 'text-on-surface-variant') + '">' + (item.connected ? 'Connected' : 'Disconnected') + '</span>';
           html += '      </div>';
           
-          if (s.connected) {
-            html += '    <button onclick="switchTab(\x27' + tabNames[s.name] + '\x27)" class="border border-outline hover:bg-surface-container-high text-on-surface-variant font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 flex items-center gap-xs"><span>Manage</span><span class="material-symbols-outlined text-sm">arrow_forward</span></button>';
+          if (item.connected || item.isNative) {
+            html += '    <button onclick="switchTab(\x27' + item.tab + '\x27)" class="border border-outline hover:bg-surface-container-high text-on-surface-variant font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 flex items-center gap-xs"><span>Manage</span><span class="material-symbols-outlined text-sm">arrow_forward</span></button>';
           } else {
-            html += '    <a href="/oauth/' + s.name + '/start" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 text-center shadow-sm">Connect</a>';
+            html += '    <a href="/oauth/' + item.name + '/start" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 text-center shadow-sm">Connect</a>';
           }
           html += '    </div>';
           html += '  </div>';

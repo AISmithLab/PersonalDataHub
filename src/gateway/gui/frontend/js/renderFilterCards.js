@@ -1,12 +1,16 @@
-function renderFilterCards(filters) {
+function renderFilterCards(filters, sourceKey) {
+      var targetSource = sourceKey || 'gmail';
       var types = state.filterTypes || {};
-      var typeKeys = Object.keys(types);
+      var typeKeys = Object.keys(types).filter(function(k) {
+        var s = types[k].source;
+        return !s || s === targetSource || s === 'all';
+      });
       if (!typeKeys.length) return '<p class="empty">Loading filter types...</p>';
 
       var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">';
       typeKeys.forEach(function(typeKey) {
         var meta = types[typeKey];
-        // Find existing filter of this type for gmail
+        // Find existing filter of this type for the specified source
         var existing = filters.find(function(f) { return f.type === typeKey; });
         var isEnabled = existing ? !!existing.enabled : false;
         var value = existing ? (existing.value || '') : '';
@@ -25,7 +29,7 @@ function renderFilterCards(filters) {
         html += '<span style="font-size:14px;font-weight:500;color:' + (isEnabled ? 'var(--fg)' : 'var(--muted)') + '">' + escapeHtml(meta.label) + '</span>';
         html += '</div>';
         if (needsValue) {
-          html += '<input type="' + (typeKey === 'time_after' ? 'date' : 'text') + '" id="filter-val-' + safeType + '" value="' + escapeAttr(value) + '" placeholder="' + escapeAttr(meta.placeholder) + '" onchange="updateFilterValue(&quot;' + safeType + '&quot;, this.value, &quot;' + escapeAttr(filterId) + '&quot;)" style="width:100%;font-size:13px;padding:6px 10px">';
+          html += '<input type="' + (typeKey === 'time_after' || typeKey === 'photo_after' || typeKey === 'sms_after' ? 'date' : 'text') + '" id="filter-val-' + safeType + '" value="' + escapeAttr(value) + '" placeholder="' + escapeAttr(meta.placeholder) + '" onchange="updateFilterValue(&quot;' + safeType + '&quot;, this.value, &quot;' + escapeAttr(filterId) + '&quot;)" style="width:100%;font-size:13px;padding:6px 10px">';
         }
         html += '</div>';
       });

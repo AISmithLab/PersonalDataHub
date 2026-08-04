@@ -175,6 +175,24 @@ async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]
     });
   }
 
+  if (deps.connectorRegistry.has('photo')) {
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'read_photos',
+        description: 'Read photos and images from the device gallery. Automatically strips EXIF GPS and identifiable metadata by default.',
+        parameters: {
+          type: 'object',
+          properties: {
+            after: { type: 'string', description: 'Only photos after date (YYYY-MM-DD)' },
+            album: { type: 'string', description: 'Filter by album or folder name' },
+            limit: { type: 'number', description: 'Max results (default 20)' },
+          },
+        },
+      },
+    });
+  }
+
   // Always available — executed client-side via window.AndroidSms.sendMessage
   tools.push({
     type: 'function',
@@ -260,7 +278,8 @@ async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]
           name: { type: 'string', description: 'Short name for this skill' },
           summary: { type: 'string', description: 'A single sentence summarizing the rule' },
           instructions: { type: 'string', description: 'Full behavioral instructions. For labels: state the condition to match. For actions: state what to do if conditions are met.' },
-          trigger_event: { type: 'string', description: 'When this skill fires. Currently supported: sms_received' },
+          trigger_event: { type: 'string', description: 'When this skill fires: sms_received, photo_added, email_received, calendar_event_starting, manual_shortcut' },
+          allowed_sources: { type: 'string', description: 'JSON array string of allowed sources for this skill (e.g., \'["photo", "emails"]\')' },
           primitive_type: { type: 'string', enum: ['label', 'action'], description: 'Type of primitive' },
           label_tag: { type: 'string', description: 'If primitive_type is label, the tag string to append when matched (e.g., "Spam")' },
           enabled: { type: 'boolean', description: 'If true, enable this skill (default false)' },
@@ -289,8 +308,9 @@ async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]
     type: 'function',
     function: {
       name: 'run_code',
-      description: `Execute JavaScript on this device's Node.js runtime. Use for computations, file I/O, network requests, or data processing.
+      description: `Execute JavaScript on this device's Node.js runtime. Use for computations, file I/O, network requests, or data processing — including writing your own logic to filter, analyze, or clean up data (e.g. finding and removing duplicate photos) instead of relying on a canned tool.
 Globals available: fetch, require (fs, path, crypto, etc.), Buffer, URL, URLSearchParams, setTimeout, AbortController, __dataDir (app data directory path).
+${deps.connectorRegistry.has('photo') ? "If photos are connected: __photos.list(params?) returns the full photo dataset as an array of { id, title, album, date, dataUrl, ... } (params: after, album — same as read_photos). __photos.stageDelete(id, reason?) stages a photo for deletion — like all writes, it requires the owner's approval before anything is actually deleted; it never deletes directly. Use these to write your own duplicate-detection logic (e.g. hash dataUrl, group photos with matching hashes or matching title+album+dimensions, and stageDelete every photo in a group after the first)." : ''}
 Top-level await is supported. Each call starts with a fresh context — write files to __dataDir to persist data between calls.
 Use console.log() to emit output; return values are not captured.`,
       parameters: {
@@ -330,8 +350,8 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
   }
 
   lines.push('', 'Memory: Use save_memory() to record important facts the user shares (preferences, ongoing projects, personal context). Use update_memory(id) when a fact changes. Use delete_memory(id) for stale facts. Be proactive but concise — one clear sentence per memory.');
-  lines.push('', 'Skills: Skills are primitive rules (labels and actions). Use list_skills() to view them. Use save_skill(name, instructions, trigger_event, enabled) to create/update a primitive. Labels classify incoming events and append tags to the context ground truth. Actions define how to respond based on the context. Ensure one primitive per rule. Do not disable other skills for the same trigger unless explicitly replacing them, as multiple primitives compose together. Currently supported trigger: sms_received.');
-  lines.push('', 'Code execution: Use run_code() to run JavaScript on this device. Supports top-level await, fetch, require (fs, path, etc.), Buffer, and __dataDir (path to app data). Use console.log() to emit output — return values are ignored. Each call is a fresh context; write files at __dataDir to persist data between calls.');
+  lines.push('', 'Skills: Skills are primitive rules (labels and actions). Use list_skills() to view them. Use save_skill(name, instructions, trigger_event, enabled) to create/update a primitive. Labels classify incoming events and append tags to the context ground truth. Actions define how to respond based on the context. Ensure one primitive per rule. Do not disable other skills for the same trigger unless explicitly replacing them, as multiple primitives compose together. Currently supported triggers: sms_received, photo_added, email_received, calendar_event_starting, manual_shortcut. Specify allowed_sources to scope permissions.');
+  lines.push('', 'Code execution: Use run_code() to run JavaScript on this device. Supports top-level await, fetch, require (fs, path, etc.), Buffer, and __dataDir (path to app data). Use console.log() to emit output — return values are ignored. Each call is a fresh context; write files at __dataDir to persist data between calls. When asked to find photos matching some criteria, or to clean up duplicates/clutter, prefer writing this logic yourself in run_code over guessing from read_photos summaries alone — see the run_code tool description for the __photos bindings.');
 
   if (sms && sms.length > 0) {
     lines.push('', 'Recent SMS messages (newest first):');
@@ -347,6 +367,67 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
 }
 
 async function executeTool(
+  deps: ServerDeps,
+  name: string,
+  input: Record<string, unknown>,
+  stagedActionIds: string[],
+): Promise<string> {
+  try {
+    return await executeToolInner(deps, name, input, stagedActionIds);
+  } catch (err) {
+    // Tool calls hit live external APIs (Gmail, Calendar, GitHub) that can fail for
+    // reasons outside our control (expired OAuth token, rate limits, network errors).
+    // Without this, a single failing tool call throws out of the whole agent loop and
+    // kills the entire chat response instead of letting the model see the failure and
+    // respond gracefully (e.g. "I couldn't reach Gmail, try reconnecting it").
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error(`[executeTool] ${name} failed:`, message);
+    return JSON.stringify({ error: `${name} failed: ${message}` });
+  }
+}
+
+/**
+ * Narrow, source-scoped capabilities exposed inside the run_code sandbox — lets the agent
+ * write its own JS (e.g. hash-based duplicate detection) against real data instead of us
+ * pre-building a "find duplicates" tool. Deletion is staged for owner approval, never
+ * executed directly from the sandbox, consistent with every other write path.
+ */
+export function buildRunCodeBindings(deps: ServerDeps, stagedActionIds: string[]): Record<string, unknown> {
+  const bindings: Record<string, unknown> = {};
+
+  if (deps.connectorRegistry.has('photo')) {
+    const connector = deps.connectorRegistry.get('photo')!;
+    bindings.__photos = {
+      // Mirrors the read_photos tool: applies stored quick filters + EXIF stripping.
+      list: async (params?: Record<string, unknown>) => {
+        const rows = await connector.fetch({}, params);
+        const filters = (await deps.store.getEnabledFiltersBySource('photo')) as QuickFilter[];
+        return applyFilters(rows, filters).map((r) => {
+          const d = r.data as Record<string, unknown>;
+          return { id: r.source_item_id, title: d.title, album: d.album, date: r.timestamp, ...d };
+        });
+      },
+      // Stages a delete for owner approval — never deletes directly.
+      stageDelete: async (photoId: string, reason?: string) => {
+        const actionId = `act_${randomUUID().slice(0, 12)}`;
+        await deps.store.insertStagingAction({
+          actionId,
+          manifestId: '',
+          source: 'photo',
+          actionType: 'delete_photo',
+          actionData: JSON.stringify({ photoId, reason: reason ?? '' }),
+          purpose: `AI: delete photo ${photoId}${reason ? ` (${reason})` : ''}`,
+        });
+        stagedActionIds.push(actionId);
+        return { ok: true, actionId, status: 'pending_review' };
+      },
+    };
+  }
+
+  return bindings;
+}
+
+async function executeToolInner(
   deps: ServerDeps,
   name: string,
   input: Record<string, unknown>,
@@ -382,6 +463,21 @@ async function executeTool(
       return JSON.stringify(applyFilters(rows, filters).slice(0, Number(input.limit ?? 20)).map(r => {
         const d = r.data as Record<string, unknown>;
         return { id: r.source_item_id, title: d.title, start: d.start, end: d.end, location: d.location, date: r.timestamp };
+      }));
+    }
+
+    case 'read_photos': {
+      const connector = deps.connectorRegistry.get('photo');
+      if (!connector) return JSON.stringify({ error: 'Photo connector not connected' });
+      const params: Record<string, unknown> = {};
+      if (input.after) params.after = input.after;
+      if (input.album) params.album = input.album;
+      if (input.limit) params.limit = input.limit;
+      const rows = await connector.fetch({}, Object.keys(params).length ? params : undefined);
+      const filters = (await deps.store.getEnabledFiltersBySource('photo')) as QuickFilter[];
+      return JSON.stringify(applyFilters(rows, filters).slice(0, Number(input.limit ?? 20)).map(r => {
+        const d = r.data as Record<string, unknown>;
+        return { id: r.source_item_id, title: d.title, album: d.album, date: r.timestamp, ...d };
       }));
     }
 
@@ -491,19 +587,20 @@ async function executeTool(
       const summary = String(input.summary ?? '').trim();
       const instructions = String(input.instructions ?? '').trim();
       const trigger_event = String(input.trigger_event ?? 'sms_received').trim();
+      const allowed_sources = input.allowed_sources ? String(input.allowed_sources).trim() : null;
       const primitive_type = String(input.primitive_type ?? 'action').trim();
       const label_tag = input.label_tag ? String(input.label_tag).trim() : null;
       const enabled = Boolean(input.enabled);
       if (!name || !instructions) return JSON.stringify({ error: 'name and instructions are required' });
       const existingId = String(input.id ?? '').trim();
       if (existingId) {
-        await deps.store.updateSkill(existingId, { name, summary, instructions, trigger_event, primitive_type, label_tag });
+        await deps.store.updateSkill(existingId, { name, summary, instructions, trigger_event, primitive_type, label_tag, allowed_sources });
         if (input.enabled !== undefined) await deps.store.setSkillEnabled(existingId, enabled ? 1 : 0);
         await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_skill_updated', source: null, details: JSON.stringify({ id: existingId, name, primitive_type }) });
         return JSON.stringify({ ok: true, id: existingId });
       }
       const skillId = `skill_${randomUUID().slice(0, 12)}`;
-      await deps.store.insertSkill({ id: skillId, name, summary, instructions, trigger_event, primitive_type, label_tag, enabled: enabled ? 1 : 0 });
+      await deps.store.insertSkill({ id: skillId, name, summary, instructions, trigger_event, primitive_type, label_tag, allowed_sources, enabled: enabled ? 1 : 0 });
       await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_skill_created', source: null, details: JSON.stringify({ id: skillId, name, primitive_type }) });
       return JSON.stringify({ ok: true, id: skillId });
     }
@@ -520,7 +617,8 @@ async function executeTool(
       const code = String(input.code ?? '').trim();
       if (!code) return JSON.stringify({ error: 'code is required' });
       const dataDir = process.env.PDH_DATA_DIR ?? join(process.cwd(), 'pdh-data');
-      const result = await runCode(code, dataDir);
+      const bindings = buildRunCodeBindings(deps, stagedActionIds);
+      const result = await runCode(code, dataDir, bindings);
       await deps.store.insertAuditEntry({
         timestamp: new Date().toISOString(),
         event: 'code_executed',
@@ -545,6 +643,33 @@ async function executeTool(
   }
 }
 
+async function callChatCompletionWithRetry(
+  client: OpenAI,
+  params: OpenAI.ChatCompletionCreateParamsNonStreaming,
+  maxAttempts = 3,
+): Promise<OpenAI.ChatCompletion> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await client.chat.completions.create(params);
+    } catch (err: any) {
+      const status = err?.status || err?.statusCode;
+      const msg = String(err?.message || '');
+      const is429 = status === 429 || msg.includes('429');
+      if (is429 && attempt < maxAttempts) {
+        const waitMs = attempt * 2000;
+        console.warn(`[chat] 429 Rate Limit encountered. Retrying in ${waitMs}ms (${attempt}/${maxAttempts})...`);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      if (is429) {
+        throw new Error('AI provider rate limit reached (429 Too Many Requests). Please wait a few seconds and try again, or check your API quota in Settings.');
+      }
+      throw err;
+    }
+  }
+  throw new Error('Chat completion failed');
+}
+
 async function runAgentLoop(
   deps: ServerDeps,
   messages: ChatMessage[],
@@ -566,7 +691,7 @@ async function runAgentLoop(
   const toolOutputs: ToolOutput[] = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const response = await client.chat.completions.create({
+    const response = await callChatCompletionWithRetry(client, {
       model,
       messages: chatMessages,
       ...(tools.length > 0 ? { tools } : {}),
@@ -575,10 +700,6 @@ async function runAgentLoop(
 
     const choice = response.choices[0];
     if (!choice) break;
-
-    if (choice.finish_reason === 'stop') {
-      return { reply: choice.message.content ?? '', toolsUsed, stagedActionIds, toolOutputs };
-    }
 
     if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls?.length) {
       chatMessages.push(choice.message);
@@ -596,7 +717,14 @@ async function runAgentLoop(
       continue;
     }
 
-    // length, content_filter, or other — return whatever text we have
+    if (choice.message.content) {
+      return { reply: choice.message.content, toolsUsed, stagedActionIds, toolOutputs };
+    }
+
+    if (choice.finish_reason === 'stop' || choice.finish_reason == null) {
+      return { reply: choice.message.content ?? '', toolsUsed, stagedActionIds, toolOutputs };
+    }
+
     return { reply: choice.message.content ?? 'Response was cut short.', toolsUsed, stagedActionIds, toolOutputs };
   }
 
@@ -715,6 +843,20 @@ async function executeAutoReplyTool(
   name: string,
   input: Record<string, unknown>,
 ): Promise<string> {
+  try {
+    return await executeAutoReplyToolInner(deps, name, input);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error(`[executeAutoReplyTool] ${name} failed:`, message);
+    return JSON.stringify({ error: `${name} failed: ${message}` });
+  }
+}
+
+async function executeAutoReplyToolInner(
+  deps: ServerDeps,
+  name: string,
+  input: Record<string, unknown>,
+): Promise<string> {
   switch (name) {
     case 'read_emails': {
       const connector = deps.connectorRegistry.get('gmail');
@@ -812,7 +954,7 @@ async function evaluateLabels(
   ].join('\n');
 
   try {
-    const response = await client.chat.completions.create({
+    const response = await callChatCompletionWithRetry(client, {
       model,
       messages: [{ role: 'system', content: prompt }],
       response_format: { type: 'json_object' }
@@ -834,6 +976,38 @@ async function evaluateLabels(
   }
 }
 
+export function filterToolsForSkillScopes(tools: any[], activeSkills: { allowed_sources?: string | null }[]): any[] {
+  const scopedSkills = activeSkills.filter(s => s.allowed_sources && s.allowed_sources.trim() !== '' && s.allowed_sources !== 'null');
+  if (scopedSkills.length === 0) return tools;
+
+  const allowedSet = new Set<string>();
+  for (const skill of scopedSkills) {
+    try {
+      const parsed = JSON.parse(skill.allowed_sources!);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((s: string) => allowedSet.add(s.toLowerCase()));
+      }
+    } catch (_) { /* ignore invalid JSON */ }
+  }
+
+  if (allowedSet.has('emails')) allowedSet.add('gmail');
+  if (allowedSet.has('gmail')) allowedSet.add('emails');
+  if (allowedSet.has('calendar')) allowedSet.add('google_calendar');
+  if (allowedSet.has('google_calendar')) allowedSet.add('calendar');
+  if (allowedSet.has('photos')) allowedSet.add('photo');
+  if (allowedSet.has('photo')) allowedSet.add('photos');
+
+  return tools.filter(tool => {
+    const name = (tool.function?.name || '').toLowerCase();
+    if (name.includes('memory') || name.includes('skill')) return true;
+    if (name.includes('calendar') && !allowedSet.has('calendar')) return false;
+    if (name.includes('email') && !allowedSet.has('emails')) return false;
+    if (name.includes('sms') && !allowedSet.has('sms')) return false;
+    if (name.includes('photo') && !allowedSet.has('photo')) return false;
+    return true;
+  });
+}
+
 async function runAutoReplyLoop(
   deps: ServerDeps,
   from: string,
@@ -843,10 +1017,14 @@ async function runAutoReplyLoop(
 ): Promise<string> {
   const client = getClient(deps);
   const model = getModel(deps);
-  const tools = await buildAutoReplyTools(deps);
+  const allTools = await buildAutoReplyTools(deps);
   const memories = await deps.store.listMemories();
   const skills = await deps.store.listSkills();
   const today = new Date().toISOString().split('T')[0];
+
+  const activeLabelSkills = skills.filter(s => s.trigger_event === 'sms_received' && s.enabled && s.primitive_type === 'label');
+  const activeActionSkills = skills.filter(s => s.trigger_event === 'sms_received' && s.enabled && s.primitive_type !== 'label');
+  const tools = filterToolsForSkillScopes(allTools, [...activeLabelSkills, ...activeActionSkills]);
 
   const systemLines = [
     `You are an AI SMS auto-reply assistant on the user's Android phone. Today is ${today}.`,
@@ -861,9 +1039,6 @@ async function runAutoReplyLoop(
     '- read_sms_thread: review conversation history with this contact',
     '- save_memory / update_memory / delete_memory: persist facts about contacts',
   ];
-
-  const activeLabelSkills = skills.filter(s => s.trigger_event === 'sms_received' && s.enabled && s.primitive_type === 'label');
-  const activeActionSkills = skills.filter(s => s.trigger_event === 'sms_received' && s.enabled && s.primitive_type !== 'label');
 
   const appliedLabels = await evaluateLabels(client, model, from, smsBody, activeLabelSkills);
 
@@ -894,7 +1069,7 @@ async function runAutoReplyLoop(
   ];
 
   for (let round = 0; round < maxRounds; round++) {
-    const response = await client.chat.completions.create({
+    const response = await callChatCompletionWithRetry(client, {
       model,
       messages: chatMessages,
       ...(tools.length > 0 ? { tools } : {}),
@@ -1195,7 +1370,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
         systemLines.push('', 'Context about the user:');
         memories.forEach(m => systemLines.push(`  ${m.content}`));
       }
-      const response = await client.chat.completions.create({
+      const response = await callChatCompletionWithRetry(client, {
         model,
         messages: [
           { role: 'system', content: systemLines.join('\n') },

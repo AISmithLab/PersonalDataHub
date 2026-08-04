@@ -23,30 +23,45 @@ function renderAiTab() {
           '<span class="material-symbols-outlined text-primary text-4xl">database</span>' +
           '</div>' +
           '<h2 class="font-headline-md text-headline-md text-on-surface mb-xs">How can I help with your data?</h2>' +
-          '<p class="font-body-sm text-body-sm text-on-surface-variant max-w-sm">Ask me anything about your data — emails, calendar, GitHub, or SMS.</p>' +
-          '<div class="grid grid-cols-2 gap-sm mt-xl w-full max-w-md">' +
-          '<button onclick="injectDemoQuestion(\'Summarize my unread emails from the last 24h\')" class="flex flex-col items-start p-md bg-white border border-outline-variant rounded-lg hover:border-primary transition-colors text-left group shadow-sm">' +
-          '<span class="material-symbols-outlined text-primary mb-base">mail</span>' +
-          '<span class="font-label-sm text-label-sm text-on-surface font-semibold">Summarize emails</span>' +
-          '<span class="font-body-sm text-body-sm text-on-surface-variant opacity-60 group-hover:opacity-100 transition-opacity">Last 24 hours</span>' +
-          '</button>' +
-          '<button onclick="injectDemoQuestion(\'What is my schedule for today and tomorrow?\')" class="flex flex-col items-start p-md bg-white border border-outline-variant rounded-lg hover:border-primary transition-colors text-left group shadow-sm">' +
-          '<span class="material-symbols-outlined text-primary mb-base">calendar_month</span>' +
-          '<span class="font-label-sm text-label-sm text-on-surface font-semibold">Check schedule</span>' +
-          '<span class="font-body-sm text-body-sm text-on-surface-variant opacity-60 group-hover:opacity-100 transition-opacity">Upcoming events</span>' +
-          '</button>' +
-          '<button onclick="injectDemoQuestion(\'List open pull requests in my repositories\')" class="flex flex-col items-start p-md bg-white border border-outline-variant rounded-lg hover:border-primary transition-colors text-left group shadow-sm">' +
-          '<span class="material-symbols-outlined text-primary mb-base">code</span>' +
-          '<span class="font-label-sm text-label-sm text-on-surface font-semibold">GitHub PRs</span>' +
-          '<span class="font-body-sm text-body-sm text-on-surface-variant opacity-60 group-hover:opacity-100 transition-opacity">Review status</span>' +
-          '</button>' +
-          '<button onclick="injectDemoQuestion(\'Find my recent 2FA codes from SMS\')" class="flex flex-col items-start p-md bg-white border border-outline-variant rounded-lg hover:border-primary transition-colors text-left group shadow-sm">' +
-          '<span class="material-symbols-outlined text-primary mb-base">sms</span>' +
-          '<span class="font-label-sm text-label-sm text-on-surface font-semibold">Find SMS codes</span>' +
-          '<span class="font-body-sm text-body-sm text-on-surface-variant opacity-60 group-hover:opacity-100 transition-opacity">Recent 2FA</span>' +
-          '</button>' +
-          '</div>' +
-          '</div>';
+          '<p class="font-body-sm text-body-sm text-on-surface-variant max-w-sm">Ask me anything about your data — emails, calendar, GitHub, or SMS.</p>';
+          var chips = [];
+          var hasPhoto = (state.sources || []).some(function(s) { return s.name === 'photo'; }) || window.AndroidSms;
+          if (hasPhoto) {
+            chips.push({ icon: 'image', title: 'Find photos', subtitle: 'This week', query: 'Find my recent photos from this week and summarize them' });
+            chips.push({ icon: 'receipt_long', title: 'Find receipts', subtitle: 'Screenshots', query: 'Find photo screenshots of receipts and catalog them' });
+          }
+          var hasGmail = (state.sources || []).some(function(s) { return s.name === 'gmail' && s.connected; });
+          if (hasGmail) {
+            chips.push({ icon: 'mail', title: 'Summarize emails', subtitle: 'Unread 24h', query: 'Summarize my unread emails from the last 24 hours' });
+            chips.push({ icon: 'edit_square', title: 'Draft reply', subtitle: 'Latest email', query: 'Draft a quick reply to the latest email I received' });
+          }
+          var hasSms = (state.sources || []).some(function(s) { return s.name === 'sms'; }) || window.AndroidSms;
+          if (hasSms) {
+            chips.push({ icon: 'sms', title: 'Find SMS codes', subtitle: 'Recent 2FA', query: 'Find my recent 2FA SMS verification codes' });
+          }
+          var hasCal = (state.sources || []).some(function(s) { return s.name === 'google_calendar' && s.connected; });
+          if (hasCal) {
+            chips.push({ icon: 'calendar_month', title: 'Check schedule', subtitle: 'Today & tomorrow', query: 'What is on my schedule for today and tomorrow?' });
+          }
+          var hasGh = (state.sources || []).some(function(s) { return s.name === 'github' && s.connected; });
+          if (hasGh) {
+            chips.push({ icon: 'code', title: 'GitHub PRs', subtitle: 'Review status', query: 'List open pull requests in my repositories' });
+          }
+          if (!chips.length) {
+            chips.push({ icon: 'mail', title: 'Summarize emails', subtitle: 'Unread 24h', query: 'Summarize my unread emails from the last 24 hours' });
+            chips.push({ icon: 'calendar_month', title: 'Check schedule', subtitle: 'Upcoming events', query: 'What is my schedule for today and tomorrow?' });
+          }
+
+          var chipsHtml = '<div class="flex flex-wrap gap-sm mt-xl w-full max-w-md justify-center" id="dynamic-chat-chips">';
+          chips.forEach(function(c) {
+            chipsHtml += '<button onclick="injectDemoQuestion(\'' + c.query.replace(/'/g, "\\'") + '\')" class="flex flex-col items-start p-md bg-white border border-outline-variant rounded-lg hover:border-primary transition-colors text-left group shadow-sm min-w-[130px] flex-1">' +
+              '<span class="material-symbols-outlined text-primary mb-base">' + c.icon + '</span>' +
+              '<span class="font-label-sm text-label-sm text-on-surface font-semibold">' + escapeHtml(c.title) + '</span>' +
+              '<span class="font-body-sm text-body-sm text-on-surface-variant opacity-60 group-hover:opacity-100 transition-opacity">' + escapeHtml(c.subtitle) + '</span>' +
+              '</button>';
+          });
+          chipsHtml += '</div>';
+          messagesHtml += chipsHtml + '</div>';
       } else {
         messagesHtml += '<div class="space-y-md">';
         chat.messages.forEach(function(msg) {

@@ -1,5 +1,6 @@
 package com.personaldatahub
 
+import android.content.Intent
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
@@ -19,4 +20,12 @@ class MainActivity : ReactActivity() {
    */
   override fun createReactActivityDelegate(): ReactActivityDelegate =
       DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
+
+  // launchMode="singleTask" means the OAuth pdh://oauth deep link re-delivers to this
+  // already-running Activity via onNewIntent rather than onCreate. Forwarding it into
+  // setIntent() is what lets RN's Linking module pick it up (getInitialURL / 'url' event).
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+  }
 }

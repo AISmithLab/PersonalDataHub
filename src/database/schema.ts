@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS agent_skills (
   summary TEXT NOT NULL DEFAULT '',
   primitive_type TEXT NOT NULL DEFAULT 'action',
   label_tag TEXT,
+  allowed_sources TEXT DEFAULT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`;
@@ -132,4 +133,5 @@ export function createTables(db: Database.Database): void {
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN summary TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already exists */ }
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN primitive_type TEXT NOT NULL DEFAULT 'action'"); } catch (_) { /* already exists */ }
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN label_tag TEXT"); } catch (_) { /* already exists */ }
+  try { db.exec("ALTER TABLE agent_skills ADD COLUMN allowed_sources TEXT DEFAULT NULL"); } catch (_) { /* already exists */ }
 }

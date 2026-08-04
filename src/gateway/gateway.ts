@@ -14,6 +14,7 @@ import { TokenManager } from './auth/token-manager.js';
 import { GmailConnector } from './connectors/gmail/connector.js';
 import { GoogleCalendarConnector } from './connectors/calendar/connector.js';
 import { GitHubConnector } from './connectors/github/connector.js';
+import { PhotoConnector } from './connectors/photo/connector.js';
 import { createServer, type ServerDeps } from './server.js';
 
 export interface GatewayOptions {
@@ -107,6 +108,11 @@ export async function createGateway(opts: GatewayOptions): Promise<GatewayResult
       allowedRepos,
     }));
   }
+
+  // Device Photos connector
+  connectorRegistry.set('photo', new PhotoConnector({
+    mobileBridge: process.env.PDH_MOBILE === 'true',
+  }));
 
   const deps: ServerDeps = { store, connectorRegistry, config, tokenManager };
   const app = createServer(deps);

@@ -1,6 +1,9 @@
 function renderCalendarFilterCards(filters) {
       var types = state.filterTypes || {};
-      var typeKeys = Object.keys(types).filter(function(k) { return k === 'time_after'; }); // Only time_after for calendar for now
+      var typeKeys = Object.keys(types).filter(function(k) {
+        var s = types[k].source;
+        return s === 'calendar' || k === 'time_after' || s === 'all';
+      });
       if (!typeKeys.length) return '<p class="empty">Loading filter types...</p>';
 
       var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">';

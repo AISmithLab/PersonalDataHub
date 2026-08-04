@@ -52,8 +52,12 @@ function renderSkillTab() {
         html += '<input id="new-skill-name" placeholder="Skill name" value="' + escapeAttr(sk.newName) + '" oninput="state.skills.newName=this.value" class="flex-grow bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
         html += '<select id="new-skill-trigger" onchange="state.skills.newTrigger=this.value; render()" class="bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">' + triggerOpts + '</select>';
         html += '</div>';
+        html += '<div class="flex items-center gap-xs mt-1">';
+        html += '<span class="text-xs text-on-surface-variant font-semibold">Allowed Sources:</span>';
+        html += '<input id="new-skill-sources" value="' + escapeAttr(sk.newAllowedSources || '') + '" oninput="state.skills.newAllowedSources=this.value" placeholder="e.g. [&quot;photo&quot;, &quot;emails&quot;] (blank = all)" class="flex-grow bg-white border border-outline-variant rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-primary shadow-sm">';
+        html += '</div>';
         
-        html += '<textarea id="new-skill-instructions" placeholder="Describe what the AI should do when this trigger fires — context to check, reply style, behavioral rules, anything." oninput="state.skills.newInstructions=this.value" class="w-full bg-white border border-outline-variant rounded-lg p-md text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm min-h-[120px]" rows="4">' + escapeHtml(sk.newInstructions) + '</textarea>';
+        html += '<textarea id="new-skill-instructions" placeholder="Describe what the AI should do when this trigger fires — context to check, reply style, behavioral rules, anything." oninput="state.skills.newInstructions=this.value" class="w-full bg-white border border-outline-variant rounded-lg p-md text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm min-h-[120px] mt-2" rows="4">' + escapeHtml(sk.newInstructions) + '</textarea>';
         
         html += '</div><div class="flex gap-sm mt-md">';
         html += '<button onclick="submitNewSkill()" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-6 py-2 rounded-xl transition-all active:scale-95 shadow-sm">Save</button>';

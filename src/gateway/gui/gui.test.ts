@@ -6,6 +6,7 @@ import { SqliteDataStore } from '../../database/sqlite-store.js';
 import { createServer } from '../server.js';
 import { TokenManager } from '../auth/token-manager.js';
 import type { ConnectorRegistry, SourceConnector, ActionResult } from '../connectors/types.js';
+import { PhotoConnector } from '../connectors/photo/connector.js';
 import type { HubConfigParsed } from '../../config/schema.js';
 import type Database from 'better-sqlite3';
 import type { Hono } from 'hono';
@@ -50,6 +51,7 @@ describe('GUI Routes', () => {
     db = getDb(join(tmpDir, 'test.db'));
     store = new SqliteDataStore(db);
     const registry: ConnectorRegistry = new Map();
+    registry.set('photo', new PhotoConnector());
     const tokenManager = new TokenManager(store, 'test');
     app = createServer({
       store, connectorRegistry: registry, config: makeConfig(), tokenManager,
@@ -233,6 +235,15 @@ describe('GUI Routes', () => {
     expect(res.status).toBe(400);
     const json = await res.json() as { ok: boolean; error: string };
     expect(json.ok).toBe(false);
+  });
+
+  it('GET /api/photos/preview returns photos with actual image dataUrl strings', async () => {
+    const res = await app.request('/api/photos/preview', { headers: { Cookie: cookie } });
+    expect(res.status).toBe(200);
+    const json = await res.json() as { ok: boolean; photos: Array<{ id: string; title: string; dataUrl: string }> };
+    expect(json.ok).toBe(true);
+    expect(json.photos.length).toBeGreaterThan(0);
+    expect(json.photos[0].dataUrl).toContain('data:image/svg+xml;base64,');
   });
 });
 

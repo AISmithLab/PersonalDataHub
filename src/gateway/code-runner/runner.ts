@@ -12,7 +12,7 @@ export interface RunResult {
 const MAX_OUTPUT_BYTES = 10 * 1024; // 10 KB
 const TIMEOUT_MS = 30_000;
 
-export async function runCode(code: string, dataDir: string): Promise<RunResult> {
+export async function runCode(code: string, dataDir: string, bindings?: Record<string, unknown>): Promise<RunResult> {
   // In the esbuild CJS bundle (Android), import.meta.url is undefined — __dirname is the
   // reliable anchor. Same pattern as android.ts. In ESM (desktop tsc), import.meta.url works.
   // typeof __dirname is safe on undeclared identifiers; no TypeScript error.
@@ -45,6 +45,7 @@ export async function runCode(code: string, dataDir: string): Promise<RunResult>
     __dataDir: dataDir,
     // Read-only env snapshot + cwd; no process.exit, no process.kill
     process: { env: { ...process.env }, cwd: () => process.cwd() },
+    ...bindings,
   });
 
   // Wrap in async IIFE so top-level await works in user code

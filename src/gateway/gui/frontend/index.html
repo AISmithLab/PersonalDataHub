@@ -199,25 +199,27 @@
 
   <!-- Bottom navigation (visible only on mobile) -->
   <nav id="bottom-nav" class="fixed bottom-0 left-0 right-0 z-50 bg-surface border-t border-outline-variant flex justify-around items-center py-2 md:hidden">
-    <a data-tab="ai" onclick="switchTab('ai')" class="flex flex-col items-center gap-1 px-4 py-1 text-on-surface-variant active:scale-95 transition-all">
+    <a data-tab="ai" onclick="switchTab('ai')" class="flex flex-col items-center gap-1 px-3 py-1 text-on-surface-variant active:scale-95 transition-all cursor-pointer">
       <span class="material-symbols-outlined">chat</span>
       <span class="font-label-sm text-label-sm">Chat</span>
     </a>
-    <a data-tab="skill" onclick="switchTab('skill')" class="flex flex-col items-center gap-1 px-4 py-1 text-on-surface-variant active:scale-95 transition-all">
+    <a data-tab="skill" onclick="switchTab('skill')" class="flex flex-col items-center gap-1 px-3 py-1 text-on-surface-variant active:scale-95 transition-all cursor-pointer">
       <span class="material-symbols-outlined">bolt</span>
       <span class="font-label-sm text-label-sm">Skill</span>
     </a>
-    <a data-tab="memory" onclick="switchTab('memory')" class="flex flex-col items-center gap-1 px-4 py-1 text-on-surface-variant active:scale-95 transition-all">
+    <a data-tab="memory" onclick="switchTab('memory')" class="flex flex-col items-center gap-1 px-3 py-1 text-on-surface-variant active:scale-95 transition-all cursor-pointer">
       <span class="material-symbols-outlined">database</span>
       <span class="font-label-sm text-label-sm">Memory</span>
     </a>
-    <a data-tab="settings" onclick="switchTab('settings')" class="flex flex-col items-center gap-1 px-4 py-1 text-on-surface-variant active:scale-95 transition-all">
+    <a data-tab="settings" onclick="switchTab('settings')" class="flex flex-col items-center gap-1 px-3 py-1 text-on-surface-variant active:scale-95 transition-all cursor-pointer">
       <span class="material-symbols-outlined">settings</span>
       <span class="font-label-sm text-label-sm">Settings</span>
     </a>
   </nav>
 
-  
+  <!-- Photo Preview Lightbox Modal -->
+  <div id="photo-preview-modal" style="display:none" onclick="if(event.target.id==='photo-preview-modal')closePhotoModal()" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"></div>
+
   <script>
     /* INJECT_JS */
   </script>

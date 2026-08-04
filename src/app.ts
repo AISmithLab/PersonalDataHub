@@ -132,14 +132,27 @@ async function seedDefaultSkills(store: DataStore): Promise<void> {
       instructions: 'If the sender shares a new fact about themselves or their preferences, save the fact to memory.',
       summary: 'Save new facts or preferences to memory.',
       primitive_type: 'action',
-      label_tag: null
+      label_tag: null,
+      trigger_event: 'sms_received',
+      allowed_sources: '["sms"]'
     },
     {
       name: 'Default Natural Reply',
       instructions: 'Unless otherwise handled, reply naturally in 1-3 sentences as the phone owner, using the sender\'s first name if known, and do not identify as AI unless directly asked.',
       summary: 'Reply naturally as the phone owner.',
       primitive_type: 'action',
-      label_tag: null
+      label_tag: null,
+      trigger_event: 'sms_received',
+      allowed_sources: '["sms"]'
+    },
+    {
+      name: 'Receipt & Expense Organizer',
+      instructions: 'When a screenshot or photo of a receipt is added, extract total amount and vendor, then check Gmail for matching PDF receipts.',
+      summary: 'Extract expense total and vendor from receipt photos, cross-reference with Gmail receipts.',
+      primitive_type: 'action',
+      label_tag: null,
+      trigger_event: 'photo_added',
+      allowed_sources: '["photo", "emails"]'
     }
   ];
 
@@ -148,13 +161,14 @@ async function seedDefaultSkills(store: DataStore): Promise<void> {
     await store.insertSkill({
       id,
       name: primitive.name,
-      trigger_event: 'sms_received',
+      trigger_event: primitive.trigger_event || 'sms_received',
       current_view: 'SUMMARIZED',
       logic_tree: '[]',
       instructions: primitive.instructions,
       summary: primitive.summary,
       primitive_type: primitive.primitive_type,
       label_tag: primitive.label_tag,
+      allowed_sources: primitive.allowed_sources || null,
       enabled: 1,
     });
   }

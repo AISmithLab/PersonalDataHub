@@ -24,6 +24,10 @@ const SmsNative: ISmsModule | null = Platform.OS === 'android' ? (NativeModules.
 interface IContactsModule { getContacts(): Promise<{name: string, number: string}[]>; }
 const ContactsNative: IContactsModule | null = Platform.OS === 'android' ? (NativeModules.ContactsModule as IContactsModule) : null;
 
+interface PhotoMsg { id: string; title: string; album: string; timestamp: string; uri: string; }
+interface IPhotosModule { getPhotos(limit: number): Promise<PhotoMsg[]>; }
+const PhotosNative: IPhotosModule | null = Platform.OS === 'android' ? (NativeModules.PhotosModule as IPhotosModule) : null;
+
 // Injected before page scripts: defines window.AndroidSms bridging postMessage → RN
 const SMS_BRIDGE = `(function(){
   if(window._pdhBridge)return;
@@ -37,12 +41,16 @@ const SMS_BRIDGE = `(function(){
     },
     getContacts:function(id){
       window.ReactNativeWebView.postMessage(JSON.stringify({t:'contacts_get',id:id}));
+    },
+    getPhotos:function(id,limit){
+      window.ReactNativeWebView.postMessage(JSON.stringify({t:'photos_get',id:id,limit:limit}));
     }
   };
   window._pdhRN=function(m){
     if(m.t==='sms_r')window._smsDeliver&&window._smsDeliver(m.id,m.msgs,m.err||null);
     else if(m.t==='sms_sr')window._smsSendDeliver&&window._smsSendDeliver(m.id,m.err||null);
     else if(m.t==='contacts_r')window._contactsDeliver&&window._contactsDeliver(m.id,m.contacts,m.err||null);
+    else if(m.t==='photos_r')window._photosDeliver&&window._photosDeliver(m.id,m.photos,m.err||null);
   };
 })();true;`;
 
@@ -64,6 +72,28 @@ export default function App() {
     webRef.current?.injectJavaScript(`window._pdhRN(${JSON.stringify(data)});true;`);
   }, []);
 
+  // OAuth (Gmail/Calendar/GitHub) finishes in the system browser, which navigates to
+  // pdh://oauth?success=<source>|error=<message>. Android's intent-filter (see
+  // AndroidManifest.xml) routes that back into this already-running Activity via
+  // onNewIntent, which RN's Linking module surfaces here as a 'url' event.
+  const handleOAuthDeepLink = useCallback((url: string) => {
+    if (!url.startsWith('pdh://oauth')) return;
+    const query = url.split('?')[1] ?? '';
+    const params = new URLSearchParams(query);
+    const success = params.get('success');
+    const error = params.get('error');
+    if (!success && !error) return;
+    webRef.current?.injectJavaScript(
+      `window.handlePdhOAuthDeepLink && window.handlePdhOAuthDeepLink(${JSON.stringify(success)}, ${JSON.stringify(error)});true;`
+    );
+  }, []);
+
+  useEffect(() => {
+    const sub = Linking.addEventListener('url', ({ url }) => handleOAuthDeepLink(url));
+    Linking.getInitialURL().then(url => { if (url) handleOAuthDeepLink(url); }).catch(() => {});
+    return () => sub.remove();
+  }, [handleOAuthDeepLink]);
+
   const onShouldStartLoadWithRequest = useCallback((request: { url: string }) => {
     const { url } = request;
     // OAuth start pages must open in the real browser — Google blocks WebView user agents
@@ -75,17 +105,18 @@ export default function App() {
   }, []);
 
   const onMessage = useCallback(async (e: WebViewMessageEvent) => {
-    if (!SmsNative) return;
     let msg: Record<string, unknown>;
     try { msg = JSON.parse(e.nativeEvent.data); } catch { return; }
 
     if (msg.t === 'sms_get') {
+      if (!SmsNative) { inject({ t: 'sms_r', id: msg.id, msgs: null, err: 'PERMISSION_DENIED' }); return; }
       const granted = await requestPerm(PermissionsAndroid.PERMISSIONS.READ_SMS);
       if (!granted) { inject({ t: 'sms_r', id: msg.id, msgs: null, err: 'PERMISSION_DENIED' }); return; }
       SmsNative.getMessages(msg.box as string, msg.limit as number)
         .then(msgs => inject({ t: 'sms_r', id: msg.id, msgs, err: null }))
         .catch((err: Error) => inject({ t: 'sms_r', id: msg.id, msgs: null, err: err.message }));
     } else if (msg.t === 'sms_send') {
+      if (!SmsNative) { inject({ t: 'sms_sr', id: msg.id, err: 'PERMISSION_DENIED' }); return; }
       const granted = await requestPerm(PermissionsAndroid.PERMISSIONS.SEND_SMS);
       if (!granted) { inject({ t: 'sms_sr', id: msg.id, err: 'PERMISSION_DENIED' }); return; }
       SmsNative.sendMessage(msg.to as string, msg.body as string)
@@ -98,6 +129,16 @@ export default function App() {
       ContactsNative.getContacts()
         .then(contacts => inject({ t: 'contacts_r', id: msg.id, contacts, err: null }))
         .catch((err: Error) => inject({ t: 'contacts_r', id: msg.id, contacts: null, err: err.message }));
+    } else if (msg.t === 'photos_get') {
+      const perm = (Platform.Version as number) >= 33
+        ? 'android.permission.READ_MEDIA_IMAGES'
+        : 'android.permission.READ_EXTERNAL_STORAGE';
+      const granted = await requestPerm(perm);
+      if (!granted) { inject({ t: 'photos_r', id: msg.id, photos: null, err: 'PERMISSION_DENIED' }); return; }
+      if (!PhotosNative) { inject({ t: 'photos_r', id: msg.id, photos: [], err: null }); return; }
+      PhotosNative.getPhotos(msg.limit as number || 50)
+        .then(photos => inject({ t: 'photos_r', id: msg.id, photos, err: null }))
+        .catch((err: Error) => inject({ t: 'photos_r', id: msg.id, photos: null, err: err.message }));
     }
   }, [inject]);
 
