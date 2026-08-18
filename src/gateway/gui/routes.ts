@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
 import type { DataStore } from '../../database/datastore.js';
+import { serializeTriggerEvents } from '../../database/datastore.js';
 import type { ConnectorRegistry } from '../connectors/types.js';
 import type { HubConfigParsed } from '../../config/schema.js';
 import type { TokenManager } from '../auth/token-manager.js';
@@ -260,14 +261,15 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   });
 
   app.post('/api/skills', async (c) => {
-    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null; allowed_sources?: string | null };
+    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; trigger_events?: string[]; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null; allowed_sources?: string | null };
     if (!body.name?.trim()) return c.json({ ok: false, error: 'name is required' }, 400);
     const id = `skill_${randomUUID().slice(0, 12)}`;
+    const triggerEvents = body.trigger_events ?? (body.trigger_event ? [body.trigger_event] : ['sms_received']);
     await deps.store.insertSkill({
       id,
       name: body.name.trim(),
       instructions: body.instructions ?? '',
-      trigger_event: body.trigger_event ?? 'sms_received',
+      trigger_event: serializeTriggerEvents(triggerEvents),
       enabled: 0,
       current_view: body.current_view ?? 'SUMMARIZED',
       logic_tree: body.logic_tree ?? '[]',
@@ -281,14 +283,15 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
 
   app.put('/api/skills/:id', async (c) => {
     const id = c.req.param('id');
-    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; enabled?: boolean; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null; allowed_sources?: string | null };
+    const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; trigger_events?: string[]; enabled?: boolean; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null; allowed_sources?: string | null };
     if (body.enabled !== undefined) {
       await deps.store.setSkillEnabled(id, body.enabled ? 1 : 0);
     } else {
+      const triggerEvents = body.trigger_events ?? (body.trigger_event ? [body.trigger_event] : undefined);
       await deps.store.updateSkill(id, {
         name: body.name,
         instructions: body.instructions,
-        trigger_event: body.trigger_event,
+        trigger_event: triggerEvents ? serializeTriggerEvents(triggerEvents) : undefined,
         current_view: body.current_view,
         logic_tree: body.logic_tree,
         summary: body.summary,

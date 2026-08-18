@@ -22,7 +22,8 @@ function renderSettingsTab() {
         { key: 'ai', label: 'AI Settings', icon: 'smart_toy' },
         { key: 'sms', label: 'SMS Auto-Reply', icon: 'sms' },
         { key: 'integrations', label: 'Integrations', icon: 'extension' },
-        { key: 'audit', label: 'Activity Log', icon: 'list_alt' }
+        { key: 'audit', label: 'Activity Log', icon: 'list_alt' },
+        { key: 'support', label: 'Support', icon: 'bug_report' }
       ];
 
       sections.forEach(function(s) {
@@ -252,6 +253,34 @@ function renderSettingsTab() {
           html += '    <p class="font-body-sm text-body-sm text-on-surface-variant">No activity has been logged yet.</p>';
           html += '  </div>';
         }
+        html += '</div>';
+      }
+
+      else if (activeSection === 'support') {
+        html += '<div class="space-y-lg">';
+        html += '  <div class="border-b border-outline-variant pb-xs">';
+        html += '    <h2 class="font-headline-lg text-headline-lg text-on-surface">Support</h2>';
+        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Found a bug? File it on GitHub — no account setup needed here, it just opens a prefilled issue in your browser.</p>';
+        html += '  </div>';
+
+        html += '  <div class="space-y-md max-w-xl">';
+        html += '    <div class="space-y-xs">';
+        html += '      <label class="font-label-caps text-label-caps text-on-surface-variant">What went wrong?</label>';
+        html += '      <textarea id="bug-report-desc" rows="5" placeholder="Describe what you were doing and what happened..." class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm"></textarea>';
+        html += '    </div>';
+        html += '    <button onclick="submitBugReport()" class="flex items-center gap-xs bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-6 py-2.5 rounded-xl transition-all active:scale-95 shadow-md">';
+        html += '      <span class="material-symbols-outlined text-[18px]">bug_report</span>Report a Bug on GitHub';
+        html += '    </button>';
+        html += '  </div>';
+
+        html += '  <div class="border-t border-outline-variant pt-lg space-y-xs max-w-xl">';
+        html += '    <label class="font-label-caps text-label-caps text-on-surface-variant">Walkthrough</label>';
+        html += '    <div>';
+        html += '      <button onclick="replayOnboarding()" class="flex items-center gap-xs bg-white hover:bg-surface-container-high border border-outline text-on-surface-variant font-label-caps text-label-caps px-4 py-2.5 rounded-xl transition-all active:scale-95 shadow-sm">';
+        html += '        <span class="material-symbols-outlined text-[18px]">replay</span>Replay Onboarding';
+        html += '      </button>';
+        html += '    </div>';
+        html += '  </div>';
         html += '</div>';
       }
 

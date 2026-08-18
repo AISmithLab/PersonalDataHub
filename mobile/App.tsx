@@ -22,11 +22,11 @@ interface ISmsModule { getMessages(box: string, limit: number): Promise<SmsMsg[]
 const SmsNative: ISmsModule | null = Platform.OS === 'android' ? (NativeModules.SmsModule as ISmsModule) : null;
 
 interface IContactsModule { getContacts(): Promise<{name: string, number: string}[]>; }
-const ContactsNative: IContactsModule | null = Platform.OS === 'android' ? (NativeModules.ContactsModule as IContactsModule) : null;
+const ContactsNative: IContactsModule | null = NativeModules.ContactsModule as IContactsModule ?? null;
 
 interface PhotoMsg { id: string; title: string; album: string; timestamp: string; uri: string; }
 interface IPhotosModule { getPhotos(limit: number): Promise<PhotoMsg[]>; }
-const PhotosNative: IPhotosModule | null = Platform.OS === 'android' ? (NativeModules.PhotosModule as IPhotosModule) : null;
+const PhotosNative: IPhotosModule | null = NativeModules.PhotosModule as IPhotosModule ?? null;
 
 // Injected before page scripts: defines window.AndroidSms bridging postMessage → RN
 const SMS_BRIDGE = `(function(){
@@ -112,6 +112,12 @@ export default function App() {
       Linking.openURL(url).catch(e => console.warn('[PDH] open URL failed:', e));
       return false;
     }
+    // Bug reports (Settings > Support) link out to github.com/.../issues/new — open in the
+    // real browser rather than navigating away from the app inside the WebView.
+    if (url.startsWith('https://github.com/')) {
+      Linking.openURL(url).catch(e => console.warn('[PDH] open URL failed:', e));
+      return false;
+    }
     return true;
   }, []);
 
@@ -134,9 +140,13 @@ export default function App() {
         .then(() => inject({ t: 'sms_sr', id: msg.id, err: null }))
         .catch((err: Error) => inject({ t: 'sms_sr', id: msg.id, err: err.message }));
     } else if (msg.t === 'contacts_get') {
-      const granted = await requestPerm(PermissionsAndroid.PERMISSIONS.READ_CONTACTS);
-      if (!granted) { inject({ t: 'contacts_r', id: msg.id, contacts: null, err: 'PERMISSION_DENIED' }); return; }
-      if (!ContactsNative) return;
+      if (!ContactsNative) { inject({ t: 'contacts_r', id: msg.id, contacts: null, err: 'PERMISSION_DENIED' }); return; }
+      // Android gates access behind PermissionsAndroid; iOS's CNContactStore triggers
+      // its own OS prompt on first access and rejects the promise if denied.
+      if (Platform.OS === 'android') {
+        const granted = await requestPerm(PermissionsAndroid.PERMISSIONS.READ_CONTACTS);
+        if (!granted) { inject({ t: 'contacts_r', id: msg.id, contacts: null, err: 'PERMISSION_DENIED' }); return; }
+      }
       ContactsNative.getContacts()
         .then(contacts => {
           inject({ t: 'contacts_r', id: msg.id, contacts, err: null });
@@ -144,12 +154,16 @@ export default function App() {
         })
         .catch((err: Error) => inject({ t: 'contacts_r', id: msg.id, contacts: null, err: err.message }));
     } else if (msg.t === 'photos_get') {
-      const perm = (Platform.Version as number) >= 33
-        ? 'android.permission.READ_MEDIA_IMAGES'
-        : 'android.permission.READ_EXTERNAL_STORAGE';
-      const granted = await requestPerm(perm);
-      if (!granted) { inject({ t: 'photos_r', id: msg.id, photos: null, err: 'PERMISSION_DENIED' }); return; }
       if (!PhotosNative) { inject({ t: 'photos_r', id: msg.id, photos: [], err: null }); return; }
+      // Android gates access behind PermissionsAndroid; iOS's PHPhotoLibrary triggers
+      // its own OS prompt on first access and rejects the promise if denied.
+      if (Platform.OS === 'android') {
+        const perm = (Platform.Version as number) >= 33
+          ? 'android.permission.READ_MEDIA_IMAGES'
+          : 'android.permission.READ_EXTERNAL_STORAGE';
+        const granted = await requestPerm(perm);
+        if (!granted) { inject({ t: 'photos_r', id: msg.id, photos: null, err: 'PERMISSION_DENIED' }); return; }
+      }
       PhotosNative.getPhotos(msg.limit as number || 50)
         .then(photos => inject({ t: 'photos_r', id: msg.id, photos, err: null }))
         .catch((err: Error) => inject({ t: 'photos_r', id: msg.id, photos: null, err: err.message }));

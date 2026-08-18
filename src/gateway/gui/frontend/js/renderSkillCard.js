@@ -15,19 +15,22 @@ function renderSkillCard(s) {
       }
 
       if (isEditing) {
-        var triggerOptions = SKILL_TRIGGERS.map(function(t) {
-          return '<option value="' + t.key + '"' + (sk.editContent.trigger_event === t.key ? ' selected' : '') + '>' + t.label + '</option>';
+        var editTriggers = sk.editContent.trigger_events || [];
+        var triggerChecks = SKILL_TRIGGERS.map(function(t) {
+          var checked = editTriggers.indexOf(t.key) !== -1;
+          return '<label class="flex items-center gap-1 px-2 py-1 rounded-lg border cursor-pointer text-xs font-label-sm ' + (checked ? 'bg-primary-container border-primary text-on-primary-container font-semibold' : 'bg-white border-outline-variant text-on-surface-variant') + '"><input type="checkbox" class="sr-only" ' + (checked ? 'checked' : '') + ' onchange="toggleEditSkillTrigger(\'' + safeId + '\', \'' + t.key + '\')">' + t.label + '</label>';
         }).join('');
-        
+
         html += '<div class="flex items-center justify-between gap-sm mb-sm">';
         html += '<span class="font-label-caps text-label-caps text-on-surface-variant">Editing Skill</span>';
         html += '</div>';
 
         html += '<div class="space-y-sm">';
-        html += '<div class="flex gap-sm">';
-        html += '<input id="edit-skill-name-' + safeId + '" value="' + escapeAttr(sk.editContent.name) + '" oninput="state.skills.editContent.name=this.value; triggerSkillAutoSave(\'' + safeId + '\')" onblur="performSkillAutoSave(\'' + safeId + '\')" placeholder="Skill name" class="flex-grow bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
-        html += '<select id="edit-skill-trigger-' + safeId + '" onchange="state.skills.editContent.trigger_event=this.value; triggerSkillAutoSave(\'' + safeId + '\'); render()" class="bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">' + triggerOptions + '</select>';
+        html += '<input id="edit-skill-name-' + safeId + '" value="' + escapeAttr(sk.editContent.name) + '" oninput="state.skills.editContent.name=this.value; triggerSkillAutoSave(\'' + safeId + '\')" onblur="performSkillAutoSave(\'' + safeId + '\')" placeholder="Skill name" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
+        html += '<div class="flex items-center gap-xs mt-1">';
+        html += '<span class="text-xs text-on-surface-variant font-semibold">Triggers when:</span>';
         html += '</div>';
+        html += '<div class="flex flex-wrap gap-xs">' + triggerChecks + '</div>';
         html += '<div class="flex items-center gap-xs mt-1">';
         html += '<span class="text-xs text-on-surface-variant font-semibold">Allowed Sources:</span>';
         html += '<input id="edit-skill-sources-' + safeId + '" value="' + escapeAttr(sk.editContent.allowed_sources || '') + '" oninput="state.skills.editContent.allowed_sources=this.value" placeholder="e.g. [&quot;photo&quot;, &quot;emails&quot;] (blank = all)" class="flex-grow bg-white border border-outline-variant rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-primary shadow-sm">';
@@ -65,7 +68,10 @@ function renderSkillCard(s) {
         
         // Badges
         html += '<div class="flex flex-wrap gap-xs">';
-        html += '<span class="font-mono-label text-mono-label bg-surface-container text-on-surface-variant px-xs py-0.5 rounded uppercase">' + (SKILL_TRIGGERS.find(function(t){return t.key===s.trigger_event;})||{label:s.trigger_event}).label + '</span>';
+        parseSkillTriggerEvents(s.trigger_event).forEach(function(key) {
+          var t = SKILL_TRIGGERS.find(function(t){return t.key===key;});
+          html += '<span class="font-mono-label text-mono-label bg-surface-container text-on-surface-variant px-xs py-0.5 rounded uppercase">' + escapeHtml(t ? t.label : key) + '</span>';
+        });
         if (isActive) {
           html += '<span class="font-mono-label text-mono-label bg-primary-container text-on-primary-container px-xs py-0.5 rounded uppercase font-semibold">active</span>';
         }

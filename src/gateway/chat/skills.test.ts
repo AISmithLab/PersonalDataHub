@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { rmSync } from 'node:fs';
 import { getDb } from '../../database/db.js';
 import { SqliteDataStore } from '../../database/sqlite-store.js';
+import { parseTriggerEvents, serializeTriggerEvents } from '../../database/datastore.js';
 import { filterToolsForSkillScopes, buildRunCodeBindings } from './routes.js';
 import { PhotoConnector } from '../connectors/photo/connector.js';
 import { TokenManager } from '../auth/token-manager.js';
@@ -57,6 +58,33 @@ describe('Multi-Source Skills and Permission Scopes', () => {
     expect(updatedSkill?.allowed_sources).toBe('["photo"]');
   });
 
+  it('supports skills tagged with multiple trigger contexts', async () => {
+    store.insertSkill({
+      id: 'skill_multi_trigger',
+      name: 'Receipt Organizer',
+      trigger_event: serializeTriggerEvents(['sms_received', 'photo_added']),
+      instructions: 'Extract vendor and amount from receipt photo or text',
+      summary: 'Receipt organizer',
+      primitive_type: 'action',
+      label_tag: null,
+      allowed_sources: '["photo", "emails", "sms"]',
+      enabled: 1,
+    });
+
+    const skills = await store.listSkills();
+    const skill = skills.find(s => s.id === 'skill_multi_trigger');
+    expect(skill).toBeDefined();
+    expect(parseTriggerEvents(skill?.trigger_event)).toEqual(['sms_received', 'photo_added']);
+
+    // A task filtering for the sms_received context should still pick up this skill
+    // even though it's also tagged for photo_added.
+    expect(parseTriggerEvents(skill?.trigger_event).includes('sms_received')).toBe(true);
+    expect(parseTriggerEvents(skill?.trigger_event).includes('email_received')).toBe(false);
+
+    // Legacy rows predating multi-tag support stored a bare string — still parses correctly.
+    expect(parseTriggerEvents('photo_added')).toEqual(['photo_added']);
+  });
+
   it('filterToolsForSkillScopes strips tools from unauthorized sources when allowed_sources is set', () => {
     const allTools = [
       { type: 'function', function: { name: 'read_calendar_events' } },
@@ -105,7 +133,7 @@ describe('Multi-Source Skills and Permission Scopes', () => {
     ]);
 
     const registry: ConnectorRegistry = new Map([['photo', connector]]);
-    const config: HubConfigParsed = { deployment: { gateway: 'local', database: 'sqlite' }, sources: {}, port: 3000 };
+    const config: HubConfigParsed = { deployment: { gateway: 'local', database: 'sqlite' }, sources: {}, port: 3000, onboardingCompleted: true };
     const deps = { store, connectorRegistry: registry, config, tokenManager: new TokenManager(store, 'test-secret') };
 
     const stagedActionIds: string[] = [];
@@ -137,7 +165,7 @@ describe('Multi-Source Skills and Permission Scopes', () => {
 
   it('buildRunCodeBindings omits __photos when the photo connector is not connected', () => {
     const registry: ConnectorRegistry = new Map();
-    const config: HubConfigParsed = { deployment: { gateway: 'local', database: 'sqlite' }, sources: {}, port: 3000 };
+    const config: HubConfigParsed = { deployment: { gateway: 'local', database: 'sqlite' }, sources: {}, port: 3000, onboardingCompleted: true };
     const deps = { store, connectorRegistry: registry, config, tokenManager: new TokenManager(store, 'test-secret') };
 
     const bindings = buildRunCodeBindings(deps, []);

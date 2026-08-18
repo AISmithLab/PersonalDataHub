@@ -51,6 +51,7 @@ function loadConfigFromEnv(): HubConfigParsed {
     },
     sources,
     port: 3000,
+    onboardingCompleted: true,
   };
 }
 

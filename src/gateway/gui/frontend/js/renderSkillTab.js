@@ -30,7 +30,11 @@ function renderSkillTab() {
       }
 
       if (sk.adding) {
-        var triggerOpts = SKILL_TRIGGERS.map(function(t) { return '<option value="' + t.key + '">' + t.label + '</option>'; }).join('');
+        var newTriggers = sk.newTriggers || [];
+        var triggerChecks = SKILL_TRIGGERS.map(function(t) {
+          var checked = newTriggers.indexOf(t.key) !== -1;
+          return '<label class="flex items-center gap-1 px-2 py-1 rounded-lg border cursor-pointer text-xs font-label-sm ' + (checked ? 'bg-primary-container border-primary text-on-primary-container font-semibold' : 'bg-white border-outline-variant text-on-surface-variant') + '"><input type="checkbox" class="sr-only" ' + (checked ? 'checked' : '') + ' onchange="toggleNewSkillTrigger(\'' + t.key + '\')">' + t.label + '</label>';
+        }).join('');
         var isTranslatingNew = !!sk.isTranslating['new'];
         var currentViewNew = sk.newCurrentView || 'SUMMARIZED';
         
@@ -48,10 +52,11 @@ function renderSkillTab() {
         html += '</div>';
 
         html += '<div class="space-y-sm">';
-        html += '<div class="flex gap-sm">';
-        html += '<input id="new-skill-name" placeholder="Skill name" value="' + escapeAttr(sk.newName) + '" oninput="state.skills.newName=this.value" class="flex-grow bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
-        html += '<select id="new-skill-trigger" onchange="state.skills.newTrigger=this.value; render()" class="bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">' + triggerOpts + '</select>';
+        html += '<input id="new-skill-name" placeholder="Skill name" value="' + escapeAttr(sk.newName) + '" oninput="state.skills.newName=this.value" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
+        html += '<div class="flex items-center gap-xs mt-1">';
+        html += '<span class="text-xs text-on-surface-variant font-semibold">Triggers when:</span>';
         html += '</div>';
+        html += '<div class="flex flex-wrap gap-xs">' + triggerChecks + '</div>';
         html += '<div class="flex items-center gap-xs mt-1">';
         html += '<span class="text-xs text-on-surface-variant font-semibold">Allowed Sources:</span>';
         html += '<input id="new-skill-sources" value="' + escapeAttr(sk.newAllowedSources || '') + '" oninput="state.skills.newAllowedSources=this.value" placeholder="e.g. [&quot;photo&quot;, &quot;emails&quot;] (blank = all)" class="flex-grow bg-white border border-outline-variant rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-primary shadow-sm">';

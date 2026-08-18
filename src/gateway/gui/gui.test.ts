@@ -28,6 +28,7 @@ function makeConfig(): HubConfigParsed {
       },
     },
     port: 3000,
+    onboardingCompleted: true,
   };
 }
 

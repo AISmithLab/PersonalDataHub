@@ -57,10 +57,33 @@ export interface MemoryRow {
   updated_at: string;
 }
 
+/**
+ * Skills can be tagged with multiple trigger contexts (sms_received, photo_added, etc).
+ * The DB stores this as a JSON array string in the `trigger_event` column; older rows
+ * predating multi-tag support hold a bare string (e.g. 'sms_received'), so parsing
+ * falls back to treating the raw value as a single-element array.
+ */
+export function parseTriggerEvents(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.filter((x): x is string => typeof x === 'string');
+  } catch {
+    // legacy plain-string value — fall through
+  }
+  return [raw];
+}
+
+export function serializeTriggerEvents(events: string[]): string {
+  const unique = Array.from(new Set(events.map(e => e.trim()).filter(Boolean)));
+  return JSON.stringify(unique.length ? unique : ['sms_received']);
+}
+
 export interface SkillRow {
   id: string;
   name: string;
   instructions: string;
+  /** JSON-encoded array of trigger tags — use parseTriggerEvents() to read. */
   trigger_event: string;
   enabled: number;
   current_view: string;

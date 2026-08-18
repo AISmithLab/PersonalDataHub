@@ -6,6 +6,7 @@
 import { resolve } from 'node:path';
 import type { Hono } from 'hono';
 import type { DataStore } from './database/datastore.js';
+import { parseTriggerEvents, serializeTriggerEvents } from './database/datastore.js';
 import type { ConnectorRegistry } from './gateway/connectors/types.js';
 import type { HubConfigParsed } from './config/schema.js';
 import type { TokenManager } from './gateway/auth/token-manager.js';
@@ -72,13 +73,13 @@ async function seedDefaultSkills(store: DataStore): Promise<void> {
   const existing = await store.listSkills();
 
   // If the user has custom/non-default skills, don't overwrite
-  const hasCustomSmsSkill = existing.some(s => 
-    s.trigger_event === 'sms_received' && 
-    s.instructions && 
+  const hasCustomSmsSkill = existing.some(s =>
+    parseTriggerEvents(s.trigger_event).includes('sms_received') &&
+    s.instructions &&
     !s.instructions.startsWith('Context:') &&
     !s.instructions.startsWith('If the sender is')
   );
-  const hasOtherTriggers = existing.some(s => s.trigger_event && s.trigger_event !== 'sms_received');
+  const hasOtherTriggers = existing.some(s => parseTriggerEvents(s.trigger_event).some(t => t !== 'sms_received'));
   if (hasCustomSmsSkill || hasOtherTriggers) return;
 
   // Delete any stale seeds from previous schema iterations
@@ -161,7 +162,7 @@ async function seedDefaultSkills(store: DataStore): Promise<void> {
     await store.insertSkill({
       id,
       name: primitive.name,
-      trigger_event: primitive.trigger_event || 'sms_received',
+      trigger_event: serializeTriggerEvents([primitive.trigger_event || 'sms_received']),
       current_view: 'SUMMARIZED',
       logic_tree: '[]',
       instructions: primitive.instructions,

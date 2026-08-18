@@ -7,6 +7,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import type { ServerDeps } from '../server.js';
 import { applyFilters, type QuickFilter } from '../filters.js';
 import type { MemoryRow, SkillRow } from '../../database/datastore.js';
+import { parseTriggerEvents, serializeTriggerEvents } from '../../database/datastore.js';
 import { runCode } from '../code-runner/runner.js';
 import { setContacts, labelWithContact } from './contacts-cache.js';
 
@@ -279,13 +280,13 @@ async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]
           name: { type: 'string', description: 'Short name for this skill' },
           summary: { type: 'string', description: 'A single sentence summarizing the rule' },
           instructions: { type: 'string', description: 'Full behavioral instructions. For labels: state the condition to match. For actions: state what to do if conditions are met.' },
-          trigger_event: { type: 'string', description: 'When this skill fires: sms_received, photo_added, email_received, calendar_event_starting, manual_shortcut' },
+          trigger_events: { type: 'array', items: { type: 'string' }, description: 'One or more contexts when this skill fires: sms_received, photo_added, email_received, calendar_event_starting, manual_shortcut. A skill only gets pulled into a task when that task\'s context matches one of these tags.' },
           allowed_sources: { type: 'string', description: 'JSON array string of allowed sources for this skill (e.g., \'["photo", "emails"]\')' },
           primitive_type: { type: 'string', enum: ['label', 'action'], description: 'Type of primitive' },
           label_tag: { type: 'string', description: 'If primitive_type is label, the tag string to append when matched (e.g., "Spam")' },
           enabled: { type: 'boolean', description: 'If true, enable this skill (default false)' },
         },
-        required: ['name', 'summary', 'instructions', 'trigger_event', 'primitive_type'],
+        required: ['name', 'summary', 'instructions', 'trigger_events', 'primitive_type'],
       },
     },
   });
@@ -351,7 +352,7 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
   }
 
   lines.push('', 'Memory: Use save_memory() to record important facts the user shares (preferences, ongoing projects, personal context). Use update_memory(id) when a fact changes. Use delete_memory(id) for stale facts. Be proactive but concise — one clear sentence per memory. If a memory is about someone in an SMS conversation, refer to them by their contact name (shown in the conversation header) rather than their phone number.');
-  lines.push('', 'Skills: Skills are primitive rules (labels and actions). Use list_skills() to view them. Use save_skill(name, instructions, trigger_event, enabled) to create/update a primitive. Labels classify incoming events and append tags to the context ground truth. Actions define how to respond based on the context. Ensure one primitive per rule. Do not disable other skills for the same trigger unless explicitly replacing them, as multiple primitives compose together. Currently supported triggers: sms_received, photo_added, email_received, calendar_event_starting, manual_shortcut. Specify allowed_sources to scope permissions.');
+  lines.push('', 'Skills: Skills are primitive rules (labels and actions). Use list_skills() to view them. Use save_skill(name, instructions, trigger_events, enabled) to create/update a primitive. A skill can be tagged with multiple trigger_events (e.g. both sms_received and photo_added) and is only pulled into a task when that task\'s context matches one of its tags. Labels classify incoming events and append tags to the context ground truth. Actions define how to respond based on the context. Ensure one primitive per rule. Do not disable other skills for the same trigger unless explicitly replacing them, as multiple primitives compose together. Currently supported triggers: sms_received, photo_added, email_received, calendar_event_starting, manual_shortcut. Specify allowed_sources to scope permissions.');
   lines.push('', 'Code execution: Use run_code() to run JavaScript on this device. Supports top-level await, fetch, require (fs, path, etc.), Buffer, and __dataDir (path to app data). Use console.log() to emit output — return values are ignored. Each call is a fresh context; write files at __dataDir to persist data between calls. When asked to find photos matching some criteria, or to clean up duplicates/clutter, prefer writing this logic yourself in run_code over guessing from read_photos summaries alone — see the run_code tool description for the __photos bindings.');
 
   if (sms && sms.length > 0) {
@@ -587,7 +588,10 @@ async function executeToolInner(
       const name = String(input.name ?? '').trim();
       const summary = String(input.summary ?? '').trim();
       const instructions = String(input.instructions ?? '').trim();
-      const trigger_event = String(input.trigger_event ?? 'sms_received').trim();
+      const triggerEventsInput = Array.isArray(input.trigger_events)
+        ? (input.trigger_events as unknown[]).map(t => String(t))
+        : (input.trigger_event ? [String(input.trigger_event)] : ['sms_received']);
+      const trigger_event = serializeTriggerEvents(triggerEventsInput);
       const allowed_sources = input.allowed_sources ? String(input.allowed_sources).trim() : null;
       const primitive_type = String(input.primitive_type ?? 'action').trim();
       const label_tag = input.label_tag ? String(input.label_tag).trim() : null;
@@ -1023,8 +1027,8 @@ async function runAutoReplyLoop(
   const skills = await deps.store.listSkills();
   const today = new Date().toISOString().split('T')[0];
 
-  const activeLabelSkills = skills.filter(s => s.trigger_event === 'sms_received' && s.enabled && s.primitive_type === 'label');
-  const activeActionSkills = skills.filter(s => s.trigger_event === 'sms_received' && s.enabled && s.primitive_type !== 'label');
+  const activeLabelSkills = skills.filter(s => parseTriggerEvents(s.trigger_event).includes('sms_received') && s.enabled && s.primitive_type === 'label');
+  const activeActionSkills = skills.filter(s => parseTriggerEvents(s.trigger_event).includes('sms_received') && s.enabled && s.primitive_type !== 'label');
   const tools = filterToolsForSkillScopes(allTools, [...activeLabelSkills, ...activeActionSkills]);
 
   const systemLines = [
@@ -1276,6 +1280,28 @@ export function createChatRoutes(deps: ServerDeps): Hono {
       }
     }
     return c.json({ ok: true, enabled, maxToolRounds });
+  });
+
+  // Onboarding completion flag — gates the first-run walkthrough in the frontend
+  app.get('/api/settings/onboarding', async (c) => {
+    return c.json({ ok: true, completed: deps.config.onboardingCompleted ?? false });
+  });
+
+  app.post('/api/settings/onboarding', async (c) => {
+    const body = await c.req.json();
+    const completed = Boolean(body.completed);
+    (deps.config as Record<string, unknown>).onboardingCompleted = completed;
+    const configPath = process.env.PDH_CONFIG_PATH;
+    if (configPath) {
+      try {
+        const parsed = parseYaml(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+        parsed.onboardingCompleted = completed;
+        writeFileSync(configPath, stringifyYaml(parsed), 'utf-8');
+      } catch (e) {
+        console.warn('[chat] onboarding persist failed (in-memory update succeeded):', e);
+      }
+    }
+    return c.json({ ok: true, completed });
   });
 
   // Contact list sync — called by the RN app (App.tsx) whenever it (re)reads the device

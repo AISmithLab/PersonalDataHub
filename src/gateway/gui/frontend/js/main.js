@@ -33,11 +33,13 @@ var currentTab = 'ai';
       sms: { messages: null, loading: false, error: null, box: 'inbox', contextMenu: null, autoReplying: false },
       chat: { messages: [], loading: false, error: null, aiAvailable: false, stagedSmsIds: [], codeBlocks: {}, configuredModel: '' },
       memories: { items: [], loading: false, loaded: false, editingId: null, editContent: '', adding: false, newContent: '', error: null },
-      skills: { items: [], loading: false, loaded: false, editingId: null, editContent: { name: '', instructions: '', trigger_event: 'sms_received', current_view: 'SUMMARIZED', logic_tree: [] }, adding: false, newName: '', newInstructions: '', newTrigger: 'sms_received', newCurrentView: 'SUMMARIZED', newLogicTree: [], error: null, isTranslating: {} },
+      skills: { items: [], loading: false, loaded: false, editingId: null, editContent: { name: '', instructions: '', trigger_events: ['sms_received'], current_view: 'SUMMARIZED', logic_tree: [] }, adding: false, newName: '', newInstructions: '', newTriggers: ['sms_received'], newCurrentView: 'SUMMARIZED', newLogicTree: [], error: null, isTranslating: {} },
       settingsProvider: 'anthropic',
       autoReply: { enabled: false, maxToolRounds: 3, loading: false, testResult: null, testLoading: false },
       settingsSection: 'ai',
+      onboarding: { active: false, step: 'intro' },
     };
+    var ONBOARDING_STEPS = ['intro', 'apikey', 'sms', 'chat', 'memory'];
     var _saveTimer = null;
 
     // Sidebar + bottom-nav switching
@@ -278,6 +280,11 @@ var currentTab = 'ai';
       document.querySelectorAll('.nav-item[data-tab], #bottom-nav a[data-tab]').forEach(function(el) {
         el.classList.toggle('active', el.dataset.tab === currentTab);
       });
+
+      if (state.onboarding.active) {
+        var obEl = document.getElementById('onboarding-screen');
+        if (obEl) obEl.innerHTML = renderOnboardingScreen();
+      }
 
       var content = document.getElementById('content');
       if (!content) return;
@@ -860,6 +867,79 @@ var currentTab = 'ai';
     }
     window.testAutoReply = testAutoReply;
 
+    function onboardingSaveAiKey() {
+      var key = document.getElementById('ob-ai-api-key').value.trim();
+      var provider = state.settingsProvider;
+      if (!key) { alert('API key is required'); return; }
+      fetch('/api/settings/ai-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: key, provider: provider || 'anthropic' }),
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok) {
+          state.chat.aiAvailable = true;
+          var flash = document.getElementById('ob-ai-flash');
+          if (flash) { flash.style.opacity = '1'; setTimeout(function() { flash.style.opacity = '0'; }, 2000); }
+          render();
+        } else {
+          alert('Error: ' + (d.error || 'Unknown error'));
+        }
+      }).catch(function() { alert('Network error'); });
+    }
+    window.onboardingSaveAiKey = onboardingSaveAiKey;
+
+    function showOnboarding() {
+      var el = document.getElementById('onboarding-screen');
+      if (el) { el.style.display = 'flex'; el.innerHTML = renderOnboardingScreen(); }
+    }
+
+    function checkOnboarding() {
+      fetch('/api/settings/onboarding').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.ok && !d.completed) {
+          state.onboarding.active = true;
+          state.onboarding.step = 'intro';
+          showOnboarding();
+        }
+      }).catch(function() { /* non-fatal */ });
+    }
+    window.checkOnboarding = checkOnboarding;
+
+    function replayOnboarding() {
+      state.onboarding.active = true;
+      state.onboarding.step = 'intro';
+      showOnboarding();
+    }
+    window.replayOnboarding = replayOnboarding;
+
+    function completeOnboarding() {
+      state.onboarding.active = false;
+      var el = document.getElementById('onboarding-screen');
+      if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+      fetch('/api/settings/onboarding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed: true }),
+      }).catch(function() { /* non-fatal */ });
+    }
+
+    function onboardingNext() {
+      var i = ONBOARDING_STEPS.indexOf(state.onboarding.step);
+      if (i < ONBOARDING_STEPS.length - 1) { state.onboarding.step = ONBOARDING_STEPS[i + 1]; showOnboarding(); }
+    }
+    window.onboardingNext = onboardingNext;
+
+    function onboardingBack() {
+      var i = ONBOARDING_STEPS.indexOf(state.onboarding.step);
+      if (i > 0) { state.onboarding.step = ONBOARDING_STEPS[i - 1]; showOnboarding(); }
+    }
+    window.onboardingBack = onboardingBack;
+
+    function skipOnboarding() { completeOnboarding(); }
+    window.skipOnboarding = skipOnboarding;
+
+    function finishOnboarding() { completeOnboarding(); }
+    window.finishOnboarding = finishOnboarding;
+
     function toggleAiBaseUrl() { /* kept for compatibility; logic moved to selectProvider */ }
     window.toggleAiBaseUrl = toggleAiBaseUrl;
 
@@ -871,6 +951,37 @@ var currentTab = 'ai';
       { key: 'manual_shortcut', label: 'Home Screen Shortcut / Tap' }
     ];
 
+    // Skills can carry multiple trigger tags. The DB stores them as a JSON array string;
+    // older rows predating multi-tag support hold a bare string (e.g. 'sms_received').
+    function parseSkillTriggerEvents(raw) {
+      if (!raw) return [];
+      try {
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.filter(function(x) { return typeof x === 'string'; });
+      } catch (e) { /* legacy plain-string value */ }
+      return [raw];
+    }
+    window.parseSkillTriggerEvents = parseSkillTriggerEvents;
+
+    function toggleTriggerInList(list, key) {
+      var i = list.indexOf(key);
+      if (i === -1) list.push(key); else list.splice(i, 1);
+      return list;
+    }
+
+    function toggleNewSkillTrigger(key) {
+      toggleTriggerInList(state.skills.newTriggers, key);
+      render();
+    }
+    window.toggleNewSkillTrigger = toggleNewSkillTrigger;
+
+    function toggleEditSkillTrigger(id, key) {
+      toggleTriggerInList(state.skills.editContent.trigger_events, key);
+      triggerSkillAutoSave(id);
+      render();
+    }
+    window.toggleEditSkillTrigger = toggleEditSkillTrigger;
+
     /* INJECT_renderLogicalEditor */
 
     window.renderLogicalEditor = renderLogicalEditor;
@@ -881,7 +992,7 @@ var currentTab = 'ai';
       var editContent = isAdding ? {
         name: sk.newName,
         instructions: sk.newInstructions,
-        trigger_event: sk.newTrigger,
+        trigger_events: sk.newTriggers,
         current_view: sk.newCurrentView,
         logic_tree: sk.newLogicTree
       } : sk.editContent;
@@ -1082,7 +1193,7 @@ var currentTab = 'ai';
           body: JSON.stringify({
             name: c.name,
             instructions: c.instructions,
-            trigger_event: c.trigger_event,
+            trigger_events: c.trigger_events && c.trigger_events.length ? c.trigger_events : ['sms_received'],
             current_view: c.current_view,
             logic_tree: JSON.stringify(c.logic_tree),
             allowed_sources: c.allowed_sources || null
@@ -1103,7 +1214,7 @@ var currentTab = 'ai';
       state.skills.newName = '';
       state.skills.newInstructions = '';
       state.skills.newAllowedSources = '';
-      state.skills.newTrigger = 'sms_received';
+      state.skills.newTriggers = ['sms_received'];
       state.skills.newCurrentView = 'SUMMARIZED';
       var initialTree = [{ id: 'node_' + Math.random().toString(36).slice(2, 9), type: 'IF', condition: '', action: '' }];
       state.skills.newLogicTree = initialTree;
@@ -1119,7 +1230,7 @@ var currentTab = 'ai';
       var sk = state.skills;
       var name = sk.newName.trim();
       if (!name) { alert('Skill name is required'); return; }
-      var trigger = sk.newTrigger || 'sms_received';
+      var triggers = sk.newTriggers && sk.newTriggers.length ? sk.newTriggers : ['sms_received'];
       var current_view = sk.newCurrentView || 'SUMMARIZED';
       var instructions = sk.newInstructions || '';
       var logic_tree_arr = sk.newLogicTree || [];
@@ -1174,7 +1285,7 @@ var currentTab = 'ai';
           body: JSON.stringify({
             name: name,
             instructions: instructions,
-            trigger_event: trigger,
+            trigger_events: triggers,
             current_view: current_view,
             logic_tree: JSON.stringify(logic_tree_arr),
             allowed_sources: sk.newAllowedSources || null
@@ -1221,10 +1332,11 @@ var currentTab = 'ai';
       if (!parsedLogic.length) {
         parsedLogic = [{ id: 'node_' + Math.random().toString(36).slice(2, 9), type: 'IF', condition: '', action: '' }];
       }
+      var parsedTriggers = parseSkillTriggerEvents(skill.trigger_event);
       state.skills.editContent = {
         name: skill.name,
         instructions: skill.instructions,
-        trigger_event: skill.trigger_event,
+        trigger_events: parsedTriggers.length ? parsedTriggers : ['sms_received'],
         current_view: skill.current_view || 'SUMMARIZED',
         logic_tree: parsedLogic,
         allowed_sources: skill.allowed_sources || ''
@@ -1246,7 +1358,7 @@ var currentTab = 'ai';
       var cache = sk.translationCache || {};
       
       var name = c.name;
-      var trigger = c.trigger_event;
+      var triggers = c.trigger_events && c.trigger_events.length ? c.trigger_events : ['sms_received'];
       var current_view = c.current_view || 'SUMMARIZED';
       var instructions = c.instructions;
       var logic_tree_arr = c.logic_tree;
@@ -1316,7 +1428,7 @@ var currentTab = 'ai';
           body: JSON.stringify({
             name: name,
             instructions: instructions,
-            trigger_event: trigger,
+            trigger_events: triggers,
             current_view: current_view,
             logic_tree: JSON.stringify(logic_tree_arr),
             allowed_sources: sk.editContent.allowed_sources || null
@@ -1354,6 +1466,8 @@ async function deleteSkill(id) {
     window.deleteSkill = deleteSkill;
 
     /* INJECT_renderSettingsTab */
+
+    /* INJECT_renderOnboarding */
 
 
     function toggleEmailExpand(emailId) {
@@ -1947,6 +2061,49 @@ async function deleteSkill(id) {
       }
     })();
 
+    // --- Bug reporting: opens a prefilled "new issue" page on the project's GitHub repo.
+    // No GitHub API/OAuth involved — this is just a link. App.tsx intercepts navigation
+    // to github.com and opens it in the system browser (same mechanism as OAuth links).
+    var BUG_REPORT_REPO = 'AISmithLab/PersonalDataHub';
+
+    function reportBug(title, body) {
+      var url = 'https://github.com/' + BUG_REPORT_REPO + '/issues/new'
+        + '?title=' + encodeURIComponent(title || 'Bug report')
+        + '&body=' + encodeURIComponent(body || '');
+      window.location.href = url;
+    }
+    window.reportBug = reportBug;
+
+    // Manual trigger: called from the Settings > Support section.
+    window.submitBugReport = function() {
+      var desc = (document.getElementById('bug-report-desc') || {}).value || '';
+      var body = (desc ? desc + '\n\n' : '') + '---\nReported from PersonalDataHub app.';
+      reportBug(desc.split('\n')[0].slice(0, 80) || 'Bug report', body);
+    };
+
+    // Automatic trigger: surfaces a "Report this?" prompt the moment an unhandled JS
+    // error or promise rejection happens, prefilled with the actual error — still
+    // requires the user to confirm before anything opens (no silent/background filing).
+    // Only offers once per page load: a recurring throw (e.g. inside render()) would
+    // otherwise pop a confirm() on every occurrence and wedge the UI.
+    var _bugReportOffered = false;
+    window.addEventListener('error', function(e) {
+      offerBugReport(e.message, e.filename && e.error && e.error.stack);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      var reason = e.reason;
+      var message = reason && reason.message ? reason.message : String(reason);
+      offerBugReport(message, reason && reason.stack);
+    });
+    function offerBugReport(message, stack) {
+      if (!message || _bugReportOffered) return;
+      _bugReportOffered = true;
+      var wantsReport = confirm('PersonalDataHub hit an error:\n\n' + message + '\n\nReport this on GitHub?');
+      if (!wantsReport) return;
+      var body = 'Error: ' + message + (stack ? '\n\nStack trace:\n```\n' + stack + '\n```' : '') + '\n\n---\nAuto-captured from PersonalDataHub app.';
+      reportBug(message.slice(0, 80), body);
+    }
+
     // --- Auth: signup vs login form ---
     var isSignup = false;
 
@@ -1986,6 +2143,7 @@ async function deleteSkill(id) {
           document.getElementById('login-screen').style.display = 'none';
           document.getElementById('app').style.display = 'flex';
           fetchData();
+          checkOnboarding();
         } else if (res.status === 409) {
           // Account already exists — switch to sign-in mode automatically
           setAuthMode(false);
@@ -2069,6 +2227,7 @@ async function deleteSkill(id) {
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('app').style.display = 'flex';
         fetchData();
+        checkOnboarding();
       } else {
         // Auto-create user + session (device is localhost — no credentials needed)
         fetch('/auth/device-login', { method: 'POST' })
@@ -2078,6 +2237,7 @@ async function deleteSkill(id) {
               document.getElementById('login-screen').style.display = 'none';
               document.getElementById('app').style.display = 'flex';
               fetchData();
+              checkOnboarding();
             } else {
               document.getElementById('login-screen').style.display = 'flex';
               document.getElementById('app').style.display = 'none';

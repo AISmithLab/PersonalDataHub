@@ -60,6 +60,7 @@ export const hubConfigSchema = z.object({
   encryption_key: z.string().optional(),
   ai: aiProviderSchema.optional(),
   autoReply: autoReplySchema.optional(),
+  onboardingCompleted: z.boolean().default(false),
   port: z.number().default(3000),
 });
 
