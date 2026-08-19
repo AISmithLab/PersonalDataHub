@@ -42,6 +42,7 @@ jobs:
         run: npm run bundle:node
 
       - name: Configure Android SDK path
+        working-directory: mobile
         run: npm run setup:android
 
       - name: Build release APK
