@@ -1,0 +1,85 @@
+name: Nightly Android Build
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Build Node.js backend bundle
+        working-directory: mobile
+        run: npm run bundle:node
+
+      - name: Configure Android SDK path
+        run: npm run setup:android
+
+      - name: Build release APK
+        working-directory: mobile/android
+        run: ./gradlew assembleRelease
+
+      - name: Set nightly build metadata
+        id: meta
+        run: |
+          echo "date=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Rename APK
+        run: |
+          mkdir -p dist-android
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk \
+            "dist-android/PersonalDataHub-nightly-${{ steps.meta.outputs.date }}-${{ steps.meta.outputs.sha }}.apk"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-nightly-apk
+          path: dist-android/*.apk
+          retention-days: 14
+
+      - name: Update nightly release tag
+        run: |
+          git tag -f nightly
+          git push origin nightly --force
+
+      - name: Publish nightly GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "Nightly build ${{ steps.meta.outputs.date }} (${{ steps.meta.outputs.sha }})"
+          body: |
+            Automated nightly Android build from commit ${{ steps.meta.outputs.sha }}.
+
+            This build is **debug-signed** and intended for internal testing only, not distribution via the Play Store.
+          prerelease: true
+          files: dist-android/*.apk
