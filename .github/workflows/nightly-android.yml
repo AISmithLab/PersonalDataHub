@@ -37,6 +37,34 @@ jobs:
         working-directory: mobile
         run: npm ci
 
+      - name: Write hub-config.yaml from secrets
+        env:
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          CAL_CLIENT_ID: ${{ secrets.CAL_CLIENT_ID }}
+          CAL_CLIENT_SECRET: ${{ secrets.CAL_CLIENT_SECRET }}
+        run: |
+          cat > hub-config.yaml <<EOF
+          sources:
+            gmail:
+              enabled: true
+              owner_auth:
+                type: oauth2
+                clientId: "${GMAIL_CLIENT_ID}"
+                clientSecret: "${GMAIL_CLIENT_SECRET}"
+            google_calendar:
+              enabled: true
+              owner_auth:
+                type: oauth2
+                clientId: "${CAL_CLIENT_ID}"
+                clientSecret: "${CAL_CLIENT_SECRET}"
+            github:
+              enabled: true
+              owner_auth:
+                type: github_app
+          port: 3000
+          EOF
+
       - name: Build Node.js backend bundle
         working-directory: mobile
         run: npm run bundle:node
