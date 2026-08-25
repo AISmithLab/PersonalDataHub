@@ -116,7 +116,7 @@ function renderCalendarTab() {
               </div>
               ${state.eventsLoading
                 ? '<div style="padding:40px;text-align:center"><p style="color:var(--muted);font-size:14px">Loading events...</p></div>'
-                : (eventListHtml || '<p class="empty" style="padding:40px">No events found.</p>')}
+                : '<div class="email-list">' + (eventListHtml || '<p class="empty" style="padding:40px">No events found.</p>') + '</div>'}
             </div>
           </div>
 

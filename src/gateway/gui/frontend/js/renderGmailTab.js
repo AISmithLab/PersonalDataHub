@@ -160,7 +160,7 @@ function renderGmailTab() {
                 ? '<div style="padding:40px;text-align:center"><p style="color:var(--muted);font-size:14px">Loading emails from Gmail...</p></div>'
                 : state.emailsError
                   ? '<div style="padding:40px;text-align:center"><p style="color:var(--destructive);font-size:14px">Error: ' + escapeHtml(state.emailsError) + '</p><button class="btn btn-primary" onclick="refreshEmails()" style="margin-top:12px">Retry</button></div>'
-                  : (emailListHtml || '<p class="empty" style="padding:40px">No emails found.</p>')}
+                  : '<div class="email-list">' + (emailListHtml || '<p class="empty" style="padding:40px">No emails found.</p>') + '</div>'}
             </div>
           </div>
 
