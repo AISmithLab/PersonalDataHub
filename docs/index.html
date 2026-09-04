@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PersonalDataHub</title>
+<title>PersonalDataHub — an AI assistant that lives on your phone</title>
 <meta name="description" content="An open-source, local AI assistant for your phone that only sees the data you allow, with actions staged for approval except an opt-in SMS auto-reply.">
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -14,54 +14,92 @@
   <div class="wrap">
     <a href="#" class="wordmark">PersonalDataHub</a>
     <nav>
-      <a href="#what-it-is">What it is</a>
       <a href="#sources">Sources</a>
-      <a href="#skills">Automations</a>
       <a href="#control">Access &amp; control</a>
       <a href="#status">Status</a>
-      <a href="https://github.com/AISmithLab/PersonalDataHub">Source</a>
+      <a href="#get-it">Get it</a>
+      <a href="https://github.com/AISmithLab/PersonalDataHub" class="nav-cta">GitHub</a>
     </nav>
   </div>
 </header>
 
 <main>
 
-  <section class="intro">
-    <div class="wrap">
-      <h1>An AI assistant that lives on your phone, not in someone else's cloud.</h1>
-      <p class="lede">
-        PersonalDataHub is an open-source app you run yourself. It's a chat assistant
-        that can read your SMS, photos, calendar, email, and GitHub &mdash; but only the
-        sources you connect, only the data you allow. Sending an email is staged for
-        your approval; the only thing that acts on its own is an opt-in SMS auto-reply,
-        which you turn on knowingly.
-      </p>
-      <p class="links">
-        <a href="https://github.com/AISmithLab/PersonalDataHub">View source on GitHub</a>
-        &middot;
-        <a href="https://github.com/AISmithLab/PersonalDataHub/blob/main/systemdesigns/ANDROID-BUILD-GUIDE.md">Build the Android app</a>
-      </p>
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow">Open source &middot; Apache 2.0 &middot; runs on your device</p>
+        <h1>An AI assistant that lives on your phone, not in someone else's cloud.</h1>
+        <p class="lede">
+          PersonalDataHub reads your SMS, photos, calendar, email, and GitHub &mdash;
+          only the sources you connect, only the data you allow &mdash; and answers
+          from a chat UI running on the phone itself.
+        </p>
+        <p class="cta-row">
+          <a class="btn btn-primary" href="https://github.com/AISmithLab/PersonalDataHub/releases/tag/nightly">Get the nightly APK</a>
+          <a class="btn btn-ghost" href="https://github.com/AISmithLab/PersonalDataHub">View source</a>
+        </p>
+        <div class="install-block">
+          <div class="install-row">
+            <span class="prompt">$</span>
+            <code id="install-cmd">git clone https://github.com/AISmithLab/PersonalDataHub.git</code>
+            <button class="copy-btn" type="button" data-copy-target="install-cmd" aria-label="Copy install command">Copy</button>
+          </div>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <div class="chat-mock" aria-hidden="true">
+          <div class="chat-mock-bar">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="chat-mock-title">Messages</span>
+          </div>
+          <div class="chat-mock-body">
+            <div class="bubble bubble-in">Running 15 min late for our 3pm, sorry!</div>
+            <div class="bubble bubble-out">
+              No problem &mdash; I'll let them know. See you at 3:15.
+              <span class="bubble-tag">auto-reply</span>
+            </div>
+            <div class="bubble bubble-system">Draft email to team@work.com &mdash; waiting for your approval</div>
+          </div>
+        </div>
+        <p class="hero-visual-caption">Auto-reply is opt-in and answers immediately &mdash; everything else is staged for your approval first.</p>
+      </div>
     </div>
   </section>
 
-  <section id="what-it-is">
-    <div class="wrap">
-      <h2>What it actually is</h2>
-      <p>
-        The app is a React Native shell around an embedded server. The server &mdash;
-        the same backend used by the self-hosted desktop version &mdash; runs inside
-        the phone in a background Node.js thread and talks to the on-screen chat UI
-        over <code>127.0.0.1</code>.
-      </p>
-      <p>
-        There's no PersonalDataHub account, no server you sign up for, and no
-        telemetry sent back to us. It's a tool you run, not a service you join.
-        Data still leaves the phone in two cases you control: each connected
-        service's own API (e.g. Gmail's, when you ask about email), and the AI
-        model itself &mdash; you bring your own API key for OpenAI, Anthropic,
-        Gemini, or Groq, and whatever the assistant reads to answer your question
-        is sent to that provider as part of the request.
-      </p>
+  <section id="what-it-is" class="about">
+    <div class="wrap about-grid">
+      <div class="about-copy">
+        <h2>What it actually is</h2>
+        <p>
+          The app is a React Native shell around an embedded server &mdash; the same
+          backend used by the self-hosted desktop version &mdash; running inside the
+          phone in a background Node.js thread, talking to the on-screen chat UI over
+          <code>127.0.0.1</code>. There's no PersonalDataHub account, no server you
+          sign up for, and no telemetry sent back to us.
+        </p>
+        <p>
+          Data still leaves the phone in two cases you control: each connected
+          service's own API (e.g. Gmail's, when you ask about email), and the AI
+          model itself &mdash; you bring your own API key for OpenAI, Anthropic,
+          Gemini, or Groq, and whatever the assistant reads to answer your question
+          is sent to that provider as part of the request.
+        </p>
+      </div>
+      <div class="about-diagram" aria-hidden="true">
+        <div class="diagram-row">
+          <span class="diagram-box">Chat UI</span>
+          <span class="diagram-arrow">&harr;</span>
+          <span class="diagram-box diagram-box-accent">Embedded server<br><small>127.0.0.1, on-device</small></span>
+        </div>
+        <div class="diagram-row diagram-row-out">
+          <span class="diagram-arrow diagram-arrow-down">&darr;</span>
+        </div>
+        <div class="diagram-row">
+          <span class="diagram-box diagram-box-muted">Gmail / GitHub / Calendar APIs</span>
+          <span class="diagram-box diagram-box-muted">Your chosen AI provider</span>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -69,46 +107,57 @@
     <div class="wrap">
       <h2>What it can connect to</h2>
       <p class="section-note">Every source below is opt-in. Nothing is readable until you connect it.</p>
-      <p class="section-note scroll-hint">Scroll the table sideways to see the Platform column.</p>
-      <div class="table-scroll">
-      <table>
-        <thead>
-          <tr><th>Source</th><th>Read</th><th>Act</th><th>Platform</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>SMS</td>
-            <td>Messages, filtered by sender/date</td>
-            <td>Auto-reply or one-tap reply &mdash; sent immediately, opt-in, not staged</td>
-            <td>Android only</td>
-          </tr>
-          <tr>
-            <td>Photos</td>
-            <td>Device gallery, searchable by date/keyword</td>
-            <td>&mdash;</td>
-            <td>Android only</td>
-          </tr>
-          <tr>
-            <td>Calendar</td>
-            <td>Events via your Google account</td>
-            <td>&mdash;</td>
-            <td>Android &amp; iOS</td>
-          </tr>
-          <tr>
-            <td>Gmail</td>
-            <td>Emails, filtered by date/sender/subject/label</td>
-            <td>Draft, reply, send (staged for approval)</td>
-            <td>Android &amp; iOS &amp; desktop</td>
-          </tr>
-          <tr>
-            <td>GitHub</td>
-            <td>Issues and PRs across selected repos</td>
-            <td>&mdash;</td>
-            <td>Android &amp; iOS &amp; desktop</td>
-          </tr>
-        </tbody>
-      </table>
+
+      <div class="card-grid">
+        <div class="source-card">
+          <h3>SMS</h3>
+          <p class="platform">Android only</p>
+          <dl>
+            <dt>Read</dt><dd>Messages, filtered by sender/date</dd>
+            <dt>Act</dt><dd>Auto-reply or one-tap reply &mdash; sent immediately, opt-in, not staged</dd>
+          </dl>
+        </div>
+        <div class="source-card">
+          <h3>Photos</h3>
+          <p class="platform">Android only</p>
+          <dl>
+            <dt>Read</dt><dd>Device gallery, searchable by date/keyword</dd>
+            <dt>Act</dt><dd>&mdash;</dd>
+          </dl>
+        </div>
+        <div class="source-card">
+          <h3>Calendar</h3>
+          <p class="platform">Android &amp; iOS</p>
+          <dl>
+            <dt>Read</dt><dd>Events via your Google account</dd>
+            <dt>Act</dt><dd>&mdash;</dd>
+          </dl>
+        </div>
+        <div class="source-card">
+          <h3>Gmail</h3>
+          <p class="platform">Android, iOS &amp; desktop</p>
+          <dl>
+            <dt>Read</dt><dd>Emails, filtered by date/sender/subject/label</dd>
+            <dt>Act</dt><dd>Draft, reply, send (staged for approval)</dd>
+          </dl>
+        </div>
+        <div class="source-card">
+          <h3>GitHub</h3>
+          <p class="platform">Android, iOS &amp; desktop</p>
+          <dl>
+            <dt>Read</dt><dd>Issues and PRs across selected repos</dd>
+            <dt>Act</dt><dd>&mdash;</dd>
+          </dl>
+        </div>
+        <div class="source-card source-card-muted">
+          <h3>Automations</h3>
+          <p class="platform">Skills</p>
+          <dl>
+            <dt>What</dt><dd>Standing rules triggered by an event (text arrives, photo saved, email comes in, calendar event starts), each scoped to specific sources</dd>
+          </dl>
+        </div>
       </div>
+
       <p class="fine-print">
         Photos are stripped of EXIF metadata (GPS coordinates, device serial, etc.)
         by default before the assistant ever sees them &mdash; you can turn that off
@@ -117,58 +166,38 @@
     </div>
   </section>
 
-  <section id="skills">
-    <div class="wrap">
-      <h2>Automations (Skills)</h2>
-      <p>
-        You can define standing rules that fire when something happens &mdash; a text
-        arrives, a photo is saved, an email comes in, a calendar event is about to
-        start. Each rule is scoped to specific sources, so a "label incoming
-        receipts" rule can't also read your calendar. Create them by hand in the
-        app's Skills tab, or just ask the assistant to set one up for you in chat.
-      </p>
-    </div>
-  </section>
-
   <section id="control">
     <div class="wrap">
       <h2>How access is actually controlled</h2>
-      <ul class="control-list">
-        <li>
-          <strong>Zero access by default.</strong> Connecting a source does not
-          automatically expose it &mdash; you set filters on top (date ranges,
-          senders, keywords, hidden fields) before the assistant can query it.
-        </li>
-        <li>
-          <strong>Email goes through a staging queue.</strong> Drafting, replying,
-          or sending a Gmail message sits in a staging queue until you approve it
-          &mdash; there's no code path for the assistant to send email directly.
-        </li>
-        <li>
-          <strong>SMS auto-reply is the exception, by design.</strong> It's an
-          opt-in toggle: when on, replies are sent immediately with no per-message
-          approval, because the point is to answer texts while you're away from
-          the phone. You approve the feature once, not each message. Turn it off
-          and the assistant can only read, not send.
-        </li>
-        <li>
-          <strong>No deletion.</strong> There's no delete endpoint for any
-          connected source. The assistant can read and propose, nothing more.
-        </li>
-        <li>
-          <strong>Everything is logged.</strong> Every read and every proposed
-          action is written to a local audit log with a timestamp and a purpose
-          string, so you can see exactly what was accessed and why.
-        </li>
-        <li>
-          <strong>Tokens are encrypted at rest</strong> (AES-256-GCM), and on the
-          desktop version the server only binds to <code>127.0.0.1</code>.
-        </li>
-      </ul>
-      <p>
+      <div class="control-grid">
+        <div class="control-item">
+          <h3>Zero access by default</h3>
+          <p>Connecting a source does not automatically expose it &mdash; you set filters on top (date ranges, senders, keywords, hidden fields) before the assistant can query it.</p>
+        </div>
+        <div class="control-item">
+          <h3>Email is staged</h3>
+          <p>Drafting, replying, or sending a Gmail message sits in a staging queue until you approve it &mdash; there's no code path for the assistant to send email directly.</p>
+        </div>
+        <div class="control-item">
+          <h3>SMS auto-reply is the exception</h3>
+          <p>It's an opt-in toggle: when on, replies send immediately with no per-message approval, so you can be answered while you're away from the phone. Turn it off and the assistant can only read, not send.</p>
+        </div>
+        <div class="control-item">
+          <h3>No deletion</h3>
+          <p>There's no delete endpoint for any connected source. The assistant can read and propose, nothing more.</p>
+        </div>
+        <div class="control-item">
+          <h3>Everything is logged</h3>
+          <p>Every read and every proposed action is written to a local audit log with a timestamp and a purpose string.</p>
+        </div>
+        <div class="control-item">
+          <h3>Encrypted at rest</h3>
+          <p>Tokens are encrypted (AES-256-GCM), and on the desktop version the server only binds to <code>127.0.0.1</code>.</p>
+        </div>
+      </div>
+      <p class="fine-print">
         None of this stops you, once you approve something, or stops a connected
-        service's own quota/rate limits. It's a boundary on the assistant, enforced
-        before data or actions reach it &mdash; see the
+        service's own quota/rate limits &mdash; see the
         <a href="https://github.com/AISmithLab/PersonalDataHub/blob/main/systemdesigns/SECURITY.md">full threat model</a>
         for what it doesn't cover.
       </p>
@@ -178,44 +207,46 @@
   <section id="status">
     <div class="wrap">
       <h2>Current status</h2>
-      <p>
-        This is an early-stage, actively-developed open-source project &mdash; not
-        a polished product. Here's where things actually stand:
-      </p>
-      <ul class="status-list">
-        <li><strong>Android:</strong> builds via nightly CI. SMS, Photos, Calendar, Gmail, and GitHub are all implemented.</li>
-        <li><strong>iOS:</strong> the app scaffold and Xcode project exist, but the native SMS and Photos bridges are Android-only &mdash; those two sources aren't available on iOS. Calendar, Gmail, and GitHub use plain OAuth with no native bridge, so they should work the same way, though iOS hasn't gotten the same testing attention as Android yet.</li>
-        <li><strong>Desktop / self-hosted:</strong> the original mode &mdash; run the server yourself and connect it to Claude Code, Cursor, or any MCP client. Gmail and GitHub only, no phone-specific sources.</li>
-      </ul>
+      <p class="section-note">This is an early-stage, actively-developed open-source project &mdash; not a polished product.</p>
+      <div class="status-grid">
+        <div class="status-item">
+          <span class="status-badge status-ready">Ready</span>
+          <h3>Android</h3>
+          <p>Builds via nightly CI. SMS, Photos, Calendar, Gmail, and GitHub are all implemented.</p>
+        </div>
+        <div class="status-item">
+          <span class="status-badge status-partial">Partial</span>
+          <h3>iOS</h3>
+          <p>App scaffold and Xcode project exist, but SMS and Photos are Android-only native bridges. Calendar, Gmail, and GitHub use plain OAuth and should work the same way, though iOS hasn't had the same testing attention as Android.</p>
+        </div>
+        <div class="status-item">
+          <span class="status-badge status-ready">Ready</span>
+          <h3>Desktop / self-hosted</h3>
+          <p>The original mode &mdash; run the server yourself and connect it to Claude Code, Cursor, or any MCP client. Gmail and GitHub only, no phone-specific sources.</p>
+        </div>
+      </div>
     </div>
   </section>
 
-  <section id="get-it">
+  <section id="get-it" class="get-it">
     <div class="wrap">
       <h2>Try it</h2>
-      <p>
-        There's no app store listing yet. Two ways to get it running:
-      </p>
-      <p>
-        <strong>Nightly APK.</strong> A debug-signed build is published automatically
-        every day on
-        <a href="https://github.com/AISmithLab/PersonalDataHub/releases/tag/nightly">GitHub Releases</a>.
-        It's meant for testing, not for handing to someone non-technical &mdash; you'll
-        need to allow installs from unknown sources on Android, and it isn't signed
-        for the Play Store.
-      </p>
-      <p>
-        <strong>Build from source:</strong>
-      </p>
-      <pre><code>git clone https://github.com/AISmithLab/PersonalDataHub.git
+      <p>There's no app store listing yet. Two ways to get it running:</p>
+
+      <div class="get-it-grid">
+        <div class="get-it-card">
+          <h3>Nightly APK</h3>
+          <p>A debug-signed build published automatically every day on <a href="https://github.com/AISmithLab/PersonalDataHub/releases/tag/nightly">GitHub Releases</a>. It's meant for testing, not for handing to someone non-technical &mdash; you'll need to allow installs from unknown sources, and it isn't signed for the Play Store.</p>
+          <a class="btn btn-primary" href="https://github.com/AISmithLab/PersonalDataHub/releases/tag/nightly">Download nightly build</a>
+        </div>
+        <div class="get-it-card">
+          <h3>Build from source</h3>
+          <pre><code>git clone https://github.com/AISmithLab/PersonalDataHub.git
 cd PersonalDataHub &amp;&amp; pnpm install
 cd mobile &amp;&amp; npm install &amp;&amp; npm run build:android</code></pre>
-      <p>
-        Full steps, prerequisites, and troubleshooting are in the
-        <a href="https://github.com/AISmithLab/PersonalDataHub/blob/main/systemdesigns/ANDROID-BUILD-GUIDE.md">Android Build Guide</a>.
-        For the desktop/MCP version, see the
-        <a href="https://github.com/AISmithLab/PersonalDataHub/blob/main/systemdesigns/SETUP.md">Setup Guide</a>.
-      </p>
+          <p>Full steps in the <a href="https://github.com/AISmithLab/PersonalDataHub/blob/main/systemdesigns/ANDROID-BUILD-GUIDE.md">Android Build Guide</a>, or the <a href="https://github.com/AISmithLab/PersonalDataHub/blob/main/systemdesigns/SETUP.md">Setup Guide</a> for desktop/MCP.</p>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -227,6 +258,20 @@ cd mobile &amp;&amp; npm install &amp;&amp; npm run build:android</code></pre>
     <a href="https://github.com/AISmithLab/PersonalDataHub">github.com/AISmithLab/PersonalDataHub</a>
   </div>
 </footer>
+
+<script>
+document.querySelectorAll('.copy-btn').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var target = document.getElementById(btn.getAttribute('data-copy-target'));
+    if (!target) return;
+    navigator.clipboard.writeText(target.textContent.trim()).then(function () {
+      var original = btn.textContent;
+      btn.textContent = 'Copied';
+      setTimeout(function () { btn.textContent = original; }, 1500);
+    });
+  });
+});
+</script>
 
 </body>
 </html>
