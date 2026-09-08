@@ -57,15 +57,25 @@ export class SqlJsDataStore implements DataStore {
     // On Android (CJS bundle), SQLJS_WASM_PATH is set by android.ts before startup.
     // We derive the sql-wasm.js path from it and require() it by absolute path —
     // this avoids any __filename / module-resolution ambiguity inside esbuild bundles.
-    // On desktop (no SQLJS_WASM_PATH), fall back to dynamic import from node_modules.
+    //
+    // On iOS, nodejs-mobile runs jitless (Apple forbids JIT in third-party apps), so the
+    // engine has no WebAssembly at all and the .wasm build aborts on load. ios.ts instead
+    // sets SQLJS_ASM_PATH to sql.js's asm.js build, which is pure JS and self-contained —
+    // no .wasm sidecar, hence no locateFile.
+    //
+    // On desktop (neither var set), fall back to dynamic import from node_modules.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let initFactory: any;
+    const asmEnvPath = process.env.SQLJS_ASM_PATH;
     const wasmEnvPath = process.env.SQLJS_WASM_PATH;
-    if (wasmEnvPath) {
+    // createRequire needs an absolute base; since these paths are already absolute,
+    // the base only needs to be any valid absolute path.
+    if (asmEnvPath) {
+      const _req = createRequire('/index.js');
+      initFactory = _req(asmEnvPath);
+    } else if (wasmEnvPath) {
       // sql-wasm.js lives alongside sql-wasm.wasm in the same dist/ directory.
       const sqlJsMainPath = wasmEnvPath.replace(/\.wasm$/, '.js');
-      // createRequire needs an absolute base; since sqlJsMainPath is already absolute,
-      // the base only needs to be any valid absolute path.
       const _req = createRequire('/index.js');
       initFactory = _req(sqlJsMainPath);
     } else {
@@ -76,7 +86,7 @@ export class SqlJsDataStore implements DataStore {
     }
 
     const SQL: SqlJsStatic = await initFactory(
-      wasmEnvPath ? { locateFile: () => wasmEnvPath } : {},
+      !asmEnvPath && wasmEnvPath ? { locateFile: () => wasmEnvPath } : {},
     ) as SqlJsStatic;
 
     let db: SqlJsDatabase;

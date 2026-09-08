@@ -31,6 +31,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     return true
   }
+
+  // OAuth (Gmail/Calendar/GitHub) finishes in Safari, which navigates to
+  // pdh://oauth?success=<source>|error=<message>. The `pdh` scheme is declared in
+  // Info.plist's CFBundleURLTypes; forwarding it to RCTLinkingManager is what surfaces
+  // it to JS as RN's Linking 'url' event, mirroring Android's intent-filter + onNewIntent.
+  func application(
+    _ app: UIApplication,
+    open url: URL,
+    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+  ) -> Bool {
+    return RCTLinkingManager.application(app, open: url, options: options)
+  }
 }
 
 class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {

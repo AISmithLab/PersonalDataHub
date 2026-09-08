@@ -12,7 +12,8 @@
     "setup:android": "node ../scripts/setup-android.cjs",
     "build:android": "npm run setup:android && npm run bundle:node && react-native run-android",
     "build:android:release": "npm run setup:android && npm run bundle:node && cd android && ./gradlew assembleRelease",
-    "build:ios": "npm run bundle:node && react-native run-ios"
+    "setup:ios": "cd ios && pod install",
+    "build:ios": "npm run setup:ios && npm run bundle:node && react-native run-ios"
   },
   "dependencies": {
     "@react-native/new-app-screen": "0.86.0",

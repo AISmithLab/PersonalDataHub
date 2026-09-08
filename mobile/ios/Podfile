@@ -14,6 +14,58 @@ if linkage != nil
   use_frameworks! :linkage => linkage.to_sym
 end
 
+# nodejs-mobile-react-native contributes "[NODEJS MOBILE] Build/Sign Native Modules" script
+# phases that hard-fail (`exit 1`) unless the `node` on Xcode's PATH is exactly v18 — and
+# that check runs *before* their own "nothing to build here" early-out. Our Node backend is
+# pre-bundled by scripts/bundle-mobile.cjs (esbuild, single file) and ships no .gyp/.node
+# files, so both phases are no-ops for us; without this they would still fail the build on
+# any modern Node.
+#
+# So hoist the plugin's own early-out above its version gate. Anyone who later adds a real
+# native module gets the .gyp file, falls through the guard, and still hits the v18 check.
+#
+# These phases are regenerated from node_modules on every `pod install`, which is why the
+# patch lives here rather than in the checked-in project.pbxproj.
+NODEJS_MOBILE_SKIP_GUARD = <<~SH
+  # >>> PDH: skip when nodejs-project has no native modules (see Podfile) >>>
+  if [ -z "$NODEJS_MOBILE_BUILD_NATIVE_MODULES" ] && \
+     [ -z "$(find "$PROJECT_DIR/../nodejs-assets/nodejs-project" -name '*.gyp' -print -quit 2>/dev/null)" ]; then
+    echo "[nodejs-mobile] nodejs-project has no native modules - skipping this phase."
+    exit 0
+  fi
+  # <<< PDH <<<
+SH
+
+def patch_nodejs_mobile_native_module_phases(installer)
+  installer.aggregate_targets.each do |aggregate_target|
+    user_project = aggregate_target.user_project
+    next if user_project.nil?
+
+    patched = false
+    user_project.targets.each do |target|
+      target.build_phases.each do |phase|
+        next unless phase.respond_to?(:shell_script)
+        name = phase.display_name.to_s
+        next unless name.include?('[NODEJS MOBILE]')
+        next unless name.include?('Build Native Modules') || name.include?('Sign Native Modules')
+        next if phase.shell_script.include?('>>> PDH:')
+
+        # shellPath is /bin/sh, so the leading shebang is only a comment; keep it first
+        # anyway and insert the guard directly after it.
+        lines = phase.shell_script.split("\n", 2)
+        phase.shell_script = if lines.first.to_s.start_with?('#!')
+          "#{lines.first}\n#{NODEJS_MOBILE_SKIP_GUARD}#{lines[1]}"
+        else
+          "#{NODEJS_MOBILE_SKIP_GUARD}#{phase.shell_script}"
+        end
+        patched = true
+        Pod::UI.puts "[PDH] Guarded \"#{name}\" against the Node 18 requirement".green
+      end
+    end
+    user_project.save if patched
+  end
+end
+
 target 'PersonalDataHub' do
   config = use_native_modules!
 
@@ -31,4 +83,10 @@ target 'PersonalDataHub' do
       # :ccache_enabled => true
     )
   end
+end
+
+# `post_integrate` rather than `post_install`: CocoaPods writes the user project during
+# integration, which happens after post_install hooks and would clobber these edits.
+post_integrate do |installer|
+  patch_nodejs_mobile_native_module_phases(installer)
 end

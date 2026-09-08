@@ -10,8 +10,10 @@
 import { join, dirname } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createApp } from './app.js';
-import { serve } from '@hono/node-server';
+// Explicitly from node:crypto — Node 18 has no global `crypto`, and this file runs before
+// @hono/node-server (which incidentally defines one) is imported.
+import { randomUUID } from 'node:crypto';
+import { installJitlessFetch } from './mobile/jitless-fetch.js';
 
 // Injected at compile time by scripts/bundle-mobile.cjs via esbuild --define
 declare const __GMAIL_CLIENT_ID__: string;
@@ -25,8 +27,11 @@ const _dir: string = (typeof __dirname !== 'undefined')
   ? __dirname
   : dirname(fileURLToPath(import.meta.url));
 
-if (!process.env.SQLJS_WASM_PATH) {
-  process.env.SQLJS_WASM_PATH = join(_dir, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+// nodejs-mobile runs jitless on iOS (Apple forbids JIT in third-party apps), so the engine
+// exposes no WebAssembly and sql.js's .wasm build aborts on load. Point the store at the
+// asm.js build instead — pure JS, no .wasm sidecar. Slower than WASM, but it works.
+if (!process.env.SQLJS_ASM_PATH) {
+  process.env.SQLJS_ASM_PATH = join(_dir, 'node_modules', 'sql.js', 'dist', 'sql-asm-memory-growth.js');
 }
 
 // nodejs-mobile on iOS copies the project into the app's Library directory.
@@ -40,7 +45,7 @@ const configPath = process.env.PDH_CONFIG_PATH ?? join(dataDir, 'hub-config.yaml
 process.env.PDH_CONFIG_PATH = configPath;
 
 if (!existsSync(configPath)) {
-  const encKey = process.env.PDH_ENCRYPTION_KEY ?? crypto.randomUUID();
+  const encKey = process.env.PDH_ENCRYPTION_KEY ?? randomUUID();
   const defaultConfig = `# PersonalDataHub — auto-generated mobile config
 deployment:
   database: sqljs
@@ -64,6 +69,15 @@ port: 3000
 const port = Number(process.env.PORT ?? 3000);
 
 async function main() {
+  // Before any gateway code is loaded: iOS has no WebAssembly, so Node's undici-backed
+  // fetch globals have to be replaced first (see ./mobile/jitless-fetch.ts).
+  await installJitlessFetch();
+
+  // @hono/node-server captures `global.Request`/`global.Response` in its module body, so
+  // it must be imported after the swap too — a static import here would run during this
+  // module's own top-level evaluation and trip the undici getter before main() is entered.
+  const { serve } = await import('@hono/node-server');
+  const { createApp } = await import('./app.js');
   const { loadConfig } = await import('./config/loader.js');
   const config = await loadConfig(configPath);
 
