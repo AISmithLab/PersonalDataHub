@@ -9,7 +9,32 @@ permissions:
   contents: write
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for new commits since last nightly
+        id: check
+        run: |
+          HEAD_SHA=$(git rev-parse HEAD)
+          TAG_SHA=$(git rev-parse refs/tags/nightly 2>/dev/null || git ls-remote origin refs/tags/nightly | cut -f1)
+          if [ "$HEAD_SHA" = "$TAG_SHA" ]; then
+            echo "No new commits since last nightly build ($HEAD_SHA); skipping."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New commits detected ($TAG_SHA -> $HEAD_SHA); building."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -95,6 +120,11 @@ jobs:
           name: android-nightly-apk
           path: dist-android/*.apk
           retention-days: 14
+
+      - name: Delete previous nightly release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete nightly --yes --cleanup-tag || true
 
       - name: Update nightly release tag
         run: |
