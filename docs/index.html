@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PersonalDataHub — an AI assistant that lives on your phone</title>
-<meta name="description" content="An open-source, local AI assistant for your phone that only sees the data you allow, with actions staged for approval except an opt-in SMS auto-reply.">
+<meta name="description" content="An open-source, local AI assistant for your phone. It only sees data you allow, and actions are staged for approval except an opt-in SMS auto-reply.">
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 </head>
@@ -31,9 +31,9 @@
         <p class="eyebrow">Open source &middot; Apache 2.0 &middot; runs on your device</p>
         <h1>An AI assistant that lives on your phone, not in someone else's cloud.</h1>
         <p class="lede">
-          PersonalDataHub reads your SMS, photos, calendar, email, and GitHub &mdash;
-          only the sources you connect, only the data you allow &mdash; and answers
-          from a chat UI running on the phone itself.
+          It reads your SMS, photos, calendar, email, and GitHub &mdash; whatever
+          you connect and allow &mdash; and answers from a chat UI running right
+          on the phone.
         </p>
         <p class="cta-row">
           <a class="btn btn-primary" href="https://github.com/AISmithLab/PersonalDataHub/releases/tag/nightly">Get the nightly APK</a>
@@ -62,7 +62,7 @@
             <div class="bubble bubble-system">Draft email to team@work.com &mdash; waiting for your approval</div>
           </div>
         </div>
-        <p class="hero-visual-caption">Auto-reply is opt-in and answers immediately &mdash; everything else is staged for your approval first.</p>
+        <p class="hero-visual-caption">Auto-reply is opt-in and instant &mdash; everything else waits for your approval.</p>
       </div>
     </div>
   </section>
@@ -72,18 +72,17 @@
       <div class="about-copy">
         <h2>What it actually is</h2>
         <p>
-          The app is a React Native shell around an embedded server &mdash; the same
-          backend used by the self-hosted desktop version &mdash; running inside the
-          phone in a background Node.js thread, talking to the on-screen chat UI over
-          <code>127.0.0.1</code>. There's no PersonalDataHub account, no server you
-          sign up for, and no telemetry sent back to us.
+          It's a React Native shell around an embedded server &mdash; the same
+          backend as the self-hosted desktop version &mdash; running in a
+          background Node.js thread on the phone and talking to the chat UI
+          over <code>127.0.0.1</code>. No account, no server to sign up for,
+          no telemetry.
         </p>
         <p>
-          Data still leaves the phone in two cases you control: each connected
-          service's own API (e.g. Gmail's, when you ask about email), and the AI
-          model itself &mdash; you bring your own API key for OpenAI, Anthropic,
-          Gemini, or Groq, and whatever the assistant reads to answer your question
-          is sent to that provider as part of the request.
+          Data only leaves the phone two ways: through each service's own API
+          (Gmail's, say, when you ask about email), and to whatever AI provider
+          you bring your own key for &mdash; OpenAI, Anthropic, Gemini, or Groq.
+          Whatever the assistant read to answer you goes along with the request.
         </p>
       </div>
       <div class="about-diagram" aria-hidden="true">
@@ -106,7 +105,7 @@
   <section id="sources">
     <div class="wrap">
       <h2>What it can connect to</h2>
-      <p class="section-note">Every source below is opt-in. Nothing is readable until you connect it.</p>
+      <p class="section-note">Everything below is opt-in &mdash; nothing's readable until you connect it.</p>
 
       <div class="card-grid">
         <div class="source-card">
@@ -159,9 +158,8 @@
       </div>
 
       <p class="fine-print">
-        Photos are stripped of EXIF metadata (GPS coordinates, device serial, etc.)
-        by default before the assistant ever sees them &mdash; you can turn that off
-        per-source if you want it.
+        Photos have EXIF metadata (GPS, device serial, etc.) stripped by default
+        before the assistant sees them. You can turn that off per-source.
       </p>
     </div>
   </section>
@@ -172,34 +170,34 @@
       <div class="control-grid">
         <div class="control-item">
           <h3>Zero access by default</h3>
-          <p>Connecting a source does not automatically expose it &mdash; you set filters on top (date ranges, senders, keywords, hidden fields) before the assistant can query it.</p>
+          <p>Connecting a source doesn't expose it. You set filters &mdash; date ranges, senders, keywords, hidden fields &mdash; before the assistant can query anything.</p>
         </div>
         <div class="control-item">
           <h3>Email is staged</h3>
-          <p>Drafting, replying, or sending a Gmail message sits in a staging queue until you approve it &mdash; there's no code path for the assistant to send email directly.</p>
+          <p>Drafting, replying, or sending a Gmail message sits in a queue until you approve it. There's no path for the assistant to send email on its own.</p>
         </div>
         <div class="control-item">
           <h3>SMS auto-reply is the exception</h3>
-          <p>It's an opt-in toggle: when on, replies send immediately with no per-message approval, so you can be answered while you're away from the phone. Turn it off and the assistant can only read, not send.</p>
+          <p>An opt-in toggle: turn it on and replies send immediately, no approval needed, so you're covered while away from the phone. Turn it off and the assistant can only read.</p>
         </div>
         <div class="control-item">
           <h3>No deletion</h3>
-          <p>There's no delete endpoint for any connected source. The assistant can read and propose, nothing more.</p>
+          <p>No delete endpoint on any connected source. The assistant reads and proposes &mdash; that's it.</p>
         </div>
         <div class="control-item">
           <h3>Everything is logged</h3>
-          <p>Every read and every proposed action is written to a local audit log with a timestamp and a purpose string.</p>
+          <p>Every read and every proposed action lands in a local audit log with a timestamp and a purpose string.</p>
         </div>
         <div class="control-item">
           <h3>Encrypted at rest</h3>
-          <p>Tokens are encrypted (AES-256-GCM), and on the desktop version the server only binds to <code>127.0.0.1</code>.</p>
+          <p>Tokens are encrypted with AES-256-GCM. On desktop, the server only binds to <code>127.0.0.1</code>.</p>
         </div>
       </div>
       <p class="fine-print">
-        None of this stops you, once you approve something, or stops a connected
-        service's own quota/rate limits &mdash; see the
+        None of this stops you once you've approved something, or a connected
+        service's own rate limits. See the
         <a href="https://github.com/AISmithLab/PersonalDataHub/blob/main/systemdesigns/SECURITY.md">full threat model</a>
-        for what it doesn't cover.
+        for what's not covered.
       </p>
     </div>
   </section>
@@ -207,22 +205,22 @@
   <section id="status">
     <div class="wrap">
       <h2>Current status</h2>
-      <p class="section-note">This is an early-stage, actively-developed open-source project &mdash; not a polished product.</p>
+      <p class="section-note">Early-stage, actively developed &mdash; not a polished product yet.</p>
       <div class="status-grid">
         <div class="status-item">
           <span class="status-badge status-ready">Ready</span>
           <h3>Android</h3>
-          <p>Builds via nightly CI. SMS, Photos, Calendar, Gmail, and GitHub are all implemented.</p>
+          <p>Builds via nightly CI. SMS, Photos, Calendar, Gmail, and GitHub all work.</p>
         </div>
         <div class="status-item">
           <span class="status-badge status-partial">Partial</span>
           <h3>iOS</h3>
-          <p>App scaffold and Xcode project exist, but SMS and Photos are Android-only native bridges. Calendar, Gmail, and GitHub use plain OAuth and should work the same way, though iOS hasn't had the same testing attention as Android.</p>
+          <p>App scaffold and Xcode project exist, but SMS and Photos are Android-only native bridges. Calendar, Gmail, and GitHub use plain OAuth and should work the same way &mdash; just less tested than Android.</p>
         </div>
         <div class="status-item">
           <span class="status-badge status-ready">Ready</span>
           <h3>Desktop / self-hosted</h3>
-          <p>The original mode &mdash; run the server yourself and connect it to Claude Code, Cursor, or any MCP client. Gmail and GitHub only, no phone-specific sources.</p>
+          <p>The original mode: run the server yourself, connect it to Claude Code, Cursor, or any MCP client. Gmail and GitHub only &mdash; no phone-specific sources.</p>
         </div>
       </div>
     </div>
@@ -231,12 +229,12 @@
   <section id="get-it" class="get-it">
     <div class="wrap">
       <h2>Try it</h2>
-      <p>There's no app store listing yet. Two ways to get it running:</p>
+      <p>No app store listing yet &mdash; two ways to get it running:</p>
 
       <div class="get-it-grid">
         <div class="get-it-card">
           <h3>Nightly APK</h3>
-          <p>A debug-signed build published automatically every day on <a href="https://github.com/AISmithLab/PersonalDataHub/releases/tag/nightly">GitHub Releases</a>. It's meant for testing, not for handing to someone non-technical &mdash; you'll need to allow installs from unknown sources, and it isn't signed for the Play Store.</p>
+          <p>A debug-signed build, published daily on <a href="https://github.com/AISmithLab/PersonalDataHub/releases/tag/nightly">GitHub Releases</a>. It's for testing, not for handing to someone non-technical &mdash; you'll need to allow installs from unknown sources, and it's not signed for the Play Store.</p>
           <a class="btn btn-primary" href="https://github.com/AISmithLab/PersonalDataHub/releases/tag/nightly">Download nightly build</a>
         </div>
         <div class="get-it-card">
