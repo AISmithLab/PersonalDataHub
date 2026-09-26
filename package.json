@@ -3,13 +3,18 @@
   "version": "0.1.0",
   "description": "Centralized access control layer for personal data",
   "type": "module",
+  "workspaces": [
+    "packages/*",
+    "mobile"
+  ],
   "main": "dist/index.js",
   "bin": {
     "pdh": "dist/cli.js"
   },
   "scripts": {
-    "build": "node scripts/build-frontend.mjs && tsc && chmod +x dist/cli.js",
-    "dev": "node scripts/build-frontend.mjs && tsc --watch",
+    "build": "node scripts/build-frontend.mjs && npm run build:frontend-next && tsc && chmod +x dist/cli.js",
+    "build:frontend-next": "vite build --config src/gateway/gui/frontend-web/vite.config.ts && node scripts/generate-frontend.mjs",
+    "dev": "node scripts/build-frontend.mjs && npm run build:frontend-next && tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src/",
@@ -26,11 +31,17 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.0",
     "@types/sql.js": "^1.4.9",
+    "@vitejs/plugin-react": "^5.1.3",
+    "autoprefixer": "^10.6.1",
     "better-sqlite3": "^12.11.1",
     "esbuild": "^0.25.0",
+    "nativewind": "^4.2.7",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.0",
     "vite": "^7.3.1",
+    "vite-plugin-singlefile": "^2.3.3",
     "vitest": "^4.0.18"
   },
   "dependencies": {
@@ -43,6 +54,8 @@
     "hono": "^4.12.1",
     "octokit": "^5.0.5",
     "openai": "^6.38.0",
+    "react-dom": "^19.2.3",
+    "react-native-web": "^0.20.0",
     "sql.js": "^1.12.0",
     "yaml": "^2.8.2",
     "zod": "^4.3.6"
@@ -52,5 +65,11 @@
       "better-sqlite3",
       "esbuild"
     ]
+  },
+  "allowScripts": {
+    "nodejs-mobile-react-native@18.20.4": true,
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.27.3": true
   }
 }

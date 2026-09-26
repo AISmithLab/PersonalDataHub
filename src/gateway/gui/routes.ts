@@ -31,6 +31,15 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
     return c.html(getIndexHtml());
   });
 
+  // Temporary strangler route for the React/NativeWind rewrite (see the
+  // migration plan). Serves src/gateway/gui/frontend-web's Vite build via
+  // frontend.generated.next.ts. Becomes '/' at the Phase 5 cutover, when
+  // this route and frontend.generated.next.ts are deleted.
+  app.get('/next', async (c) => {
+    const { getIndexHtml: getNextIndexHtml } = await import('./frontend.generated.next.js');
+    return c.html(getNextIndexHtml());
+  });
+
   app.post('/api/error-log', async (c) => {
     try {
       const body = await c.req.json();

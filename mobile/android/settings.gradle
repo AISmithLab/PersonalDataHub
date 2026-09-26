@@ -1,6 +1,10 @@
-pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+// `mobile` is an npm workspace member, so its deps (react-native, the RN
+// gradle plugin, etc.) get hoisted to the repo root's node_modules instead of
+// mobile/node_modules. Paths below account for that extra level (repo root
+// is two directories up from android/, not one).
+pluginManagement { includeBuild("../../node_modules/@react-native/gradle-plugin") }
 plugins { id("com.facebook.react.settings") }
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
 rootProject.name = 'PersonalDataHub'
 include ':app'
-includeBuild('../node_modules/@react-native/gradle-plugin')
+includeBuild('../../node_modules/@react-native/gradle-plugin')
