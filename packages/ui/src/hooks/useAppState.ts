@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import * as api from '../api/client';
 import type { CalendarEvent, Filter, FilterType, GithubRepo, GmailEmail, Source, StagingAction } from '../api/client';
+import { deviceBridge } from '../device/deviceBridge';
+import type { PhotoMsg, SmsMsg } from '../device/deviceBridge.types';
+
+interface SmsContextMenu {
+  address: string;
+  body: string;
+  status: 'thinking' | 'sending' | 'sent' | 'error' | null;
+  reply?: string;
+  error?: string;
+}
 
 export function useAppState() {
   const [sources, setSources] = useState<Source[]>([]);
@@ -22,6 +32,19 @@ export function useAppState() {
 
   const [expandedEmail, setExpandedEmail] = useState<string | null>(null);
   const [editingAction, setEditingAction] = useState<string | null>(null);
+
+  const [sms, setSms] = useState<SmsMsg[] | null>(null);
+  const [smsLoading, setSmsLoading] = useState(false);
+  const [smsError, setSmsError] = useState<string | null>(null);
+  const [smsBox, setSmsBox] = useState<'inbox' | 'sent' | 'all'>('inbox');
+  const [smsAutoReplying, setSmsAutoReplying] = useState(false);
+  const [smsContextMenu, setSmsContextMenu] = useState<SmsContextMenu | null>(null);
+
+  const [photos, setPhotos] = useState<PhotoMsg[] | null>(null);
+  const [photosError, setPhotosError] = useState<string | null>(null);
+
+  const [contacts, setContacts] = useState<Record<string, string>>({});
+  const [contactsLoading, setContactsLoading] = useState(false);
 
   const gmailSource = sources.find((s) => s.name === 'gmail');
   const gmailConnected = !!gmailSource?.connected;
@@ -261,6 +284,126 @@ export function useAppState() {
     [resolveAction]
   );
 
+  const loadContacts = useCallback(
+    async (force = false) => {
+      if (!force && Object.keys(contacts).length > 0) return;
+      if (contactsLoading) return;
+      setContactsLoading(true);
+      try {
+        const list = await deviceBridge.getContacts();
+        if (list.length) {
+          setContacts((cur) => {
+            const next = { ...cur };
+            list.forEach((c) => {
+              next[c.number] = c.name;
+              const stripped = c.number.replace(/\D/g, '');
+              if (stripped.length >= 7) next[stripped] = c.name;
+            });
+            return next;
+          });
+        }
+      } catch {
+        // non-fatal — SMS list still renders with raw phone numbers
+      } finally {
+        setContactsLoading(false);
+      }
+    },
+    [contacts, contactsLoading]
+  );
+
+  const formatContact = useCallback(
+    (addr: string | undefined | null) => {
+      if (!addr) return addr ?? '';
+      let name = contacts[addr];
+      if (!name) {
+        const stripped = addr.replace(/\D/g, '');
+        if (stripped.length >= 7) name = contacts[stripped];
+      }
+      return name ? `${name} (${addr})` : addr;
+    },
+    [contacts]
+  );
+
+  const loadSmsMessages = useCallback(
+    async (force = false) => {
+      if (!force && sms !== null) return;
+      if (!force && smsError) return;
+      if (smsLoading) return;
+      setSmsLoading(true);
+      setSmsError(null);
+      try {
+        const messages = await deviceBridge.getSmsMessages(smsBox, 100);
+        setSms(messages);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const lower = msg.toLowerCase();
+        setSmsError(lower.includes('denied') || lower.includes('permission') || lower === 'not_android' ? msg : msg);
+      } finally {
+        setSmsLoading(false);
+      }
+    },
+    [sms, smsError, smsLoading, smsBox]
+  );
+
+  const changeSmsBox = useCallback((box: 'inbox' | 'sent' | 'all') => {
+    setSmsBox(box);
+    setSms(null);
+    setSmsError(null);
+  }, []);
+
+  const showSmsContextMenu = useCallback((address: string, body: string) => {
+    setSmsContextMenu({ address, body, status: null });
+  }, []);
+
+  const hideSmsContextMenu = useCallback(() => {
+    setSmsContextMenu(null);
+    setSmsAutoReplying(false);
+  }, []);
+
+  const manualAutoReply = useCallback(async () => {
+    const cm = smsContextMenu;
+    if (!cm || smsAutoReplying) return;
+    setSmsAutoReplying(true);
+    setSmsContextMenu({ ...cm, status: 'thinking' });
+    try {
+      const d = await api.manualSmsReply(cm.address, cm.body);
+      if (!d.ok || !d.reply) {
+        setSmsContextMenu({ ...cm, status: 'error', error: d.error || 'No reply generated' });
+        setSmsAutoReplying(false);
+        return;
+      }
+      setSmsContextMenu({ ...cm, status: 'sending', reply: d.reply });
+      try {
+        await deviceBridge.sendSms(cm.address, d.reply);
+        setSmsContextMenu((cur) => (cur ? { ...cur, status: 'sent' } : cur));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setSmsContextMenu((cur) => (cur ? { ...cur, status: 'error', error: `Send failed: ${msg}` } : cur));
+      } finally {
+        setSmsAutoReplying(false);
+      }
+    } catch (err) {
+      setSmsContextMenu({ ...cm, status: 'error', error: err instanceof Error ? err.message : 'Network error' });
+      setSmsAutoReplying(false);
+    }
+  }, [smsContextMenu, smsAutoReplying]);
+
+  const loadPhotos = useCallback(
+    async (force = false) => {
+      const hasRealPhotos = !!photos && photos.length > 0 && photos[0].id !== 'img-1';
+      if (!force && hasRealPhotos) return;
+      try {
+        const list = await deviceBridge.getPhotos(20);
+        setPhotosError(null);
+        setPhotos(list);
+        if (list.length) api.syncPhotos(list).catch(() => {});
+      } catch (err) {
+        setPhotosError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [photos]
+  );
+
   const disconnectSource = useCallback(
     async (source: string) => {
       await api.disconnectSource(source);
@@ -314,6 +457,23 @@ export function useAppState() {
     toggleRepoPerm,
     selectAllOwner,
     applyBulkPerms,
+    sms,
+    smsLoading,
+    smsError,
+    smsBox,
+    smsAutoReplying,
+    smsContextMenu,
+    loadSmsMessages,
+    changeSmsBox,
+    showSmsContextMenu,
+    hideSmsContextMenu,
+    manualAutoReply,
+    photos,
+    photosError,
+    loadPhotos,
+    contacts,
+    loadContacts,
+    formatContact,
   };
 }
 

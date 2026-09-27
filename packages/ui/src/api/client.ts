@@ -1,4 +1,5 @@
 import { API_BASE_URL } from './baseUrl';
+import type { ContactInfo, PhotoMsg, SmsMsg } from '../device/deviceBridge.types';
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
@@ -135,4 +136,42 @@ export function disconnectSource(source: string) {
 
 export function oauthStartUrl(source: string) {
   return `${API_BASE_URL}/oauth/${source}/start`;
+}
+
+export function manualSmsReply(from: string, body: string) {
+  return json<{ ok: boolean; reply?: string; error?: string }>('/api/sms/manual-reply', {
+    method: 'POST',
+    body: JSON.stringify({ from, body }),
+  });
+}
+
+export function getPendingSmsReplies() {
+  return json<{ ok: boolean; replies?: { id: string; to: string; body: string }[] }>('/api/sms/pending-replies');
+}
+
+export function deletePendingSmsReply(id: string) {
+  return fetch(`${API_BASE_URL}/api/sms/pending-replies/${id}`, { method: 'DELETE' });
+}
+
+export function autoReplySms(from: string, body: string, history: SmsMsg[]) {
+  return json<{ ok: boolean; enabled?: boolean; reply?: string }>('/sms/auto-reply', {
+    method: 'POST',
+    body: JSON.stringify({ from, body, history }),
+  });
+}
+
+export function syncPhotos(photos: PhotoMsg[]) {
+  return fetch(`${API_BASE_URL}/api/photos/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ photos }),
+  });
+}
+
+export function syncContacts(contacts: ContactInfo[]) {
+  return fetch(`${API_BASE_URL}/device/contacts-sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contacts }),
+  });
 }
