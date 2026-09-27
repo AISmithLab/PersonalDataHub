@@ -20,7 +20,15 @@ export function App() {
 
   return (
     <View className="flex-1 bg-background">
-      <View className="flex-row gap-2 p-4 pb-0">
+      {/* Fixed top padding as a rough stand-in for a status-bar clearance —
+          arbitrary-value classes using calc()/env() are NOT safe here even
+          though this only renders inside the mobile WebView today: Tailwind's
+          content scan picks up the literal class text from this file for the
+          *native* mobile build too (its config globs packages/ui/src), and
+          NativeWind's native-side CSS parser (lightningcss) can't parse
+          calc(env(...)) and crashes the whole Metro bundle. Phase 3's native
+          cutover should replace this with real SafeAreaView/useSafeAreaInsets. */}
+      <View className="flex-row gap-2 p-4 pb-0 pt-8">
         {TABS.map((t) => (
           <Pressable
             key={t.key}

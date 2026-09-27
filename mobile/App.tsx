@@ -185,7 +185,7 @@ export default function App() {
       <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
       <WebView
         ref={webRef}
-        source={{ uri: SERVER_URL }}
+        source={{ uri: `${SERVER_URL}/next` }}
         style={s.full}
         injectedJavaScriptBeforeContentLoaded={SMS_BRIDGE}
         onMessage={onMessage}
