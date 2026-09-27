@@ -46,12 +46,16 @@ execSync(
   { stdio: 'inherit', cwd: root }
 );
 
-// Copy sql.js WASM files — cannot be bundled, must be present at runtime
+// Copy the sql.js runtimes — these cannot be bundled, they must be present as files.
+// Android gets the WASM build; iOS gets the asm.js build because nodejs-mobile runs
+// jitless there and has no WebAssembly (see src/ios.ts). Both platforms share one
+// nodejs-project directory, so ship both.
 const sqlSrc = path.join(root, 'node_modules', 'sql.js', 'dist');
 const sqlDst = path.join(outDir, 'node_modules', 'sql.js', 'dist');
 mkdirSync(sqlDst, { recursive: true });
 copyFileSync(path.join(sqlSrc, 'sql-wasm.js'),   path.join(sqlDst, 'sql-wasm.js'));
 copyFileSync(path.join(sqlSrc, 'sql-wasm.wasm'), path.join(sqlDst, 'sql-wasm.wasm'));
+copyFileSync(path.join(sqlSrc, 'sql-asm-memory-growth.js'), path.join(sqlDst, 'sql-asm-memory-growth.js'));
 
 const sqlPkg = JSON.parse(readFileSync(path.join(root, 'node_modules', 'sql.js', 'package.json'), 'utf8'));
 writeFileSync(
