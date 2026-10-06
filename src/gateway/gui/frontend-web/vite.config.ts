@@ -21,6 +21,14 @@ export default defineConfig({
     // override as plain `.web.js`, not `.web.jsx`/`.web.ts(x)` — without it
     // here, Vite falls through to the native entry point instead.
     extensions: ['.web.tsx', '.web.ts', '.web.jsx', '.web.js', '.tsx', '.ts', '.jsx', '.js'],
+    // react-native-reanimated (a transitive dep pulled in via nativewind's
+    // react-native-css-interop) demands a newer react range than mobile/
+    // and packages/ui pin, so npm nests a second react copy under
+    // packages/ui/node_modules — without dedupe, Vite loads both copies
+    // (since packages/ui/src/*.tsx resolves 'react' relative to its own
+    // nearest node_modules) and every hook call crashes with
+    // "Cannot read properties of null (reading 'useState')".
+    dedupe: ['react', 'react-dom'],
   },
   server: {
     proxy: {

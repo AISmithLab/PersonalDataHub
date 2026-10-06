@@ -13,8 +13,21 @@ react {
     //   `mobile` is an npm workspace member, so react-native/@react-native/*
     //   are hoisted to the repo root's node_modules, not mobile/node_modules
     //   (the plain default paths below assume the latter and one level up).
+    //   Root pins the exact same react-native version as mobile (see root
+    //   package.json) specifically so this hoists cleanly as one copy.
     reactNativeDir = file("../../../node_modules/react-native")
-    codegenDir = file("../../../node_modules/@react-native/codegen")
+    //   @react-native/codegen itself does NOT hoist to root despite there
+    //   being zero version conflict (both root's react-native and mobile's
+    //   @react-native/babel-preset want the identical 0.86.0) — confirmed via
+    //   `npm ls @react-native/codegen` showing a single resolved version but
+    //   npm still nesting two copies under react-native/node_modules and
+    //   @react-native/babel-plugin-codegen/node_modules instead of hoisting
+    //   one to root/node_modules. Likely an npm hoisting quirk interacting
+    //   with the root "overrides" field. Point at react-native's own nested
+    //   copy (stable — it's pinned to react-native's own exact version, not
+    //   dependent on unrelated dependency changes) rather than a root path
+    //   that doesn't actually get populated.
+    codegenDir = file("../../../node_modules/react-native/node_modules/@react-native/codegen")
     cliFile = file("../../../node_modules/react-native/cli.js")
 
     /* Variants */

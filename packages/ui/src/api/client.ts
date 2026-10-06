@@ -74,6 +74,17 @@ export interface GithubRepo {
   permissions: string | string[];
 }
 
+export function getAuthStatus() {
+  return json<{ authenticated: boolean; hasUsers: boolean }>('/api/auth/status');
+}
+
+// Single-device auto-login (no credentials — server only binds to 127.0.0.1).
+// The legacy WebView frontend called this on every load before fetching any
+// data; the native app must do the same or every /api/* call 401s silently.
+export function deviceLogin() {
+  return json<{ ok: boolean }>('/auth/device-login', { method: 'POST' });
+}
+
 export function getSources() {
   return json<{ sources: Source[] }>('/api/sources');
 }
@@ -174,4 +185,168 @@ export function syncContacts(contacts: ContactInfo[]) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ contacts }),
   });
+}
+
+// --- Memories ---
+
+export interface MemoryRow {
+  id: string;
+  content: string;
+  created_at: string;
+}
+
+export function getMemories() {
+  return json<{ ok: boolean; memories: MemoryRow[] }>('/api/memories');
+}
+
+export function createMemory(content: string) {
+  return json<{ ok: boolean; id?: string; error?: string }>('/api/memories', {
+    method: 'POST',
+    body: JSON.stringify({ content }),
+  });
+}
+
+export function updateMemory(id: string, content: string) {
+  return json<{ ok: boolean; error?: string }>(`/api/memories/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ content }),
+  });
+}
+
+export function deleteMemory(id: string) {
+  return json<{ ok: boolean }>(`/api/memories/${id}`, { method: 'DELETE' });
+}
+
+// --- AI / chat settings ---
+
+export function getChatStatus() {
+  return json<{ ok: boolean; configured: boolean; provider: string | null; model: string | null }>('/api/chat/status');
+}
+
+export function saveAiSettings(input: { api_key: string; provider?: string; model?: string; base_url?: string }) {
+  return json<{ ok: boolean; error?: string }>('/api/settings/ai-key', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function getAutoReplySettings() {
+  return json<{ ok: boolean; enabled: boolean; maxToolRounds: number }>('/api/settings/auto-reply');
+}
+
+export function saveAutoReplySettings(input: { enabled?: boolean; maxToolRounds?: number }) {
+  return json<{ ok: boolean; enabled: boolean; maxToolRounds: number }>('/api/settings/auto-reply', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function testAutoReply(from: string, body: string) {
+  return json<{ ok: boolean; enabled?: boolean; reply?: string; skipped?: boolean; reason?: string; error?: string }>(
+    '/sms/auto-reply',
+    { method: 'POST', body: JSON.stringify({ from, body }) }
+  );
+}
+
+// --- Onboarding ---
+
+export function getOnboardingStatus() {
+  return json<{ ok: boolean; completed: boolean }>('/api/settings/onboarding');
+}
+
+export function setOnboardingCompleted(completed: boolean) {
+  return json<{ ok: boolean; completed: boolean }>('/api/settings/onboarding', {
+    method: 'POST',
+    body: JSON.stringify({ completed }),
+  });
+}
+
+// --- Audit log ---
+
+export interface AuditEntry {
+  timestamp: string;
+  event: string;
+  source: string | null;
+  details: string;
+}
+
+export function getAuditLog(limit = 50) {
+  return json<{ ok: boolean; entries: AuditEntry[] }>(`/api/audit?limit=${limit}`);
+}
+
+// --- Skills ---
+// Note: skills also have a logic_tree/current_view (LOGICAL vs SUMMARIZED natural-language
+// view) field pair with backend translate endpoints, but no UI in the legacy app ever
+// exposed a way to reach that view — it's dead code there. Not ported; only the reachable
+// name/triggers/allowed_sources/instructions editor is.
+
+export interface SkillRow {
+  id: string;
+  name: string;
+  instructions: string;
+  trigger_event: string;
+  enabled: number;
+  current_view: string;
+  logic_tree: string;
+  summary: string;
+  primitive_type: string;
+  label_tag: string | null;
+  allowed_sources: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SkillInput {
+  name?: string;
+  instructions?: string;
+  trigger_events?: string[];
+  current_view?: string;
+  logic_tree?: string;
+  summary?: string;
+  primitive_type?: string;
+  label_tag?: string | null;
+  allowed_sources?: string | null;
+}
+
+export function getSkills() {
+  return json<{ ok: boolean; skills: SkillRow[] }>('/api/skills');
+}
+
+export function createSkill(input: SkillInput) {
+  return json<{ ok: boolean; id?: string; error?: string }>('/api/skills', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateSkill(id: string, input: SkillInput & { enabled?: boolean }) {
+  return json<{ ok: boolean }>(`/api/skills/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteSkill(id: string) {
+  return json<{ ok: boolean }>(`/api/skills/${id}`, { method: 'DELETE' });
+}
+
+// --- Chat ---
+
+export interface ToolOutput {
+  name: string;
+  input: Record<string, unknown>;
+  output: string;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  toolOutputs?: ToolOutput[];
+}
+
+export function sendChatMessage(messages: ChatMessage[], sms: SmsMsg[] | null) {
+  return json<{ ok: boolean; reply?: string; toolOutputs?: ToolOutput[]; stagedActionIds?: string[]; error?: string }>(
+    '/api/chat',
+    { method: 'POST', body: JSON.stringify({ messages, sms }) }
+  );
 }

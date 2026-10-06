@@ -1,8 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import * as api from '../api/client';
-import type { CalendarEvent, Filter, FilterType, GithubRepo, GmailEmail, Source, StagingAction } from '../api/client';
+import type {
+  CalendarEvent,
+  ChatMessage,
+  Filter,
+  FilterType,
+  GithubRepo,
+  GmailEmail,
+  MemoryRow,
+  SkillInput,
+  SkillRow,
+  Source,
+  StagingAction,
+} from '../api/client';
 import { deviceBridge } from '../device/deviceBridge';
 import type { PhotoMsg, SmsMsg } from '../device/deviceBridge.types';
+
+const ONBOARDING_STEPS = ['intro', 'apikey', 'sms', 'chat', 'memory'] as const;
+type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
 interface SmsContextMenu {
   address: string;
@@ -45,6 +60,31 @@ export function useAppState() {
 
   const [contacts, setContacts] = useState<Record<string, string>>({});
   const [contactsLoading, setContactsLoading] = useState(false);
+
+  const [memories, setMemories] = useState<MemoryRow[] | null>(null);
+  const [memoriesLoading, setMemoriesLoading] = useState(false);
+
+  const [skills, setSkills] = useState<SkillRow[] | null>(null);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+
+  const [aiProvider, setAiProvider] = useState('anthropic');
+  const [aiAvailable, setAiAvailable] = useState(false);
+  const [configuredModel, setConfiguredModel] = useState<string | null>(null);
+
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
+  const [autoReplyMaxToolRounds, setAutoReplyMaxToolRounds] = useState(3);
+  const [autoReplyTestResult, setAutoReplyTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [autoReplyTestLoading, setAutoReplyTestLoading] = useState(false);
+
+  const [auditLog, setAuditLog] = useState<api.AuditEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  const [onboardingActive, setOnboardingActive] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('intro');
 
   const gmailSource = sources.find((s) => s.name === 'gmail');
   const gmailConnected = !!gmailSource?.connected;
@@ -120,10 +160,6 @@ export function useAppState() {
   const refreshAll = useCallback(async () => {
     await refreshCore();
   }, [refreshCore]);
-
-  useEffect(() => {
-    refreshAll();
-  }, [refreshAll]);
 
   useEffect(() => {
     if (gmailConnected && emails === null && !emailsLoading) {
@@ -404,6 +440,292 @@ export function useAppState() {
     [photos]
   );
 
+  const loadMemories = useCallback(
+    async (force = false) => {
+      if (!force && memories !== null) return;
+      if (memoriesLoading) return;
+      setMemoriesLoading(true);
+      try {
+        const d = await api.getMemories();
+        if (d.ok) setMemories(d.memories);
+      } catch (err) {
+        console.warn('[useAppState] Failed to load memories:', err);
+      } finally {
+        setMemoriesLoading(false);
+      }
+    },
+    [memories, memoriesLoading]
+  );
+
+  const addMemory = useCallback(async (content: string) => {
+    const d = await api.createMemory(content);
+    if (d.ok) {
+      const refreshed = await api.getMemories();
+      if (refreshed.ok) setMemories(refreshed.memories);
+    }
+    return d;
+  }, []);
+
+  const editMemory = useCallback(async (id: string, content: string) => {
+    const d = await api.updateMemory(id, content);
+    if (d.ok) {
+      setMemories((cur) => (cur ? cur.map((m) => (m.id === id ? { ...m, content } : m)) : cur));
+    }
+    return d;
+  }, []);
+
+  const deleteMemory = useCallback(async (id: string) => {
+    await api.deleteMemory(id);
+    setMemories((cur) => (cur ? cur.filter((m) => m.id !== id) : cur));
+  }, []);
+
+  const loadSkills = useCallback(
+    async (force = false) => {
+      if (!force && skills !== null) return;
+      if (skillsLoading) return;
+      setSkillsLoading(true);
+      try {
+        const d = await api.getSkills();
+        if (d.ok) setSkills(d.skills);
+      } catch (err) {
+        console.warn('[useAppState] Failed to load skills:', err);
+      } finally {
+        setSkillsLoading(false);
+      }
+    },
+    [skills, skillsLoading]
+  );
+
+  const refreshSkills = useCallback(async () => {
+    const d = await api.getSkills();
+    if (d.ok) setSkills(d.skills);
+  }, []);
+
+  const createSkill = useCallback(
+    async (input: SkillInput) => {
+      const d = await api.createSkill(input);
+      if (d.ok) await refreshSkills();
+      return d;
+    },
+    [refreshSkills]
+  );
+
+  const saveSkill = useCallback(
+    async (id: string, input: SkillInput) => {
+      const d = await api.updateSkill(id, input);
+      if (d.ok) await refreshSkills();
+      return d;
+    },
+    [refreshSkills]
+  );
+
+  const toggleSkillEnabled = useCallback(
+    async (id: string, enabled: boolean) => {
+      setSkills((cur) => (cur ? cur.map((s) => (s.id === id ? { ...s, enabled: enabled ? 1 : 0 } : s)) : cur));
+      await api.updateSkill(id, { enabled });
+    },
+    []
+  );
+
+  const deleteSkillById = useCallback(
+    async (id: string) => {
+      await api.deleteSkill(id);
+      setSkills((cur) => (cur ? cur.filter((s) => s.id !== id) : cur));
+    },
+    []
+  );
+
+  const loadAiStatus = useCallback(async () => {
+    try {
+      const d = await api.getChatStatus();
+      if (d.ok) {
+        setAiAvailable(d.configured);
+        if (d.provider) setAiProvider(d.provider);
+        if (d.model) setConfiguredModel(d.model);
+      }
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
+  const saveAiSettings = useCallback(
+    async (input: { api_key: string; provider?: string; model?: string; base_url?: string }) => {
+      const d = await api.saveAiSettings(input);
+      if (d.ok) {
+        if (input.provider) setAiProvider(input.provider);
+        await loadAiStatus();
+      }
+      return d;
+    },
+    [loadAiStatus]
+  );
+
+  const loadAutoReplySettings = useCallback(async () => {
+    try {
+      const d = await api.getAutoReplySettings();
+      if (d.ok) {
+        setAutoReplyEnabled(d.enabled);
+        setAutoReplyMaxToolRounds(d.maxToolRounds);
+      }
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
+  const saveAutoReplyEnabled = useCallback(async (enabled: boolean) => {
+    const d = await api.saveAutoReplySettings({ enabled });
+    if (d.ok) setAutoReplyEnabled(d.enabled);
+    return d;
+  }, []);
+
+  const saveMaxToolRounds = useCallback(async (maxToolRounds: number) => {
+    const d = await api.saveAutoReplySettings({ maxToolRounds });
+    if (d.ok) setAutoReplyMaxToolRounds(d.maxToolRounds);
+    return d;
+  }, []);
+
+  const runAutoReplyTest = useCallback(async () => {
+    setAutoReplyTestLoading(true);
+    setAutoReplyTestResult(null);
+    try {
+      const d = await api.testAutoReply('+15555550100', 'Hey, are we still on for lunch tomorrow?');
+      if (!autoReplyEnabled) {
+        setAutoReplyTestResult({ ok: false, msg: 'Toggle is OFF — enable it above first' });
+      } else if (!d.ok) {
+        setAutoReplyTestResult({ ok: false, msg: d.error || 'Server error' });
+      } else if (d.skipped) {
+        setAutoReplyTestResult({ ok: false, msg: `Skipped: ${d.reason || 'unknown reason'}` });
+      } else if (d.reply) {
+        setAutoReplyTestResult({ ok: true, msg: `AI replied: "${d.reply}"` });
+      } else {
+        setAutoReplyTestResult({ ok: false, msg: 'No reply generated' });
+      }
+    } catch (err) {
+      setAutoReplyTestResult({ ok: false, msg: `Network error: ${err instanceof Error ? err.message : err}` });
+    } finally {
+      setAutoReplyTestLoading(false);
+    }
+  }, [autoReplyEnabled]);
+
+  const loadAuditLog = useCallback(async (force = false) => {
+    if (!force && auditLog.length > 0) return;
+    if (auditLoading) return;
+    setAuditLoading(true);
+    try {
+      const d = await api.getAuditLog();
+      if (d.ok) setAuditLog(d.entries);
+    } catch (err) {
+      console.warn('[useAppState] Failed to load audit log:', err);
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [auditLog.length, auditLoading]);
+
+  const sendMessage = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || chatLoading) return;
+      const nextMessages = [...chatMessages, { role: 'user' as const, content: trimmed }];
+      setChatMessages(nextMessages);
+      setChatLoading(true);
+      setChatError(null);
+      const smsPayload = sms
+        ? sms.map((m) => ({ ...m, address: formatContact(m.address) }))
+        : null;
+      try {
+        const d = await api.sendChatMessage(nextMessages.slice(-50), smsPayload);
+        if (d.ok) {
+          setChatMessages((cur) => [...cur, { role: 'assistant', content: d.reply ?? '', toolOutputs: d.toolOutputs ?? [] }]);
+          if (d.stagedActionIds && d.stagedActionIds.length) await refreshCore();
+        } else {
+          setChatError(d.error || 'Unknown error');
+        }
+      } catch (err) {
+        setChatError(err instanceof Error ? err.message : 'Network error');
+      } finally {
+        setChatLoading(false);
+      }
+    },
+    [chatMessages, chatLoading, sms, formatContact, refreshCore]
+  );
+
+  const clearChat = useCallback(() => {
+    setChatMessages([]);
+    setChatError(null);
+  }, []);
+
+  const sendStagedSms = useCallback(
+    async (actionId: string, to: string, body: string) => {
+      try {
+        await deviceBridge.sendSms(to, body);
+        await resolveAction(actionId, 'approve');
+      } catch (err) {
+        console.warn('[useAppState] Failed to send staged SMS:', err);
+      }
+    },
+    [resolveAction]
+  );
+
+  const checkOnboarding = useCallback(async () => {
+    try {
+      const d = await api.getOnboardingStatus();
+      if (d.ok && !d.completed) {
+        setOnboardingStep('intro');
+        setOnboardingActive(true);
+      }
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
+  const replayOnboarding = useCallback(() => {
+    setOnboardingStep('intro');
+    setOnboardingActive(true);
+  }, []);
+
+  const onboardingNext = useCallback(() => {
+    setOnboardingStep((cur) => {
+      const idx = ONBOARDING_STEPS.indexOf(cur);
+      return ONBOARDING_STEPS[Math.min(idx + 1, ONBOARDING_STEPS.length - 1)];
+    });
+  }, []);
+
+  const onboardingBack = useCallback(() => {
+    setOnboardingStep((cur) => {
+      const idx = ONBOARDING_STEPS.indexOf(cur);
+      return ONBOARDING_STEPS[Math.max(idx - 1, 0)];
+    });
+  }, []);
+
+  const completeOnboarding = useCallback(async () => {
+    setOnboardingActive(false);
+    api.setOnboardingCompleted(true).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    // The native app has no login screen — mirrors main.js's legacy
+    // "check auth on load, auto-create a device session if needed" sequence.
+    // Every /api/* route is gated by a session cookie middleware, so skipping
+    // this means every data fetch below 401s silently (empty-looking state,
+    // easy to miss — e.g. default-seeded skills just never show up).
+    async function bootstrap() {
+      try {
+        const status = await api.getAuthStatus();
+        if (!status.authenticated) {
+          await api.deviceLogin();
+        }
+      } catch (err) {
+        console.warn('[useAppState] Auth bootstrap failed:', err);
+      }
+      refreshAll();
+      loadAiStatus();
+      loadAutoReplySettings();
+      checkOnboarding();
+    }
+    bootstrap();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const disconnectSource = useCallback(
     async (source: string) => {
       await api.disconnectSource(source);
@@ -474,6 +796,45 @@ export function useAppState() {
     contacts,
     loadContacts,
     formatContact,
+    memories,
+    memoriesLoading,
+    loadMemories,
+    addMemory,
+    editMemory,
+    deleteMemory,
+    skills,
+    skillsLoading,
+    loadSkills,
+    createSkill,
+    saveSkill,
+    toggleSkillEnabled,
+    deleteSkill: deleteSkillById,
+    aiProvider,
+    aiAvailable,
+    configuredModel,
+    saveAiSettings,
+    autoReplyEnabled,
+    autoReplyMaxToolRounds,
+    autoReplyTestResult,
+    autoReplyTestLoading,
+    saveAutoReplyEnabled,
+    saveMaxToolRounds,
+    runAutoReplyTest,
+    auditLog,
+    auditLoading,
+    loadAuditLog,
+    chatMessages,
+    chatLoading,
+    chatError,
+    sendMessage,
+    clearChat,
+    sendStagedSms,
+    onboardingActive,
+    onboardingStep,
+    replayOnboarding,
+    onboardingNext,
+    onboardingBack,
+    completeOnboarding,
   };
 }
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, ScrollView, Pressable, Text, Linking } from 'react-native';
+import { View, ScrollView, Pressable, Text, Linking, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppState } from './hooks/useAppState';
 import { useSmsAutoReply } from './hooks/useSmsAutoReply';
@@ -10,16 +10,28 @@ import { CalendarTab } from './tabs/CalendarTab';
 import { GitHubTab } from './tabs/GitHubTab';
 import { SmsTab } from './tabs/SmsTab';
 import { PhotoTab } from './tabs/PhotoTab';
+import { MemoryTab } from './tabs/MemoryTab';
+import { SkillTab } from './tabs/SkillTab';
+import { ChatTab } from './tabs/ChatTab';
+import { AiSettingsForm } from './components/AiSettingsForm';
+import { AutoReplyForm } from './components/AutoReplyForm';
+import { OnboardingWizard } from './components/OnboardingWizard';
+import { TabIcon } from './components/TabIcon';
+import type { TabIconName } from './components/TabIcon';
 
 type BottomTab = 'ai' | 'skill' | 'memory' | 'settings';
 type ManageSource = 'gmail' | 'google_calendar' | 'github' | 'sms' | 'photo';
-type SettingsView = 'root' | 'integrations' | { manage: ManageSource };
+type SettingsSection = 'ai' | 'autoreply' | 'activity' | 'support';
+type SettingsView = 'root' | 'integrations' | { manage: ManageSource } | { section: SettingsSection };
 
-const BOTTOM_TABS: { key: BottomTab; label: string }[] = [
-  { key: 'ai', label: 'Chat' },
-  { key: 'skill', label: 'Skill' },
-  { key: 'memory', label: 'Memory' },
-  { key: 'settings', label: 'Settings' },
+const PRIMARY_COLOR = '#006b5a';
+const ON_SURFACE_VARIANT_COLOR = '#3d4945';
+
+const BOTTOM_TABS: { key: BottomTab; label: string; icon: TabIconName }[] = [
+  { key: 'ai', label: 'Chat', icon: 'chat' },
+  { key: 'skill', label: 'Skill', icon: 'bolt' },
+  { key: 'memory', label: 'Memory', icon: 'database' },
+  { key: 'settings', label: 'Settings', icon: 'settings' },
 ];
 
 const INTEGRATIONS: { name: ManageSource; label: string; subtitle: string; isNative: boolean }[] = [
@@ -30,13 +42,20 @@ const INTEGRATIONS: { name: ManageSource; label: string; subtitle: string; isNat
   { name: 'github', label: 'GitHub', subtitle: '', isNative: false },
 ];
 
+const SETTINGS_SECTIONS: { key: SettingsSection; label: string }[] = [
+  { key: 'ai', label: 'AI Settings' },
+  { key: 'autoreply', label: 'SMS Auto-Reply' },
+  { key: 'activity', label: 'Activity Log' },
+  { key: 'support', label: 'Support' },
+];
+
 export function App() {
   const state = useAppState();
   const [activeTab, setActiveTab] = useState<BottomTab>('ai');
   const [settingsView, setSettingsView] = useState<SettingsView>('root');
   const insets = useSafeAreaInsets();
 
-  useSmsAutoReply();
+  useSmsAutoReply(state.autoReplyEnabled, state.aiAvailable);
 
   const handleOAuthResult = useCallback(
     (success: string | null, error: string | null) => {
@@ -51,12 +70,17 @@ export function App() {
   );
   useOAuthDeepLink(handleOAuthResult);
 
+  const goToSettings = useCallback(() => {
+    setActiveTab('settings');
+    setSettingsView('root');
+  }, []);
+
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <ScrollView className="flex-1 p-4">
-        {activeTab === 'ai' && <StubTab label="Chat" />}
-        {activeTab === 'skill' && <StubTab label="Skill" />}
-        {activeTab === 'memory' && <StubTab label="Memory" />}
+        {activeTab === 'ai' && <ChatTab state={state} onGoToSettings={goToSettings} />}
+        {activeTab === 'skill' && <SkillTab state={state} />}
+        {activeTab === 'memory' && <MemoryTab state={state} />}
         {activeTab === 'settings' && (
           <SettingsTab state={state} view={settingsView} setView={setSettingsView} />
         )}
@@ -73,23 +97,17 @@ export function App() {
               setActiveTab(t.key);
               if (t.key === 'settings') setSettingsView('root');
             }}
-            className="px-3 py-1 items-center"
+            className="px-3 py-1 items-center gap-0.5"
           >
+            <TabIcon name={t.icon} color={activeTab === t.key ? PRIMARY_COLOR : ON_SURFACE_VARIANT_COLOR} />
             <Text className={`text-label-sm ${activeTab === t.key ? 'text-primary font-bold' : 'text-on-surface-variant'}`}>
               {t.label}
             </Text>
           </Pressable>
         ))}
       </View>
-    </View>
-  );
-}
 
-function StubTab({ label }: { label: string }) {
-  return (
-    <View className="items-center mt-16">
-      <Text className="text-headline-md text-on-surface font-bold mb-2">{label}</Text>
-      <Text className="text-body-sm text-on-surface-variant">Coming in Phase 4.</Text>
+      <OnboardingWizard state={state} />
     </View>
   );
 }
@@ -103,8 +121,12 @@ function SettingsTab({
   view: SettingsView;
   setView: (v: SettingsView) => void;
 }) {
-  if (typeof view === 'object') {
+  if (typeof view === 'object' && 'manage' in view) {
     return <ManageScreen source={view.manage} state={state} onBack={() => setView('integrations')} />;
+  }
+
+  if (typeof view === 'object' && 'section' in view) {
+    return <SettingsSectionScreen section={view.section} state={state} onBack={() => setView('root')} />;
   }
 
   if (view === 'integrations') {
@@ -159,14 +181,109 @@ function SettingsTab({
   return (
     <View>
       <Text className="text-headline-md text-on-surface font-bold mb-4">Settings</Text>
-      <Pressable
-        onPress={() => setView('integrations')}
-        className="bg-surface border border-outline-variant rounded-lg px-4 py-3.5 flex-row items-center justify-between"
-      >
-        <Text className="text-body-md text-on-surface">Integrations</Text>
-        <Text className="text-on-surface-variant">→</Text>
+      <View className="gap-2.5">
+        {SETTINGS_SECTIONS.map((s) => (
+          <Pressable
+            key={s.key}
+            onPress={() => setView({ section: s.key })}
+            className="bg-surface border border-outline-variant rounded-lg px-4 py-3.5 flex-row items-center justify-between"
+          >
+            <Text className="text-body-md text-on-surface">{s.label}</Text>
+            <Text className="text-on-surface-variant">→</Text>
+          </Pressable>
+        ))}
+        <Pressable
+          onPress={() => setView('integrations')}
+          className="bg-surface border border-outline-variant rounded-lg px-4 py-3.5 flex-row items-center justify-between"
+        >
+          <Text className="text-body-md text-on-surface">Integrations</Text>
+          <Text className="text-on-surface-variant">→</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function SettingsSectionScreen({
+  section,
+  state,
+  onBack,
+}: {
+  section: SettingsSection;
+  state: ReturnType<typeof useAppState>;
+  onBack: () => void;
+}) {
+  const label = SETTINGS_SECTIONS.find((s) => s.key === section)?.label ?? section;
+  return (
+    <View>
+      <BackHeader title={label} onBack={onBack} />
+      {section === 'ai' && <AiSettingsForm state={state} />}
+      {section === 'autoreply' && <AutoReplyForm state={state} />}
+      {section === 'activity' && <ActivityLog state={state} />}
+      {section === 'support' && <SupportSection state={state} />}
+    </View>
+  );
+}
+
+function ActivityLog({ state }: { state: ReturnType<typeof useAppState> }) {
+  React.useEffect(() => {
+    state.loadAuditLog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (state.auditLoading && state.auditLog.length === 0) {
+    return <Text className="text-on-surface-variant text-body-sm">Loading…</Text>;
+  }
+  if (state.auditLog.length === 0) {
+    return <Text className="text-on-surface-variant text-body-sm">No activity has been logged yet.</Text>;
+  }
+  return (
+    <View className="gap-2">
+      {state.auditLog.map((e, i) => (
+        <View key={i} className="border border-outline-variant rounded-lg p-3 bg-surface gap-0.5">
+          <View className="flex-row justify-between">
+            <Text className="text-label-sm font-semibold text-on-surface">{e.event}</Text>
+            <Text className="text-label-sm text-on-surface-variant">{new Date(e.timestamp).toLocaleString()}</Text>
+          </View>
+          {e.source ? <Text className="text-label-sm text-on-surface-variant">source: {e.source}</Text> : null}
+          <Text className="text-label-sm text-on-surface-variant" numberOfLines={3}>{e.details}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const BUG_REPORT_REPO = 'AISmithLab/PersonalDataHub';
+
+function SupportSection({ state }: { state: ReturnType<typeof useAppState> }) {
+  const [bugReport, setBugReport] = useState('');
+
+  const reportBug = () => {
+    const url =
+      `https://github.com/${BUG_REPORT_REPO}/issues/new` +
+      `?title=${encodeURIComponent('Bug report')}&body=${encodeURIComponent(bugReport)}`;
+    Linking.openURL(url);
+  };
+
+  return (
+    <View className="gap-4" style={{ maxWidth: 480 }}>
+      <View className="gap-1.5">
+        <Text className="text-label-caps text-on-surface-variant">What went wrong?</Text>
+        <TextInput
+          value={bugReport}
+          onChangeText={setBugReport}
+          placeholder="Describe the issue…"
+          multiline
+          className="border border-outline-variant rounded-lg p-3 text-body-sm"
+          style={{ minHeight: 80 }}
+        />
+      </View>
+      <Pressable onPress={reportBug} className="self-start border border-outline-variant rounded-lg px-4 py-2">
+        <Text className="text-on-surface-variant text-label-caps">Report a Bug on GitHub</Text>
       </Pressable>
-      <Text className="text-body-sm text-on-surface-variant mt-4">More settings coming in Phase 4.</Text>
+      <Pressable onPress={state.replayOnboarding} className="self-start border border-outline-variant rounded-lg px-4 py-2">
+        <Text className="text-on-surface-variant text-label-caps">Replay Onboarding</Text>
+      </Pressable>
     </View>
   );
 }

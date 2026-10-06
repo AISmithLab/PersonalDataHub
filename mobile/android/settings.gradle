@@ -1,7 +1,12 @@
 // `mobile` is an npm workspace member, so its deps (react-native, the RN
 // gradle plugin, etc.) get hoisted to the repo root's node_modules instead of
 // mobile/node_modules. Paths below account for that extra level (repo root
-// is two directories up from android/, not one).
+// is two directories up from android/, not one). Root pins the exact same
+// react-native version as mobile (see root package.json's "react-native"
+// dependency + "react"/"react-dom" overrides) specifically so this hoists
+// cleanly as one copy — don't let that pin drift from mobile/package.json's
+// react-native version, or npm nests a second copy here again (see Phase 4
+// progress log for the duplicate-React saga this caused).
 pluginManagement { includeBuild("../../node_modules/@react-native/gradle-plugin") }
 plugins { id("com.facebook.react.settings") }
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }

@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
-import { API_BASE_URL } from '../api/baseUrl';
+import { useEffect, useRef } from 'react';
 import * as api from '../api/client';
 import { deviceBridge } from '../device/deviceBridge';
 
@@ -9,36 +8,11 @@ import { deviceBridge } from '../device/deviceBridge';
  * watches the inbox for new messages to auto-reply to. Safe no-op on web/iOS —
  * deviceBridge.getSmsMessages/sendSms reject with NOT_ANDROID there.
  *
- * Gating flags (auto-reply enabled, AI configured) live in Settings/Chat state
- * that isn't ported until Phase 4 — fetched directly here in the meantime,
- * same endpoints main.js already polls (`/api/settings/auto-reply`, `/api/chat/status`).
+ * Gating flags come from useAppState (Settings/Chat), which already polls
+ * `/api/settings/auto-reply` and `/api/chat/status` on mount.
  */
-export function useSmsAutoReply() {
+export function useSmsAutoReply(autoReplyEnabled: boolean, aiAvailable: boolean) {
   const lastCheckedMsRef = useRef(Date.now());
-  const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
-  const [aiAvailable, setAiAvailable] = useState(false);
-
-  useEffect(() => {
-    const check = async () => {
-      try {
-        const r = await fetch(`${API_BASE_URL}/api/settings/auto-reply`);
-        const d = await r.json();
-        if (d.ok) setAutoReplyEnabled(!!d.enabled);
-      } catch {
-        // non-fatal
-      }
-      try {
-        const r = await fetch(`${API_BASE_URL}/api/chat/status`);
-        const d = await r.json();
-        if (d.ok) setAiAvailable(!!d.configured);
-      } catch {
-        // non-fatal
-      }
-    };
-    check();
-    const t = setInterval(check, 30000);
-    return () => clearInterval(t);
-  }, []);
 
   useEffect(() => {
     if (!autoReplyEnabled) return;
