@@ -1,0 +1,158 @@
+name: Nightly iOS Build (Simulator)
+
+# No Apple Developer account is configured yet, so this builds and smoke-tests
+# the app for the iOS Simulator only — it cannot produce something installable
+# on a physical iPhone (that requires a signing certificate + provisioning
+# profile, which don't exist here). This is still a real, valuable gate: it's
+# the only thing in CI that actually compiles mobile/ios (Podfile, the
+# ContactsModule/PhotosModule native modules, nodejs-mobile's build phases)
+# and confirms the built .app installs and launches in a simulator without
+# crashing on startup.
+
+on:
+  schedule:
+    - cron: '30 7 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for new commits since last nightly
+        id: check
+        run: |
+          HEAD_SHA=$(git rev-parse HEAD)
+          TAG_SHA=$(git rev-parse refs/tags/nightly-ios 2>/dev/null || git ls-remote origin refs/tags/nightly-ios | cut -f1)
+          if [ "$HEAD_SHA" = "$TAG_SHA" ]; then
+            echo "No new commits since last nightly iOS build ($HEAD_SHA); skipping."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New commits detected ($TAG_SHA -> $HEAD_SHA); building."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Write hub-config.yaml from secrets
+        env:
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          CAL_CLIENT_ID: ${{ secrets.CAL_CLIENT_ID }}
+          CAL_CLIENT_SECRET: ${{ secrets.CAL_CLIENT_SECRET }}
+        run: |
+          cat > hub-config.yaml <<EOF
+          sources:
+            gmail:
+              enabled: true
+              owner_auth:
+                type: oauth2
+                clientId: "${GMAIL_CLIENT_ID}"
+                clientSecret: "${GMAIL_CLIENT_SECRET}"
+            google_calendar:
+              enabled: true
+              owner_auth:
+                type: oauth2
+                clientId: "${CAL_CLIENT_ID}"
+                clientSecret: "${CAL_CLIENT_SECRET}"
+            github:
+              enabled: true
+              owner_auth:
+                type: github_app
+          port: 3000
+          EOF
+
+      - name: Build Node.js backend bundle
+        working-directory: mobile
+        run: npm run bundle:node
+
+      - name: Install CocoaPods dependencies
+        working-directory: mobile/ios
+        run: pod install --repo-update
+
+      - name: Build for iOS Simulator
+        working-directory: mobile/ios
+        run: |
+          xcodebuild \
+            -workspace PersonalDataHub.xcworkspace \
+            -scheme PersonalDataHub \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Boot simulator and smoke-test launch
+        working-directory: mobile/ios
+        run: |
+          set -e
+          APP_PATH="build/Build/Products/Debug-iphonesimulator/PersonalDataHub.app"
+          BUNDLE_ID="com.personaldatahub"
+
+          DEVICE_ID=$(xcrun simctl list devices available -j \
+            | jq -r '[.devices[] | .[] | select(.name | contains("iPhone"))][0].udid')
+          if [ -z "$DEVICE_ID" ] || [ "$DEVICE_ID" = "null" ]; then
+            echo "::error::No available iPhone simulator found on this runner image."
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Using simulator: $DEVICE_ID"
+
+          xcrun simctl boot "$DEVICE_ID"
+          xcrun simctl install "$DEVICE_ID" "$APP_PATH"
+          xcrun simctl launch "$DEVICE_ID" "$BUNDLE_ID"
+
+          # Give the embedded Node.js backend a moment to start, then confirm the
+          # app is still running (not crashed on launch) before screenshotting.
+          sleep 8
+          if ! xcrun simctl spawn "$DEVICE_ID" launchctl list | grep -q "$BUNDLE_ID"; then
+            echo "::error::App does not appear to be running after launch — crashed on startup?"
+            xcrun simctl spawn "$DEVICE_ID" log collect --output /tmp/sim.logarchive || true
+            exit 1
+          fi
+
+          mkdir -p ../../dist-ios
+          xcrun simctl io "$DEVICE_ID" screenshot ../../dist-ios/simulator-screenshot.png
+
+      - name: Upload simulator screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-screenshot
+          path: dist-ios/*.png
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Update nightly-ios tag
+        run: |
+          git tag -f nightly-ios
+          git push origin nightly-ios --force
