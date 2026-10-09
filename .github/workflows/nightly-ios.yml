@@ -92,6 +92,9 @@ jobs:
         working-directory: mobile
         run: npm run bundle:node
 
+      - name: Link iOS native deps hoisted by npm workspaces
+        run: node scripts/link-ios-native-deps.cjs
+
       - name: Install CocoaPods dependencies
         working-directory: mobile/ios
         run: pod install --repo-update
