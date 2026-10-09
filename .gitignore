@@ -15,5 +15,11 @@ coverage/
 www/nodejs/
 android/app/src/main/assets/nodejs-project/
 android/app/src/main/assets/public/nodejs/
+# nodejs-mobile-react-native's postinstall writes npm-junk here when its
+# hoisted copy targets the repo root instead of mobile/ (see workflow
+# "mkdir -p nodejs-assets" step, which pre-creates the dir to avoid a
+# postinstall race — the dir itself is tracked via .gitkeep, its contents aren't)
+/nodejs-assets/*
+!/nodejs-assets/.gitkeep
 hc.yml
 text
