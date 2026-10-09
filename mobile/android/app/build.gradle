@@ -58,7 +58,11 @@ react {
 
     /* Hermes Commands */
     //   The hermes compiler command to run. By default it is 'hermesc'
-    // hermesCommand = "$rootDir/my-custom-hermesc/bin/hermesc"
+    //   Default resolution looks for node_modules/hermes-compiler relative to
+    //   `root` (mobile/), but hermes-compiler is hoisted to the repo root's
+    //   node_modules as an npm workspace dependency of react-native, so it
+    //   must be pointed there explicitly (same reasoning as reactNativeDir above).
+    hermesCommand = "$rootDir/../../node_modules/hermes-compiler/hermesc/%OS-BIN%/hermesc"
     //
     //   The list of flags to pass to the Hermes compiler. By default is "-O", "-output-source-map"
     // hermesFlags = ["-O", "-output-source-map"]
