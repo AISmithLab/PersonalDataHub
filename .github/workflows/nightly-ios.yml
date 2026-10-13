@@ -203,3 +203,18 @@ jobs:
         run: |
           git tag -f nightly-ios
           git push origin nightly-ios --force
+
+      - name: Publish nightly-ios release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ASSETS=()
+          [ -f dist-ios/PersonalDataHub-simulator.zip ] && ASSETS+=(dist-ios/PersonalDataHub-simulator.zip)
+          [ -f dist-ios/simulator-screenshot.png ] && ASSETS+=(dist-ios/simulator-screenshot.png)
+          [ -f dist-ios/PersonalDataHub-device-unsigned.zip ] && ASSETS+=(dist-ios/PersonalDataHub-device-unsigned.zip)
+
+          gh release delete nightly-ios --yes || true
+          gh release create nightly-ios "${ASSETS[@]}" \
+            --title "Nightly iOS Build ($(date -u +%Y-%m-%d))" \
+            --notes "Automated nightly build. Simulator app is smoke-tested; device app is unsigned and untested. Not for production use." \
+            --prerelease
