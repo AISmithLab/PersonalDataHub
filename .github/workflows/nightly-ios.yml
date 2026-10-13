@@ -144,12 +144,58 @@ jobs:
           mkdir -p ../../dist-ios
           xcrun simctl io "$DEVICE_ID" screenshot ../../dist-ios/simulator-screenshot.png
 
+      - name: Zip the simulator .app bundle
+        working-directory: mobile/ios
+        run: |
+          APP_PATH="build/Build/Products/Debug-iphonesimulator/PersonalDataHub.app"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" ../../dist-ios/PersonalDataHub-simulator.zip
+
+      - name: Build unsigned for iOS device
+        id: device-build
+        continue-on-error: true
+        working-directory: mobile/ios
+        run: |
+          xcodebuild \
+            -workspace PersonalDataHub.xcworkspace \
+            -scheme PersonalDataHub \
+            -configuration Debug \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build-device \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Zip the unsigned device .app bundle
+        if: steps.device-build.outcome == 'success'
+        working-directory: mobile/ios
+        run: |
+          APP_PATH="build-device/Build/Products/Debug-iphoneos/PersonalDataHub.app"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" ../../dist-ios/PersonalDataHub-device-unsigned.zip
+
       - name: Upload simulator screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ios-simulator-screenshot
           path: dist-ios/*.png
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload simulator app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-app
+          path: dist-ios/PersonalDataHub-simulator.zip
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload unsigned device app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-device-unsigned-app
+          path: dist-ios/PersonalDataHub-device-unsigned.zip
           retention-days: 14
           if-no-files-found: ignore
 
