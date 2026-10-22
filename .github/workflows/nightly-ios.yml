@@ -132,7 +132,7 @@ jobs:
         run: |
           set -e
           APP_PATH="build/Build/Products/Debug-iphonesimulator/PersonalDataHub.app"
-          BUNDLE_ID="com.personaldatahub"
+          BUNDLE_ID="com.aismithlab.personaldatahub"
 
           DEVICE_ID=$(xcrun simctl list devices available -j \
             | jq -r '[.devices[] | .[] | select(.name | contains("iPhone"))][0].udid')
@@ -255,7 +255,7 @@ jobs:
             <key>uploadSymbols</key><false/>
             <key>provisioningProfiles</key>
             <dict>
-              <key>com.personaldatahub</key>
+              <key>com.aismithlab.personaldatahub</key>
               <string>${PROFILE_UUID}</string>
             </dict>
           </dict>
