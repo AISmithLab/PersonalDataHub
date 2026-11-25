@@ -21,7 +21,7 @@ export const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   anthropic: 'claude-sonnet-4-6',
   openai: 'gpt-4o',
   groq: 'llama-3.3-70b-versatile',
-  google: 'gemini-2.0-flash',
+  google: 'gemini-flash-latest',
   ollama: 'llama3',
 };
 

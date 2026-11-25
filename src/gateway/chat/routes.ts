@@ -23,7 +23,8 @@ const DEFAULT_MODELS: Record<string, string> = {
   anthropic: 'claude-sonnet-4-6',
   openai: 'gpt-4o',
   groq: 'llama-3.3-70b-versatile',
-  google: 'gemini-2.0-flash',
+  // An alias Google keeps pointed at its current Flash model; fixed model names get retired.
+  google: 'gemini-flash-latest',
   ollama: 'llama3',
 };
 
@@ -45,8 +46,29 @@ export function getClient(deps: ServerDeps): OpenAI {
   const ai = deps.config.ai!;
   const provider = ai.provider ?? 'anthropic';
   const baseURL = ai.base_url ?? DEFAULT_BASE_URLS[provider];
-  return new OpenAI({ apiKey: ai.api_key, ...(baseURL ? { baseURL } : {}) });
+  return new OpenAI({ apiKey: ai.api_key, ...(baseURL ? { baseURL } : {}), fetch: readableErrors, maxRetries: 0 });
 }
+
+/**
+ * Some providers do not send errors in OpenAI's shape. Google's compatible endpoint
+ * wraps its error in an array, which the SDK cannot read, so the user sees only
+ * "400 status code (no body)". Re-shape such bodies so the provider's own message
+ * (model retired, quota exceeded, key not valid) reaches the user.
+ */
+const readableErrors: typeof fetch = async (input, init) => {
+  const res = await fetch(input, init);
+  if (res.ok) return res;
+  const text = await res.text();
+  let message = '';
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    const first = (Array.isArray(parsed) ? parsed[0] : parsed) as { error?: { message?: unknown } | string; message?: unknown } | null;
+    const err = first?.error;
+    message = typeof err === 'string' ? err : String(err?.message ?? first?.message ?? '');
+  } catch { /* not JSON */ }
+  const body = JSON.stringify({ error: { message: message || text.slice(0, 500) || res.statusText, type: 'provider_error' } });
+  return new Response(body, { status: res.status, statusText: res.statusText, headers: { 'content-type': 'application/json', ...(res.headers.get('retry-after') ? { 'retry-after': res.headers.get('retry-after')! } : {}) } });
+};
 
 export function getModel(deps: ServerDeps): string {
   const ai = deps.config.ai!;
@@ -62,10 +84,11 @@ export function pipeAsk(deps: ServerDeps): AskFn {
   if (!ask) {
     ask = makeAsk(async (system, user) => {
       if (!deps.config.ai?.api_key) throw new Error('ask() needs an AI key. Add one in Settings → AI Settings.');
-      const response = await getClient(deps).chat.completions.create({
+      const response = await callChatCompletionWithRetry(getClient(deps), {
         model: getModel(deps),
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-        max_tokens: 16,
+        // Room for a model that thinks before it answers; the answer itself is a few words.
+        max_tokens: 2048,
       });
       return response.choices[0]?.message.content ?? '';
     });
@@ -778,20 +801,28 @@ async function callChatCompletionWithRetry(
     } catch (err: any) {
       const status = err?.status || err?.statusCode;
       const msg = String(err?.message || '');
-      const is429 = status === 429 || msg.includes('429');
-      if (is429 && attempt < maxAttempts) {
-        const waitMs = attempt * 2000;
-        console.warn(`[chat] 429 Rate Limit encountered. Retrying in ${waitMs}ms (${attempt}/${maxAttempts})...`);
+      // 429: over the rate limit. 503: the provider is overloaded. Both pass if we wait.
+      const busy = status === 429 || status === 503 || msg.includes('429');
+      if (busy && attempt < maxAttempts) {
+        // Providers often say how long ("Please retry in 23.3s"); a short fixed wait would just fail again.
+        const hinted = /retry in ([\d.]+)\s*s/i.exec(msg);
+        const waitMs = hinted ? Math.min(Math.ceil(Number(hinted[1]) * 1000) + 500, 45_000) : attempt * 2000;
+        console.warn(`[chat] provider busy (${status}). Retrying in ${waitMs}ms (${attempt}/${maxAttempts})...`);
         await new Promise((resolve) => setTimeout(resolve, waitMs));
         continue;
       }
-      if (is429) {
-        throw new Error('AI provider rate limit reached (429 Too Many Requests). Please wait a few seconds and try again, or check your API quota in Settings.');
+      if (status === 429 || msg.includes('429')) {
+        throw new Error(`AI provider rate limit reached. ${providerSaid(msg)}`);
       }
-      throw err;
+      throw new Error(providerSaid(msg) || 'The AI provider returned an error.');
     }
   }
   throw new Error('Chat completion failed');
+}
+
+// The provider's own sentence, without the SDK's status prefix and without the long tail of links.
+function providerSaid(message: string): string {
+  return message.replace(/^\d{3}\s+/, '').split('\n')[0].trim().slice(0, 400);
 }
 
 async function runAgentLoop(
@@ -1250,14 +1281,14 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     const prov = (provider && typeof provider === 'string' && provider.trim()) ? provider.trim() : 'anthropic';
     const key = api_key.trim();
 
-    if (!deps.config.ai) {
-      (deps.config as Record<string, unknown>).ai = { provider: prov, api_key: key };
-    } else {
-      deps.config.ai.provider = prov;
-      deps.config.ai.api_key = key;
-    }
-    if (model && typeof model === 'string' && model.trim()) deps.config.ai!.model = model.trim();
-    if (base_url && typeof base_url === 'string' && base_url.trim()) (deps.config.ai as Record<string, unknown>).base_url = base_url.trim();
+    // Replace the whole setting. Keeping an earlier provider's model or base URL when
+    // only the provider and key change would send, say, a Claude model name to Google.
+    (deps.config as Record<string, unknown>).ai = {
+      provider: prov,
+      api_key: key,
+      ...(model && typeof model === 'string' && model.trim() ? { model: model.trim() } : {}),
+      ...(base_url && typeof base_url === 'string' && base_url.trim() ? { base_url: base_url.trim() } : {}),
+    };
 
     // Persist to config file — PDH_CONFIG_PATH is set by android.ts at startup
     const configPath = process.env.PDH_CONFIG_PATH;

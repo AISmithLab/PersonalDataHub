@@ -1059,7 +1059,7 @@ var currentTab = 'ai';
     function selectProvider(val) {
       state.settingsProvider = val;
       var customUrls = { anthropic: 'https://api.anthropic.com/v1', openai: '', groq: 'https://api.groq.com/openai/v1', google: 'https://generativelanguage.googleapis.com/v1beta/openai/', ollama: 'http://localhost:11434/v1' };
-      var defaultModels = { anthropic: 'claude-sonnet-4-6', openai: 'gpt-4o', groq: 'llama-3.3-70b-versatile', google: 'gemini-2.0-flash', ollama: 'llama3' };
+      var defaultModels = { anthropic: 'claude-sonnet-4-6', openai: 'gpt-4o', groq: 'llama-3.3-70b-versatile', google: 'gemini-flash-latest', ollama: 'llama3' };
       var urlEl = document.getElementById('ai-base-url');
       var modelEl = document.getElementById('ai-model');
       if (urlEl) urlEl.placeholder = customUrls[val] || 'https://...';
