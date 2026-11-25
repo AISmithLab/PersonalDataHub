@@ -106,6 +106,7 @@ Tables in SQLite:
 | Table | Purpose |
 |---|---|
 | `oauth_tokens` | Encrypted OAuth tokens per source |
+| `agent_keys` | Agent keys (name and SHA-256 hash; the key itself is never stored) |
 | `owner_auth` | Bcrypt-hashed owner password for GUI access |
 | `filters` | Quick filter definitions per source (type, value, enabled) |
 | `staging` | Outbound actions pending owner review |
@@ -165,7 +166,20 @@ interface SourceConnector {
 
 ## How Data Flows
 
-### Pull request (`POST /app/v1/pull`)
+### Route layout
+
+Two prefixes, each with one credential (see `src/gateway/server.ts` and `src/gateway/auth/access.ts`):
+
+| Prefix | Caller | Credential |
+|---|---|---|
+| `/web/*` | The GUI and the mobile app | Owner: session cookie, or the device secret on the phone |
+| `/agent/*` | Agents | Agent key (`Authorization: Bearer pk_...`), or the owner |
+
+Unauthenticated by necessity: `GET /health`, the pages (`/`, `/next`), `/web/auth/{signup,login,status}`, and the two OAuth routes the provider's flow calls (`GET /oauth/:source/callback`, protected by the one-time state; `POST /oauth/:source/store-tokens`, protected by a one-time ticket).
+
+New owner routes go in `gui/routes.ts` or `chat/routes.ts` (they are mounted under `/web`, so write the path without the prefix). New agent routes go in `app-api.ts`.
+
+### Pull request (`POST /agent/pull`)
 
 1. Fetches live data from the connector using the configured boundary
 2. Loads enabled quick filters from the `filters` table for that source
@@ -181,14 +195,14 @@ Request → fetch data (live from source) → apply filters → audit log → re
 
 1. Agent calls the MCP tool via stdio
 2. The MCP server builds an HTTP request body from the tool arguments
-3. Calls `POST /app/v1/pull` on the local HTTP server
+3. Calls `POST /agent/pull` on the local HTTP server
 4. Returns the JSON response as MCP text content
 
 ```
-Agent → MCP stdio → fetch(hubUrl/app/v1/pull) → HTTP server → connector → filters → response
+Agent → MCP stdio → fetch(hubUrl/agent/pull) → HTTP server → connector → filters → response
 ```
 
-### Propose action (`POST /app/v1/propose`)
+### Propose action (`POST /agent/propose`)
 
 1. Inserts the action into the `staging` table with status `pending`
 2. Logs the proposal to the audit log
@@ -232,7 +246,7 @@ The MCP server (`src/mcp/server.ts`) provides a stdio transport for MCP-compatib
 
 1. Reads `~/.pdh/config.json` for the hub URL
 2. Health-checks the running HTTP server
-3. Queries `GET /app/v1/sources` to discover connected sources
+3. Queries `GET /agent/sources` to discover connected sources
 4. Registers source-specific tools dynamically (only for connected sources)
 
 To test the MCP server manually:

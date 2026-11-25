@@ -12,7 +12,7 @@ Help users manage their schedule by checking for conflicts, listing upcoming eve
 
 ### 1. Read the PersonalDataHub config
 
-Read `~/.pdh/config.json` to get the `hubUrl`. If the file doesn't exist, tell the user to run `npx pdh init` and `npx pdh start` first.
+Read `~/.pdh/config.json` to get the `hubUrl` and `apiKey`. Send the key on every call as `Authorization: Bearer <apiKey>`. If the file doesn't exist, tell the user to run `npx pdh init` and `npx pdh start` first.
 
 ### 2. Verify the hub is running
 
@@ -37,7 +37,8 @@ Before scheduling or responding, check existing commitments. Plan queries for:
 Pull calendar data from PersonalDataHub:
 
 ```bash
-curl -s -X POST <hubUrl>/app/v1/pull \
+curl -s -X POST <hubUrl>/agent/pull \
+  -H "Authorization: Bearer <apiKey>" \
   -H "Content-Type: application/json" \
   -d '{"source": "google_calendar", "query": "<optional_search_term>", "after": "<iso_timestamp>", "limit": 20, "purpose": "Checking availability for <context>"}'
 ```
@@ -62,7 +63,8 @@ Calendar modifications require user approval via the `propose` endpoint.
 
 #### Create an Event:
 ```bash
-curl -s -X POST <hubUrl>/app/v1/propose \
+curl -s -X POST <hubUrl>/agent/propose \
+  -H "Authorization: Bearer <apiKey>" \
   -H "Content-Type: application/json" \
   -d '{
     "source": "google_calendar",
@@ -82,7 +84,8 @@ curl -s -X POST <hubUrl>/app/v1/propose \
 
 #### Update an Event:
 ```bash
-curl -s -X POST <hubUrl>/app/v1/propose \
+curl -s -X POST <hubUrl>/agent/propose \
+  -H "Authorization: Bearer <apiKey>" \
   -H "Content-Type: application/json" \
   -d '{
     "source": "google_calendar",
@@ -97,7 +100,8 @@ curl -s -X POST <hubUrl>/app/v1/propose \
 
 #### Delete an Event:
 ```bash
-curl -s -X POST <hubUrl>/app/v1/propose \
+curl -s -X POST <hubUrl>/agent/propose \
+  -H "Authorization: Bearer <apiKey>" \
   -H "Content-Type: application/json" \
   -d '{
     "source": "google_calendar",

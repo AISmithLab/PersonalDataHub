@@ -91,6 +91,8 @@ export interface InitResult {
   envPath: string;
   globalConfigPath: string;
   credentialsFetched: boolean;
+  /** The first agent key. Also written to the config file; the database has only its hash. */
+  apiKey: string;
 }
 
 export interface InitOptions {
@@ -191,7 +193,7 @@ export async function init(targetDir?: string, options?: InitOptions): Promise<I
   const hubUrl = `http://localhost:${port}`;
   writeConfig({ hubUrl, hubDir: dir, apiKey });
 
-  return { secret, dbPath, configPath, envPath, globalConfigPath: CONFIG_PATH, credentialsFetched };
+  return { secret, dbPath, configPath, envPath, globalConfigPath: CONFIG_PATH, credentialsFetched, apiKey };
 }
 
 // --- Start / Stop / Status ---
@@ -462,6 +464,10 @@ if (isDirectRun) {
       console.log(`  hub-config.yaml created  ${result.configPath}`);
       console.log(`  Database created         ${result.dbPath}`);
       console.log(`  Config saved             ${result.globalConfigPath}`);
+      console.log(`\n  Agent key ("default")    ${result.apiKey}`);
+      console.log('    Agents send this key on every call. It is saved in the config file above.');
+      console.log('    If your agent runs as another user, copy it into that user\'s ~/.pdh/config.json as "apiKey".');
+      console.log('    Create more keys, or delete this one, in the GUI under Settings → Agent Keys.');
       console.log('\n  Next steps:');
       if (result.credentialsFetched) {
         console.log('    Default OAuth credentials configured. Just click Connect in the GUI.');

@@ -53,9 +53,9 @@ npx pdh init
 | `.env` | Master encryption key for OAuth tokens |
 | `hub-config.yaml` | Server config with OAuth credentials and port |
 | `pdh.db` | SQLite database (owned by `personaldatahub`, mode `0600`) |
-| `~personaldatahub/.pdh/config.json` | Hub URL and directory |
+| `~personaldatahub/.pdh/config.json` | Hub URL, directory, and the first agent key |
 
-It prints an **owner password** — save it. You need it to log into the GUI.
+It prints an **agent key** (`pk_...`). Save it: agents must send it on every call, and Step 5 needs it. You can create more keys later in the GUI under **Settings → Agent Keys**.
 
 ## Step 3: Start the Server
 
@@ -150,7 +150,7 @@ Or use your display manager's user switching feature to log into a `personaldata
 
 ### In the GUI
 
-Log in with the owner password from Step 2, then:
+On the first visit the GUI asks you to create the owner account (email and password). Only this account can change settings and approve actions. Then:
 
 **Gmail:**
 1. Click the **Gmail** tab, then **Connect Gmail**
@@ -170,8 +170,11 @@ Back as your **main user**, set up the MCP config so `~/.pdh/config.json` points
 
 ```bash
 mkdir -p ~/.pdh
-echo '{"hubUrl":"http://localhost:3000","hubDir":"/Users/personaldatahub/PersonalDataHub"}' > ~/.pdh/config.json
+echo '{"hubUrl":"http://localhost:3000","hubDir":"/Users/personaldatahub/PersonalDataHub","apiKey":"pk_..."}' > ~/.pdh/config.json
+chmod 600 ~/.pdh/config.json
 ```
+
+Replace `pk_...` with the agent key from Step 2, or a new one from **Settings → Agent Keys**. Without a valid key every agent call is rejected with 401.
 
 Then connect your AI agents. You can connect multiple agents — each one that needs access to your personal data should be configured below.
 
@@ -194,7 +197,7 @@ Add PersonalDataHub as an MCP server in your agent's config.
 
 **Cursor / Windsurf** — add the same `command` and `args` in MCP settings.
 
-The MCP server reads `~/.pdh/config.json`, verifies the server is running, and registers source-specific tools (`read_emails`, `draft_email`, `search_github_issues`, etc.) for connected sources only.
+The MCP server reads `hubUrl` and `apiKey` from `~/.pdh/config.json`, verifies the server is running, and registers source-specific tools (`read_emails`, `draft_email`, `search_github_issues`, etc.) for connected sources only.
 
 You can test it standalone:
 
@@ -211,7 +214,7 @@ Install the PersonalDataHub skill from ClawHub:
 clawhub install personaldatahub
 ```
 
-The skill auto-discovers the running server via `~/.pdh/config.json` and registers `pull` and `propose` tools. See [`packages/personaldatahub/SKILL.md`](../packages/personaldatahub/SKILL.md) for tool details.
+The skill reads the server address and agent key from `~/.pdh/config.json` and registers `pull` and `propose` tools. See [`packages/personaldatahub/SKILL.md`](../packages/personaldatahub/SKILL.md) for tool details.
 
 ## Step 6: Verify
 
@@ -245,12 +248,20 @@ To approve staged actions or change filters, switch to the `personaldatahub` use
 
 ## Direct API Usage
 
-Any localhost process can call the agent API (no auth required). The GUI admin endpoints require the owner's session cookie.
+Every route needs a credential:
+
+| Prefix | For | Credential |
+|---|---|---|
+| `/agent/*` | Agents: pull data, propose actions | An agent key: `Authorization: Bearer pk_...` |
+| `/web/*` | The GUI: settings, approvals, audit log | The owner's session cookie, set by signing in |
+
+`GET /health` is the only data-free route that needs neither.
 
 **Pull data:**
 
 ```bash
-curl -X POST http://localhost:3000/app/v1/pull \
+curl -X POST http://localhost:3000/agent/pull \
+  -H "Authorization: Bearer $PDH_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"source": "gmail", "purpose": "Find recent emails"}'
 ```
@@ -258,7 +269,8 @@ curl -X POST http://localhost:3000/app/v1/pull \
 **Propose an action:**
 
 ```bash
-curl -X POST http://localhost:3000/app/v1/propose \
+curl -X POST http://localhost:3000/agent/propose \
+  -H "Authorization: Bearer $PDH_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "source": "gmail",
@@ -271,7 +283,7 @@ curl -X POST http://localhost:3000/app/v1/propose \
 **Discover connected sources:**
 
 ```bash
-curl http://localhost:3000/app/v1/sources
+curl -H "Authorization: Bearer $PDH_API_KEY" http://localhost:3000/agent/sources
 ```
 
 ---

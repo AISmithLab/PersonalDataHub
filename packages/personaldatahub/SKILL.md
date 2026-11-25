@@ -109,18 +109,20 @@ Search GitHub pull requests. Data is filtered according to the owner's access co
 
 If the MCP tools above are not available, you can call the PersonalDataHub API directly via HTTP.
 
-**Config:** Read `~/.pdh/config.json` to get `hubUrl`.
+**Config:** Read `~/.pdh/config.json` to get `hubUrl` and `apiKey`. Send the key on every call as `Authorization: Bearer <apiKey>`; without it the hub answers 401.
 
 **Pull data:**
 ```bash
-curl -X POST <hubUrl>/app/v1/pull \
+curl -X POST <hubUrl>/agent/pull \
+  -H "Authorization: Bearer <apiKey>" \
   -H "Content-Type: application/json" \
   -d '{"source": "gmail", "purpose": "reason for pulling data"}'
 ```
 
 **Propose an action:**
 ```bash
-curl -X POST <hubUrl>/app/v1/propose \
+curl -X POST <hubUrl>/agent/propose \
+  -H "Authorization: Bearer <apiKey>" \
   -H "Content-Type: application/json" \
   -d '{"source": "gmail", "action_type": "draft_email", "action_data": {"to": "...", "subject": "...", "body": "..."}, "purpose": "reason for action"}'
 ```

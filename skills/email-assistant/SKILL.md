@@ -12,7 +12,7 @@ Given a natural language email request, pull relevant data from connected source
 
 ### 1. Read the PersonalDataHub config
 
-Read `~/.pdh/config.json` to get the `hubUrl`. If the file doesn't exist, tell the user to run `npx pdh init` and `npx pdh start` first.
+Read `~/.pdh/config.json` to get the `hubUrl` and `apiKey`. Send the key on every call as `Authorization: Bearer <apiKey>`. If the file doesn't exist, tell the user to run `npx pdh init` and `npx pdh start` first.
 
 ### 2. Verify the hub is running
 
@@ -45,7 +45,8 @@ Example strategy for "I've been discussing a proposal with Diego@UCSF, we mentio
 Pull data from PersonalDataHub using the REST API. Make **parallel calls** when queries are independent:
 
 ```bash
-curl -s -X POST <hubUrl>/app/v1/pull \
+curl -s -X POST <hubUrl>/agent/pull \
+  -H "Authorization: Bearer <apiKey>" \
   -H "Content-Type: application/json" \
   -d '{"source": "gmail", "query": "<query>", "limit": 20, "purpose": "<why>"}'
 ```
@@ -60,7 +61,8 @@ curl -s -X POST <hubUrl>/app/v1/pull \
 
 **Cross-source pulls:** For non-email sources, change the `source` field:
 ```bash
-curl -s -X POST <hubUrl>/app/v1/pull \
+curl -s -X POST <hubUrl>/agent/pull \
+  -H "Authorization: Bearer <apiKey>" \
   -H "Content-Type: application/json" \
   -d '{"source": "github", "query": "<query>", "limit": 10, "purpose": "<why>"}'
 ```
@@ -99,7 +101,8 @@ Show the draft to the user and ask if they'd like any changes.
 Once the user approves the draft, propose it via the staging API:
 
 ```bash
-curl -s -X POST <hubUrl>/app/v1/propose \
+curl -s -X POST <hubUrl>/agent/propose \
+  -H "Authorization: Bearer <apiKey>" \
   -H "Content-Type: application/json" \
   -d '{"source": "gmail", "action_type": "draft_email", "action_data": {"to": "<recipient>", "subject": "<subject>", "body": "<body>"}, "purpose": "<why this draft is being created>"}'
 ```

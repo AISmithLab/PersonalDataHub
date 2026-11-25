@@ -16,7 +16,8 @@ PersonalDataHub connects to your accounts via OAuth2 and lets AI agents query th
 - **Action staging** — every outbound action (drafts, replies, sends) is queued for your review and approval before execution
 - **MCP server** — agents discover tools via the Model Context Protocol (works with Claude Code, Cursor, Windsurf)
 - **Skills** — high-level workflows (e.g., email-assistant) that orchestrate multi-step tasks on top of MCP tools
-- **REST API** — pull data and propose actions via simple HTTP endpoints
+- **REST API** — pull data and propose actions via simple HTTP endpoints under `/agent/*`
+- **Agent keys** — every agent call carries a key you create and can revoke; the audit log records which key made each call
 - **Web GUI** — built-in admin dashboard for managing sources, filters, staging, and audit logs
 - **Audit log** — every data access and action is logged with purpose, timestamp, source, and initiator
 - **AES-256-GCM encryption** — OAuth tokens are encrypted at rest
