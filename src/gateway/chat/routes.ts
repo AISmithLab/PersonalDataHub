@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import OpenAI from 'openai';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -10,6 +9,7 @@ import type { MemoryRow, SkillRow } from '../../database/datastore.js';
 import { parseTriggerEvents, serializeTriggerEvents } from '../../database/datastore.js';
 import { runCode } from '../code-runner/runner.js';
 import { setContacts, labelWithContact } from './contacts-cache.js';
+import { complete, createLlmClient, describeError, readableErrors, type LlmClient, type LlmMessage, type LlmParams, type LlmResponse, type LlmTool } from './llm.js';
 import { makeAsk, savePipe, deletePipe, describePipe, PIPE_SOURCES, type AskFn, type PipeDeps } from '../pipes.js';
 
 type SmsMessage = { address: string; body: string; date: number };
@@ -28,7 +28,8 @@ const DEFAULT_MODELS: Record<string, string> = {
   ollama: 'llama3',
 };
 
-const DEFAULT_BASE_URLS: Record<string, string> = {
+// Where each provider lists its models, for the Settings dropdown.
+const MODEL_LIST_BASE_URLS: Record<string, string> = {
   anthropic: 'https://api.anthropic.com/v1',
   groq: 'https://api.groq.com/openai/v1',
   google: 'https://generativelanguage.googleapis.com/v1beta/openai/',
@@ -42,36 +43,9 @@ const MAX_TOOL_ROUNDS = 5;
 // it replays queued SMS via ?drain=true, stores them here, and the WebView picks them up.
 const pendingAutoReplies = new Map<string, { to: string; body: string; createdAt: number }>();
 
-export function getClient(deps: ServerDeps): OpenAI {
-  const ai = deps.config.ai!;
-  const provider = ai.provider ?? 'anthropic';
-  const baseURL = ai.base_url ?? DEFAULT_BASE_URLS[provider];
-  // A model that accepts the request and then never answers must not hold a chat for the
-  // SDK's default ten minutes; after this long the next model is tried.
-  const timeout = Number(process.env.PDH_AI_TIMEOUT_MS) || 60_000;
-  return new OpenAI({ apiKey: ai.api_key, ...(baseURL ? { baseURL } : {}), fetch: readableErrors, maxRetries: 0, timeout });
+export function getClient(deps: ServerDeps): LlmClient {
+  return createLlmClient(deps.config.ai!);
 }
-
-/**
- * Some providers do not send errors in OpenAI's shape. Google's compatible endpoint
- * wraps its error in an array, which the SDK cannot read, so the user sees only
- * "400 status code (no body)". Re-shape such bodies so the provider's own message
- * (model retired, quota exceeded, key not valid) reaches the user.
- */
-const readableErrors: typeof fetch = async (input, init) => {
-  const res = await fetch(input, init);
-  if (res.ok) return res;
-  const text = await res.text();
-  let message = '';
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    const first = (Array.isArray(parsed) ? parsed[0] : parsed) as { error?: { message?: unknown } | string; message?: unknown } | null;
-    const err = first?.error;
-    message = typeof err === 'string' ? err : String(err?.message ?? first?.message ?? '');
-  } catch { /* not JSON */ }
-  const body = JSON.stringify({ error: { message: message || text.slice(0, 500) || res.statusText, type: 'provider_error' } });
-  return new Response(body, { status: res.status, statusText: res.statusText, headers: { 'content-type': 'application/json', ...(res.headers.get('retry-after') ? { 'retry-after': res.headers.get('retry-after')! } : {}) } });
-};
 
 /**
  * Models to move to, in order, when the one asked for is overloaded or has been
@@ -117,7 +91,7 @@ const NOT_CHAT = /(embed|tts|audio|image|imagen|veo|whisper|transcribe|realtime|
  * come first.
  */
 export async function listProviderModels(provider: string, apiKey: string, baseUrl?: string): Promise<string[]> {
-  const base = (baseUrl ?? DEFAULT_BASE_URLS[provider] ?? 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const base = (baseUrl ?? MODEL_LIST_BASE_URLS[provider] ?? 'https://api.openai.com/v1').replace(/\/+$/, '');
   const headers: Record<string, string> = provider === 'anthropic'
     ? { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
     : { Authorization: `Bearer ${apiKey}` };
@@ -202,8 +176,8 @@ async function pageContext(deps: ServerDeps, where: ChatPage): Promise<string[]>
   return [];
 }
 
-async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]> {
-  const tools: OpenAI.ChatCompletionTool[] = [];
+async function buildTools(deps: ServerDeps): Promise<LlmTool[]> {
+  const tools: LlmTool[] = [];
 
   if (await deps.tokenManager.hasToken('gmail')) {
     tools.push({
@@ -849,79 +823,28 @@ async function executeToolInner(
   }
 }
 
-/**
- * The reply-length limit has two names. OpenAI's newer models accept only
- * `max_completion_tokens` and reject `max_tokens`; other providers' compatible
- * endpoints know `max_tokens`. Callers always pass `max_tokens`; this picks the
- * name the model wants.
- *
- * `max_completion_tokens` also counts the tokens a model spends thinking before it
- * answers, so a small limit meant for a short answer can leave no room for the
- * answer itself. It is raised to a floor.
- */
-const COMPLETION_TOKENS_FLOOR = 4096;
-const wantsCompletionTokens = new Set<string>();
-
-/**
- * Some OpenAI models refuse function tools on this endpoint unless thinking is switched
- * off ("set reasoning_effort to 'none'"). Models that said so are remembered here, and
- * get reasoning_effort 'none' on every request that carries tools.
- */
-const toolsNeedNoReasoning = new Set<string>();
-
-function withTokenLimitName(input: OpenAI.ChatCompletionCreateParamsNonStreaming): OpenAI.ChatCompletionCreateParamsNonStreaming {
-  const params = toolsNeedNoReasoning.has(input.model) && input.tools?.length
-    ? { ...input, reasoning_effort: 'none' as OpenAI.ChatCompletionCreateParamsNonStreaming['reasoning_effort'] }
-    : input;
-  const limit = params.max_tokens ?? params.max_completion_tokens;
-  if (limit == null) return params;
-  const { max_tokens: _a, max_completion_tokens: _b, ...rest } = params;
-  const openaiStyle = wantsCompletionTokens.has(params.model) || /^(gpt-|o\d|chatgpt-)/.test(params.model);
-  return openaiStyle
-    ? { ...rest, max_completion_tokens: Math.max(limit, COMPLETION_TOKENS_FLOOR) }
-    : { ...rest, max_tokens: limit };
-}
-
 export async function callChatCompletionWithRetry(
-  client: OpenAI,
-  params: OpenAI.ChatCompletionCreateParamsNonStreaming,
+  client: LlmClient,
+  params: LlmParams,
   maxAttempts = 3,
-): Promise<OpenAI.ChatCompletion> {
-  params = withTokenLimitName(params);
+): Promise<LlmResponse> {
   const tried = new Set<string>([params.model]);
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const response = await client.chat.completions.create(params);
+      const response = await complete(client, params);
       const provider = fallbackProvider(params.model);
       if (provider) workingModel.set(provider, params.model);
       return response;
     } catch (err: any) {
-      const status = err?.status || err?.statusCode;
-      const msg = String(err?.message || '');
-      // A model we did not recognise that wants the other name for the limit: learn it and resend.
-      if (status === 400 && /max_tokens/.test(msg) && /max_completion_tokens/.test(msg) && params.max_tokens != null && !wantsCompletionTokens.has(params.model)) {
-        wantsCompletionTokens.add(params.model);
-        params = withTokenLimitName(params);
-        attempt--;
-        continue;
-      }
-      // A model that will not take tools while thinking: switch thinking off and resend.
-      if (status === 400 && /reasoning_effort/.test(msg) && /tools/i.test(msg) && params.tools?.length && !toolsNeedNoReasoning.has(params.model)) {
-        toolsNeedNoReasoning.add(params.model);
-        params = withTokenLimitName(params);
-        attempt--;
-        continue;
-      }
+      const { status, message: msg, timedOut } = describeError(err);
       // Overloaded (503) or retired (404) model: another model of the same provider will do.
-      const timedOut = !status && (err?.name === 'APIConnectionTimeoutError' || /timed out|timeout/i.test(msg));
       const unavailable = status === 503 || timedOut || (status === 404 && /model/i.test(msg));
       const provider = unavailable ? fallbackProvider(params.model) : null;
       const next = provider ? MODEL_FALLBACKS[provider].find((m) => !tried.has(m)) : undefined;
       if (next) {
         console.warn(`[chat] ${params.model} is unavailable (${timedOut ? 'no answer in time' : status}); using ${next} instead.`);
         tried.add(next);
-        const { reasoning_effort: _r, ...carried } = params;
-        params = withTokenLimitName({ ...carried, model: next });
+        params = { ...params, model: next };
         attempt--; // switching models is not a retry
         continue;
       }
@@ -962,7 +885,7 @@ async function runAgentLoop(
   const memories = await deps.store.listMemories();
   const system = [buildSystemPrompt(deps, sms, memories), ...(await pageContext(deps, where))].join('\n');
 
-  const chatMessages: OpenAI.ChatCompletionMessageParam[] = [
+  const chatMessages: LlmMessage[] = [
     { role: 'system', content: system },
     ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
   ];
@@ -984,7 +907,7 @@ async function runAgentLoop(
 
     if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls?.length) {
       chatMessages.push(choice.message);
-      const results: OpenAI.ChatCompletionToolMessageParam[] = [];
+      const results: LlmMessage[] = [];
       for (const tc of choice.message.tool_calls) {
         if (tc.type !== 'function') continue;
         toolsUsed.push(tc.function.name);
@@ -1017,8 +940,8 @@ async function runAgentLoop(
   };
 }
 
-async function buildAutoReplyTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]> {
-  const tools: OpenAI.ChatCompletionTool[] = [];
+async function buildAutoReplyTools(deps: ServerDeps): Promise<LlmTool[]> {
+  const tools: LlmTool[] = [];
 
   if (await deps.tokenManager.hasToken('gmail')) {
     tools.push({
@@ -1219,7 +1142,7 @@ async function executeAutoReplyToolInner(
 }
 
 async function evaluateLabels(
-  client: OpenAI,
+  client: LlmClient,
   model: string,
   from: string,
   smsBody: string,
@@ -1237,15 +1160,17 @@ async function evaluateLabels(
   try {
     const response = await callChatCompletionWithRetry(client, {
       model,
-      messages: [{ role: 'system', content: prompt }],
-      response_format: { type: 'json_object' }
+      // A user message: providers other than OpenAI refuse a request that has only a system prompt.
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 512,
     });
     const content = response.choices[0]?.message.content?.trim();
     if (!content) return [];
     
     let tags: string[] = [];
     try {
-      const parsed = JSON.parse(content);
+      // The model may wrap the object in a code fence or a sentence; take the object itself.
+      const parsed = JSON.parse(content.slice(content.indexOf('{'), content.lastIndexOf('}') + 1));
       if (parsed.tags && Array.isArray(parsed.tags)) tags = parsed.tags;
     } catch (e) {
       tags = labelSkills.map(s => s.label_tag).filter(tag => tag && content.includes(tag));
@@ -1344,7 +1269,7 @@ async function runAutoReplyLoop(
   }
 
   const labelTagsStr = appliedLabels.length > 0 ? ` [Labels: ${appliedLabels.join(', ')}]` : '';
-  const chatMessages: OpenAI.ChatCompletionMessageParam[] = [
+  const chatMessages: LlmMessage[] = [
     { role: 'system', content: systemLines.join('\n') },
     { role: 'user', content: `Incoming SMS from ${from}: "${smsBody}"${labelTagsStr}` },
   ];
@@ -1366,7 +1291,7 @@ async function runAutoReplyLoop(
 
     if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls?.length) {
       chatMessages.push(choice.message);
-      const results: OpenAI.ChatCompletionToolMessageParam[] = [];
+      const results: LlmMessage[] = [];
       for (const tc of choice.message.tool_calls) {
         if (tc.type !== 'function') continue;
         let input: Record<string, unknown> = {};
