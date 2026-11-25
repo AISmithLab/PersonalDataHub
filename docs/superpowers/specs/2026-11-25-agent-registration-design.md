@@ -142,15 +142,18 @@ Empty state: "No agents yet. Add one to let an agent use this hub."
 
 ### CLI
 
-- `pdh init` no longer creates a key or writes `apiKey`.
-- `pdh key` is replaced by `pdh join-link [--pull gmail,github] [--propose gmail]`, which writes a join code into the hub's database and prints the link. It is for hubs run under the separate `personaldatahub` user (`sudo -u personaldatahub npx pdh join-link`) or without a browser at hand. Default: read and propose for all sources. Like every `pdh` command it needs file access to the hub's directory.
-- `pdh mcp` is removed.
+Haojian: keep `pdh`; "i will run pdh myself manually whenever needed." Agents do not start the hub.
+
+- Kept as they are: `pdh init`, `start`, `stop`, `status`, `install-service`, `uninstall-service`, `reset`.
+- Removed: `pdh mcp`, and `pdh key` (added yesterday on this branch). There is no `pdh join-link`; join links come only from Settings → Agents.
+- `pdh init` no longer creates a key or prints one.
+- `~/.pdh/config.json` stays, because `start`, `stop`, `reset` and `install-service` read `hubDir` from it so they work from any directory. It holds only `hubUrl` and `hubDir` again: no `apiKey`, and no agent reads it. (Correction to what I told Haojian: it cannot be deleted while `pdh` stays.)
 
 ### Removing MCP
 
 Delete `src/ai/mcp/`, the `mcp` command, the `@modelcontextprotocol/sdk` dependency, and the MCP sections of `README.md` and `systemdesigns/`. Cursor and Windsurf users lose their integration; any agent that can run a shell command can use `query-hub` instead. `systemdesigns/architecture-design/skills-vs-mcp.md` is a historical note and stays.
 
-`packages/personaldatahub` (the OpenClaw plugin) is not MCP and stays. Its `apiKey` setting now takes an agent token; its README says how to get one with the raw join call. (My call.)
+`packages/personaldatahub` (the OpenClaw plugin) is not MCP and stays. It stops reading `~/.pdh/config.json`: it takes the hub address and token from its own settings, or from `query-hub`'s token file (`QUERY_HUB_CONFIG`, else `~/.pdh/agent.json`). (My call.)
 
 `skills/email-assistant`, `skills/calendar-assistant` and `packages/personaldatahub/SKILL.md` switch from curl to `query-hub`, with a first step: if `query-hub me` fails, ask the owner for a join link from Settings → Agents and run `query-hub join <link> --name <name>`.
 
