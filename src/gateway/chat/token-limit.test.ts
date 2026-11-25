@@ -49,4 +49,22 @@ describe('reply-length limit name', () => {
     await callChatCompletionWithRetry(client, { model: 'some-new-model', messages, max_tokens: 512 });
     expect(sent).toHaveLength(3);
   });
+
+  it('switches thinking off when a model refuses tools with it, and remembers', async () => {
+    const tools = [{ type: 'function' as const, function: { name: 't', parameters: { type: 'object', properties: {} } } }];
+    const { client, sent } = fakeClient((p) => {
+      if (p.tools && p.reasoning_effort !== 'none') {
+        throw Object.assign(new Error("400 Function tools with reasoning_effort are not supported for gpt-6.1-sol in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'."), { status: 400 });
+      }
+      return ok;
+    });
+    await callChatCompletionWithRetry(client, { model: 'gpt-6.1-sol', messages, tools, max_tokens: 4096 });
+    expect(sent).toHaveLength(2);
+    expect(sent[1].reasoning_effort).toBe('none');
+    await callChatCompletionWithRetry(client, { model: 'gpt-6.1-sol', messages, tools, max_tokens: 4096 });
+    expect(sent).toHaveLength(3);
+    // Without tools the model keeps thinking.
+    await callChatCompletionWithRetry(client, { model: 'gpt-6.1-sol', messages, max_tokens: 4096 });
+    expect(sent[3].reasoning_effort).toBeUndefined();
+  });
 });

@@ -862,7 +862,17 @@ async function executeToolInner(
 const COMPLETION_TOKENS_FLOOR = 4096;
 const wantsCompletionTokens = new Set<string>();
 
-function withTokenLimitName(params: OpenAI.ChatCompletionCreateParamsNonStreaming): OpenAI.ChatCompletionCreateParamsNonStreaming {
+/**
+ * Some OpenAI models refuse function tools on this endpoint unless thinking is switched
+ * off ("set reasoning_effort to 'none'"). Models that said so are remembered here, and
+ * get reasoning_effort 'none' on every request that carries tools.
+ */
+const toolsNeedNoReasoning = new Set<string>();
+
+function withTokenLimitName(input: OpenAI.ChatCompletionCreateParamsNonStreaming): OpenAI.ChatCompletionCreateParamsNonStreaming {
+  const params = toolsNeedNoReasoning.has(input.model) && input.tools?.length
+    ? { ...input, reasoning_effort: 'none' as OpenAI.ChatCompletionCreateParamsNonStreaming['reasoning_effort'] }
+    : input;
   const limit = params.max_tokens ?? params.max_completion_tokens;
   if (limit == null) return params;
   const { max_tokens: _a, max_completion_tokens: _b, ...rest } = params;
@@ -895,6 +905,13 @@ export async function callChatCompletionWithRetry(
         attempt--;
         continue;
       }
+      // A model that will not take tools while thinking: switch thinking off and resend.
+      if (status === 400 && /reasoning_effort/.test(msg) && /tools/i.test(msg) && params.tools?.length && !toolsNeedNoReasoning.has(params.model)) {
+        toolsNeedNoReasoning.add(params.model);
+        params = withTokenLimitName(params);
+        attempt--;
+        continue;
+      }
       // Overloaded (503) or retired (404) model: another model of the same provider will do.
       const timedOut = !status && (err?.name === 'APIConnectionTimeoutError' || /timed out|timeout/i.test(msg));
       const unavailable = status === 503 || timedOut || (status === 404 && /model/i.test(msg));
@@ -903,7 +920,8 @@ export async function callChatCompletionWithRetry(
       if (next) {
         console.warn(`[chat] ${params.model} is unavailable (${timedOut ? 'no answer in time' : status}); using ${next} instead.`);
         tried.add(next);
-        params = withTokenLimitName({ ...params, model: next });
+        const { reasoning_effort: _r, ...carried } = params;
+        params = withTokenLimitName({ ...carried, model: next });
         attempt--; // switching models is not a retry
         continue;
       }
