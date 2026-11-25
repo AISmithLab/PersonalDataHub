@@ -157,6 +157,22 @@ Delete `src/ai/mcp/`, the `mcp` command, the `@modelcontextprotocol/sdk` depende
 
 `skills/email-assistant`, `skills/calendar-assistant` and `packages/personaldatahub/SKILL.md` switch from curl to `query-hub`, with a first step: if `query-hub me` fails, ask the owner for a join link from Settings → Agents and run `query-hub join <link> --name <name>`.
 
+### Built, and changed after review (2026-11-25)
+
+Part 1 is implemented on branch `pipes`. An independent review led to these changes:
+
+- `query-hub join` reserves its token file before it spends the link, so a file that cannot be written no longer loses the token. It refuses to follow a symlink at that path.
+- `query-hub` sends a join code only to this machine over http, or to any host over https, and scrubs the token from anything it prints.
+- `/agent/pull` and `/agent/propose` reject a `source` that is not a plain string, and a body that is not a JSON object, with 400.
+- DynamoDB: agent updates are conditional on the agent still existing (an update racing a revoke could otherwise revive the token), and names are reserved with their own item.
+
+Known and not addressed:
+
+- **First-run window on desktop.** Before the owner creates the account, any local program can call signup and become the owner, and could then mint join links. This predates registration but undermines it during that window. Closing it needs a setup code from `pdh init` that signup must present; Haojian to decide.
+- DynamoDB looks agents up by id with a table scan on every agent call. Fine at a handful of agents.
+- The sql.js and DynamoDB implementations of the new store methods have no automated tests; only SQLite does.
+- The legacy page at `/` has no Agents screen.
+
 ## Part 2: smithagent
 
 In `Lab-AI-Infra/smithagent`. Other sessions commit to that repository; pull first and work on a branch.

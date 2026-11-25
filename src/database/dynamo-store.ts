@@ -14,6 +14,7 @@
  *   GHREPO#{name}   / GHREPO         — GitHub repos
  *   STATE#{state}   / STATE          — OAuth CSRF state (TTL)
  *   AGENT#{token hash} / AGENT       — registered agents (token hash only)
+ *   AGENTNAME#{name} / AGENTNAME     — reserves an agent name (uniqueness)
  *   JOINCODE#{code} / JOINCODE       — one-time agent join codes
  */
 
@@ -590,9 +591,19 @@ export class DynamoDataStore implements DataStore {
   }
 
   async insertAgent(agent: { id: string; name: string; token_hash: string; permissions: string }): Promise<void> {
-    // No unique index on name in a single-table design: check, then write.
-    if ((await this.listAgents()).some((a) => a.name === agent.name)) {
-      throw new Error(`UNIQUE constraint failed: agents.name (${agent.name})`);
+    // No unique index on name in a single-table design, so a name is reserved with
+    // its own item, written only if absent. Two joins cannot both win it.
+    try {
+      await this.docClient.send(new PutCommand({
+        TableName: this.tableName,
+        Item: { PK: `AGENTNAME#${agent.name}`, SK: 'AGENTNAME', id: agent.id },
+        ConditionExpression: 'attribute_not_exists(PK)',
+      }));
+    } catch (err) {
+      if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+        throw new Error(`UNIQUE constraint failed: agents.name (${agent.name})`);
+      }
+      throw err;
     }
     await this.docClient.send(new PutCommand({
       TableName: this.tableName,
@@ -621,33 +632,41 @@ export class DynamoDataStore implements DataStore {
     return row ? { PK: `AGENT#${row.token_hash}`, SK: 'AGENT' } : null;
   }
 
+  // An UpdateCommand creates the item if it is missing. Every update of an agent is
+  // therefore conditional on the item still existing: otherwise an update that
+  // races with a revoke would bring the revoked agent's token back to life.
+  private async updateExistingAgent(key: { PK: string; SK: string }, update: Omit<ConstructorParameters<typeof UpdateCommand>[0], 'TableName' | 'Key' | 'ConditionExpression'>): Promise<void> {
+    try {
+      await this.docClient.send(new UpdateCommand({ TableName: this.tableName, Key: key, ConditionExpression: 'attribute_exists(PK)', ...update }));
+    } catch (err) {
+      if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
+    }
+  }
+
   async touchAgent(id: string): Promise<void> {
     const key = await this.agentKeyById(id);
     if (!key) return;
-    await this.docClient.send(new UpdateCommand({
-      TableName: this.tableName,
-      Key: key,
+    await this.updateExistingAgent(key, {
       UpdateExpression: 'SET last_used_at = :t',
       ExpressionAttributeValues: { ':t': new Date().toISOString() },
-    }));
+    });
   }
 
   async updateAgentPermissions(id: string, permissions: string): Promise<void> {
     const key = await this.agentKeyById(id);
     if (!key) return;
-    await this.docClient.send(new UpdateCommand({
-      TableName: this.tableName,
-      Key: key,
+    await this.updateExistingAgent(key, {
       UpdateExpression: 'SET #p = :p',
       ExpressionAttributeNames: { '#p': 'permissions' },
       ExpressionAttributeValues: { ':p': permissions },
-    }));
+    });
   }
 
   async deleteAgent(id: string): Promise<void> {
-    const key = await this.agentKeyById(id);
-    if (!key) return;
-    await this.docClient.send(new DeleteCommand({ TableName: this.tableName, Key: key }));
+    const row = (await this.listAgents()).find((a) => a.id === id);
+    if (!row) return;
+    await this.docClient.send(new DeleteCommand({ TableName: this.tableName, Key: { PK: `AGENT#${row.token_hash}`, SK: 'AGENT' } }));
+    await this.docClient.send(new DeleteCommand({ TableName: this.tableName, Key: { PK: `AGENTNAME#${row.name}`, SK: 'AGENTNAME' } }));
   }
 
   // --- Join codes ---
@@ -705,7 +724,10 @@ export class DynamoDataStore implements DataStore {
       TableName: this.tableName,
       Key: { PK: `JOINCODE#${code}`, SK: 'JOINCODE' },
       UpdateExpression: 'REMOVE used_at',
-    }));
+      ConditionExpression: 'attribute_exists(PK)',
+    })).catch((err) => {
+      if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
+    });
   }
 
   // --- AI Memories (not implemented for DynamoDB — Android uses SQLite) ---

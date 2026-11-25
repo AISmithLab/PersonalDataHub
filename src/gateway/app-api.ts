@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { randomUUID } from 'node:crypto';
 import type { DataStore } from '../database/datastore.js';
 import type { ConnectorRegistry } from './connectors/types.js';
@@ -26,6 +26,13 @@ export function createAppApi(deps: AppApiDeps): Hono<AccessEnv> {
     error: { code: 'FORBIDDEN', permission, message: `This agent does not have the "${permission}" permission. The owner can grant it in Settings → Agents.` },
   });
 
+  // A JSON object body, or null. Anything else (invalid JSON, null, an array) is a bad request, not a crash.
+  const readBody = async (c: Context<AccessEnv>): Promise<Record<string, unknown> | null> => {
+    const parsed = await c.req.json().catch(() => null);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  };
+  const badBody = { ok: false, error: { code: 'BAD_REQUEST', message: 'The request body must be a JSON object.' } };
+
   // Who am I, and what may I do.
   app.get('/me', (c) => {
     const permissions = c.get('permissions');
@@ -49,16 +56,20 @@ export function createAppApi(deps: AppApiDeps): Hono<AccessEnv> {
   // POST /pull
   app.post('/pull', async (c) => {
     console.log('[app-api] /pull handler entered');
-    const body = await c.req.json();
+    const body = await readBody(c);
+    if (!body) return c.json(badBody, 400);
     console.log('[app-api] /pull body:', JSON.stringify(body));
-    const { source, purpose } = body;
+    const { source, purpose } = body as { source?: unknown; purpose?: unknown };
 
     if (!purpose) {
       return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required field: purpose' } }, 400);
     }
 
-    if (!source) {
-      return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required field: source' } }, 400);
+    if (typeof source !== 'string' || !source) {
+      return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required field: source (a string)' } }, 400);
+    }
+    if (typeof purpose !== 'string') {
+      return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'purpose must be a string' } }, 400);
     }
 
     if (!allows(c, `pull:${source}`)) return c.json(forbidden(`pull:${source}`), 403);
@@ -120,16 +131,17 @@ export function createAppApi(deps: AppApiDeps): Hono<AccessEnv> {
 
   // POST /propose
   app.post('/propose', async (c) => {
-    const body = await c.req.json();
-    const { source, action_type, action_data, params, purpose } = body;
+    const body = await readBody(c);
+    if (!body) return c.json(badBody, 400);
+    const { source, action_type, action_data, params, purpose } = body as { source?: unknown; action_type?: unknown; action_data?: unknown; params?: unknown; purpose?: unknown };
     const actionPayload = action_data ?? params;
 
     if (!purpose) {
       return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required field: purpose' } }, 400);
     }
 
-    if (!source || !action_type) {
-      return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required fields: source, action_type' } }, 400);
+    if (typeof source !== 'string' || !source || typeof action_type !== 'string' || !action_type || typeof purpose !== 'string') {
+      return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required fields: source, action_type, purpose (all strings)' } }, 400);
     }
 
     if (!allows(c, `propose:${source}`)) return c.json(forbidden(`propose:${source}`), 403);

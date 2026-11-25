@@ -160,10 +160,12 @@ export function createJoinRoutes(deps: AgentDeps): Hono {
     const { token, hash } = newAgentToken();
     try {
       await deps.store.insertAgent({ id, name, token_hash: hash, permissions: row.permissions });
-    } catch {
-      // Another agent took the name between the check and the insert. Give the link back.
+    } catch (err) {
+      // Whatever went wrong, the agent was not registered: give the link back.
       await deps.store.releaseJoinCode(code);
-      return c.json(taken, 409);
+      // Another agent took the name between the check and the insert.
+      if (/unique/i.test(err instanceof Error ? err.message : '')) return c.json(taken, 409);
+      throw err;
     }
     const permissions = parsePermissions(row.permissions);
     await auditLog.insert('agent_joined', null, { id, name, permissions });

@@ -183,6 +183,17 @@ describe('agent registration', () => {
       expect((await joinWith(loser.code, 'twin-2')).status).toBe(201);
     });
 
+    it('a storage failure during join gives the link back and is not reported as a taken name', async () => {
+      const { code } = await makeLink(['pull:gmail']);
+      const original = store.insertAgent.bind(store);
+      store.insertAgent = () => { throw new Error('disk I/O error'); };
+      const res = await joinWith(code, 'a1');
+      store.insertAgent = original;
+      expect(res.status).toBe(500);
+      expect(store.getJoinCode(code)!.used_at).toBeNull();
+      expect((await joinWith(code, 'a1')).status).toBe(201);
+    });
+
     it('the same link redeemed twice at once registers one agent', async () => {
       const { code } = await makeLink(['pull:gmail']);
       const results = await Promise.all([joinWith(code, 'p1'), joinWith(code, 'p2')]);
@@ -238,6 +249,25 @@ describe('agent registration', () => {
       const bad = await app.request(`/web/agents/${id}`, { method: 'PUT', headers: owner, body: JSON.stringify({ permissions: ['root'] }) });
       expect(bad.status).toBe(400);
       expect((await app.request('/web/agents/agent_nope', { method: 'PUT', headers: owner, body: JSON.stringify({ permissions: [] }) })).status).toBe(404);
+    });
+
+    it('a source that is not a plain string is a bad request, never a way around the check', async () => {
+      const { token } = await register('gm', ['pull:gmail', 'propose:gmail']);
+      const before = store.getAllStagingActions().length;
+      for (const source of [['gmail'], [['gmail']], { name: 'gmail' }, 42, null, '']) {
+        const p = await app.request('/agent/pull', { method: 'POST', headers: as(token), body: JSON.stringify({ source, purpose: 'p' }) });
+        expect(p.status, `pull ${JSON.stringify(source)}`).toBe(400);
+        const q = await app.request('/agent/propose', { method: 'POST', headers: as(token), body: JSON.stringify({ source, action_type: 'draft_email', action_data: {}, purpose: 'p' }) });
+        expect(q.status, `propose ${JSON.stringify(source)}`).toBe(400);
+      }
+      for (const body of ['null', '[]', '{not json', '"gmail"']) {
+        expect((await app.request('/agent/pull', { method: 'POST', headers: as(token), body })).status, body).toBe(400);
+        expect((await app.request('/agent/propose', { method: 'POST', headers: as(token), body })).status, body).toBe(400);
+      }
+      for (const source of ['GMAIL', ' gmail', '__proto__', 'constructor', 'github']) {
+        expect((await pull(token, source)).status, source).toBe(403);
+      }
+      expect(store.getAllStagingActions()).toHaveLength(before);
     });
 
     it('the owner passes every check', async () => {

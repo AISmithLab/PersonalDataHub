@@ -9,7 +9,7 @@
 // This file has no dependencies and is the source copy. smithagent carries a copy
 // of it (Lab-AI-Infra/smithagent/bin/query-hub); change it here and copy it there.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, chmodSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, lstatSync, mkdirSync, unlinkSync, openSync, closeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -32,6 +32,10 @@ The token file is $QUERY_HUB_CONFIG, or ~/.pdh/agent.json. Output is JSON on std
 
 class Fail extends Error {}
 
+// The agent's token, once known, so it can be scrubbed from anything we print.
+let secret = null;
+const scrub = (text) => (secret ? String(text).split(secret).join('<token>') : String(text));
+
 function tokenFile() {
   return process.env.QUERY_HUB_CONFIG || join(homedir(), '.pdh', 'agent.json');
 }
@@ -47,7 +51,10 @@ function loadAgent() {
   } catch {
     throw new Fail(`${file} is not valid JSON. Delete it and join again.`);
   }
-  if (!agent.hub || !agent.token) throw new Fail(`${file} has no hub or token. Delete it and join again.`);
+  if (!agent || typeof agent.hub !== 'string' || typeof agent.token !== 'string' || !agent.hub || !agent.token) {
+    throw new Fail(`${file} has no hub or token. Delete it and join again.`);
+  }
+  secret = agent.token;
   return agent;
 }
 
@@ -61,7 +68,7 @@ function parseArgs(argv, known) {
       const name = arg.slice(2);
       if (!known.includes(name)) throw new Fail(`Unknown option --${name}.`);
       const value = argv[++i];
-      if (value === undefined) throw new Fail(`--${name} needs a value.`);
+      if (value === undefined || value === '' || value.startsWith('--')) throw new Fail(`--${name} needs a value.`);
       flags[name] = value;
     } else {
       positional.push(arg);
@@ -112,8 +119,23 @@ async function call(path, options = {}) {
   return json;
 }
 
+// A join link is <hub>/agent/join/<code>. The code is a credential, so it only
+// goes to this machine over http, or to any host over https.
+function parseJoinLink(link) {
+  const bad = new Fail('That is not a hub join link. It should look like http://127.0.0.1:3000/agent/join/<code>.');
+  let url;
+  try { url = new URL(link); } catch { throw bad; }
+  const match = /^\/agent\/join\/([0-9a-f]+)\/?$/.exec(url.pathname);
+  if (!match || url.username || url.password || url.search || url.hash) throw bad;
+  const local = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+  if (url.protocol === 'http:' ? !local : url.protocol !== 'https:') {
+    throw new Fail(`Refusing to send the join code to ${url.host} over plain http. A hub on another machine must use https.`);
+  }
+  return { hub: url.origin, code: match[1] };
+}
+
 function print(value) {
-  process.stdout.write(JSON.stringify(value, null, 2) + '\n');
+  process.stdout.write(scrub(JSON.stringify(value, null, 2)) + '\n');
 }
 
 const commands = {
@@ -121,24 +143,41 @@ const commands = {
     const { positional, flags } = parseArgs(argv, ['name']);
     const link = positional[0];
     if (!link || !flags.name) throw new Fail('Usage: query-hub join <join-link> --name <agent-name>');
-    const match = /^(https?:\/\/[^/]+)\/agent\/join\/([0-9a-f]+)\/?$/.exec(link);
-    if (!match) throw new Fail('That is not a hub join link. It should look like http://127.0.0.1:3000/agent/join/<code>.');
-    const [, hub, code] = match;
+    const { hub, code } = parseJoinLink(link);
 
     const file = tokenFile();
-    if (existsSync(file)) {
+    // lstat, not exists: a dangling symlink at this path must count as "something is here".
+    let occupied = true;
+    try { lstatSync(file); } catch { occupied = false; }
+    if (occupied) {
       let current = 'another agent';
       try { current = `"${JSON.parse(readFileSync(file, 'utf8')).agent_name}"`; } catch { /* unreadable */ }
       throw new Fail(`Already registered as ${current} (${file}). Run "query-hub leave" first, or set QUERY_HUB_CONFIG to another file for a second agent.`);
     }
 
-    const { status, json } = await request(hub, '/agent/join', { method: 'POST', body: { code, name: flags.name } });
-    if (status !== 201 || !json?.token) throw new Fail(describe(json, status));
+    // Reserve the token file before spending the link. The hub hands the token over
+    // exactly once; if we could not save it, the agent would be registered and lost.
+    // 'wx' creates the file only if nothing is there, and never follows a symlink.
+    try {
+      mkdirSync(dirname(file), { recursive: true });
+      closeSync(openSync(file, 'wx', 0o600));
+    } catch (err) {
+      throw new Fail(`Cannot write the token file ${file} (${err.code || err.message}). The join link was not used.`);
+    }
 
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify({ hub: json.hub || hub, token: json.token, agent_name: json.agent_name, agent_id: json.agent_id }, null, 2) + '\n', { mode: 0o600 });
-    chmodSync(file, 0o600);
-    print({ ok: true, joined: json.agent_name, hub: json.hub || hub, permissions: json.permissions, token_file: file });
+    let joined;
+    try {
+      const { status, json } = await request(hub, '/agent/join', { method: 'POST', body: { code, name: flags.name } });
+      if (status !== 201 || !json || typeof json.token !== 'string') throw new Fail(describe(json, status));
+      joined = json;
+      secret = json.token;
+      writeFileSync(file, JSON.stringify({ hub, token: json.token, agent_name: json.agent_name, agent_id: json.agent_id }, null, 2) + '\n', { mode: 0o600 });
+    } catch (err) {
+      try { unlinkSync(file); } catch { /* nothing to clean up */ }
+      throw err;
+    }
+    const json = joined;
+    print({ ok: true, joined: json.agent_name, hub, permissions: json.permissions, token_file: file });
   },
 
   async me() {
@@ -154,8 +193,8 @@ const commands = {
     const source = positional[0];
     if (!source || !flags.purpose) throw new Fail('Usage: query-hub pull <source> --purpose <why> [--query <search>] [--limit <n>]');
     const body = { source, purpose: flags.purpose };
-    if (flags.query) body.query = flags.query;
-    if (flags.limit) {
+    if (flags.query !== undefined) body.query = flags.query;
+    if (flags.limit !== undefined) {
       const limit = Number(flags.limit);
       if (!Number.isInteger(limit) || limit < 1) throw new Fail('--limit must be a positive whole number.');
       body.limit = limit;
@@ -168,7 +207,7 @@ const commands = {
     const [source, actionType] = positional;
     if (!source || !actionType || !flags.purpose) throw new Fail("Usage: query-hub propose <source> <action-type> --purpose <why> --data '<json>'");
     let data = {};
-    if (flags.data) {
+    if (flags.data !== undefined) {
       try {
         data = JSON.parse(flags.data);
       } catch {
@@ -205,12 +244,12 @@ async function main() {
     process.stdout.write(`query-hub ${VERSION}\n`);
     return;
   }
-  const run = commands[command];
+  const run = Object.hasOwn(commands, command) ? commands[command] : null;
   if (!run) throw new Fail(`Unknown command "${command}".\n\n${USAGE}`);
   await run(rest);
 }
 
 main().catch((err) => {
-  process.stderr.write(`query-hub: ${err instanceof Fail ? err.message : (err && err.stack) || err}\n`);
+  process.stderr.write(`query-hub: ${scrub(err instanceof Fail ? err.message : (err && err.stack) || err)}\n`);
   process.exit(1);
 });

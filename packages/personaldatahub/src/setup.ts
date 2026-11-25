@@ -25,8 +25,7 @@ export interface HubConfig {
  * The token file written by `query-hub join` when this agent registered with a
  * hub: { hub, token, agent_name, agent_id }. Same location query-hub uses.
  */
-export const CONFIG_PATH = process.env.QUERY_HUB_CONFIG
-  ?? join(process.env.PDH_CONFIG_DIR ?? join(homedir(), '.pdh'), 'agent.json');
+export const CONFIG_PATH = process.env.QUERY_HUB_CONFIG || join(homedir(), '.pdh', 'agent.json');
 
 /**
  * Read the agent's registration. Returns null if this agent has not joined a hub
