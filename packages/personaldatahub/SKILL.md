@@ -15,143 +15,75 @@ always: false
 
 Access personal data from Gmail, GitHub, and other sources through the PersonalDataHub access control gateway. The data owner controls what the agent can see, which fields are visible, what gets redacted, and which actions are allowed.
 
-## MCP Setup (Recommended)
+## Setup
 
-PersonalDataHub provides an MCP server for native tool discovery. Add to your Claude Code config (`.claude/settings.json`):
+1. Run `query-hub me`. It prints this agent's name and permissions.
+2. If it fails because the agent is not registered, ask the owner for a join link from **Settings → Agents** in the PersonalDataHub GUI, then run:
 
-```json
-{
-  "mcpServers": {
-    "personaldatahub": {
-      "command": "npx",
-      "args": ["pdh", "mcp"]
-    }
-  }
-}
-```
-
-This registers source-specific tools dynamically — only sources with connected OAuth tokens get tools.
-
-## Tools
-
-### read_emails
-*(Gmail — requires connected Gmail OAuth)*
-
-Pull emails from Gmail. Data is filtered and redacted according to the owner's access control policy.
-
-**Parameters:**
-- `purpose` (required) — Why this data is needed (logged for audit)
-- `query` (optional) — Gmail search query (e.g., `"is:unread from:alice newer_than:7d"`)
-- `limit` (optional) — Maximum number of results
-
-**Example:**
-```
-Pull my recent unread emails about the Q4 report.
-```
-
-### draft_email
-*(Gmail — requires connected Gmail OAuth)*
-
-Draft an email via Gmail. The draft is staged for the data owner to review — it does NOT send until approved.
-
-**Parameters:**
-- `to` (required) — Recipient email address
-- `subject` (required) — Email subject
-- `body` (required) — Email body
-- `purpose` (required) — Why this action is being proposed (logged for audit)
-- `in_reply_to` (optional) — Message ID for threading
-
-### send_email
-*(Gmail — requires connected Gmail OAuth)*
-
-Send an email via Gmail. The action is staged for the data owner to review — it does NOT execute until approved.
-
-**Parameters:**
-- `to` (required) — Recipient email address
-- `subject` (required) — Email subject
-- `body` (required) — Email body
-- `purpose` (required) — Why this action is being proposed (logged for audit)
-- `in_reply_to` (optional) — Message ID for threading
-
-### reply_to_email
-*(Gmail — requires connected Gmail OAuth)*
-
-Reply to an email via Gmail. The reply is staged for the data owner to review — it does NOT send until approved.
-
-**Parameters:**
-- `to` (required) — Recipient email address
-- `subject` (required) — Email subject
-- `body` (required) — Email body
-- `in_reply_to` (required) — Message ID of the email being replied to
-- `purpose` (required) — Why this action is being proposed (logged for audit)
-
-### search_github_issues
-*(GitHub — requires connected GitHub OAuth)*
-
-Search GitHub issues. Data is filtered according to the owner's access control policy.
-
-**Parameters:**
-- `purpose` (required) — Why this data is needed (logged for audit)
-- `query` (optional) — Search query for issues
-- `limit` (optional) — Maximum number of results
-
-### search_github_prs
-*(GitHub — requires connected GitHub OAuth)*
-
-Search GitHub pull requests. Data is filtered according to the owner's access control policy.
-
-**Parameters:**
-- `purpose` (required) — Why this data is needed (logged for audit)
-- `query` (optional) — Search query for pull requests
-- `limit` (optional) — Maximum number of results
-
-## Direct API Fallback
-
-If the MCP tools above are not available, you can call the PersonalDataHub API directly via HTTP.
-
-**Config:** Read `~/.pdh/config.json` to get `hubUrl` and `apiKey`. Send the key on every call as `Authorization: Bearer <apiKey>`; without it the hub answers 401.
-
-**Pull data:**
 ```bash
-curl -X POST <hubUrl>/agent/pull \
-  -H "Authorization: Bearer <apiKey>" \
-  -H "Content-Type: application/json" \
-  -d '{"source": "gmail", "purpose": "reason for pulling data"}'
+query-hub join <link> --name <name>
 ```
 
-**Propose an action:**
+A join link works once and expires after 15 minutes. The token is stored in `~/.pdh/agent.json` (or `$QUERY_HUB_CONFIG`). Do not read or print that file.
+
+The install hook builds and starts the hub. The owner then opens `http://localhost:3000` to connect Gmail/GitHub via OAuth and to create the join link.
+
+## Commands
+
+All output is JSON on stdout. Errors go to stderr with exit code 1.
+
+### query-hub sources
+
+List the sources this agent may read, and whether each is connected.
+
 ```bash
-curl -X POST <hubUrl>/agent/propose \
-  -H "Authorization: Bearer <apiKey>" \
-  -H "Content-Type: application/json" \
-  -d '{"source": "gmail", "action_type": "draft_email", "action_data": {"to": "...", "subject": "...", "body": "..."}, "purpose": "reason for action"}'
+query-hub sources
 ```
+
+### query-hub pull
+
+Pull data from a source (`gmail`, `google_calendar`, `github`, `photo`). Data is filtered and redacted according to the owner's access control policy. Needs the `pull:<source>` permission.
+
+**Options:**
+- `--purpose` (required): why this data is needed (logged for audit)
+- `--query` (optional): search query (for Gmail, e.g. `"is:unread from:alice newer_than:7d"`)
+- `--limit` (optional): maximum number of results
+
+```bash
+query-hub pull gmail --purpose "Find unread emails about the Q4 report" --query "is:unread Q4 report" --limit 20
+query-hub pull github --purpose "Find open issues about login" --query "login" --limit 10
+```
+
+### query-hub propose
+
+Propose an outbound action. The action is staged for the data owner to review. It does NOT execute until approved. Needs the `propose:<source>` permission.
+
+**Arguments and options:**
+- `<source>` and `<action-type>` (required)
+- `--purpose` (required): why this action is being proposed (logged for audit)
+- `--data` (required for most actions): the action's fields as JSON
+
+Gmail action types:
+- `draft_email`: `to`, `subject`, `body`
+- `send_email`: `to`, `subject`, `body`
+- `reply_email`: `to`, `subject`, `body`, `in_reply_to` (thread ID of the email being replied to)
+
+```bash
+query-hub propose gmail draft_email --purpose "Draft reply about the Q4 report" \
+  --data '{"to": "...", "subject": "...", "body": "..."}'
+```
+
+### query-hub leave
+
+Remove this agent from the hub and delete its token.
 
 ## Troubleshooting
 
-If calls fail, check if the PersonalDataHub server is running:
-```bash
-curl <hubUrl>/health
-```
-
-If the server is not running, find and start it:
-```bash
-# Check where PersonalDataHub is installed
-cat ~/.pdh/config.json   # look at hubDir
-# Start the server
-cd <hubDir> && node dist/index.js
-```
-
-## Setup
-
-The install hook bootstraps PersonalDataHub automatically:
-1. Installs dependencies, builds the project, initializes the database
-2. Saves hub URL and directory to `~/.pdh/config.json`
-3. Starts the server in the background
-
-After installation, open `http://localhost:3000` to connect Gmail/GitHub via OAuth.
-
-Agents read config automatically from `~/.pdh/config.json` — no manual configuration needed.
+- **"Not registered with a hub"**: follow Setup above.
+- **"it was revoked"**: the owner revoked this agent. Ask for a new join link, run `query-hub leave` to clear the old token, then join again.
+- **"Not allowed: this agent lacks the ... permission"**: ask the owner to grant it in Settings → Agents.
+- **"The hub is not running"**: ask the owner to start it with `npx pdh start`.
+- **"Source ... is not connected"**: ask the owner to connect the source via OAuth in the GUI.
 
 ## Query Syntax (Gmail)
 

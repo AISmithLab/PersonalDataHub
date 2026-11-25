@@ -2,7 +2,7 @@
 
 **An open-source, self-hosted data hub between your personal services (Gmail, GitHub, etc.) and your AI agents.**
 
-PersonalDataHub connects to your accounts via OAuth2 and lets AI agents query them through MCP or REST API — all running locally on your machine, with no data sent to third parties. You configure quick filters to control what agents can see, and review every action they propose before it's executed.
+PersonalDataHub connects to your accounts via OAuth2 and lets AI agents query them through the `query-hub` command or the REST API — all running locally on your machine, with no data sent to third parties. You configure quick filters to control what agents can see, and review every action they propose before it's executed.
 
 ![](architecture.png)
 
@@ -14,14 +14,14 @@ PersonalDataHub connects to your accounts via OAuth2 and lets AI agents query th
 - **OAuth2 integration** — connect Gmail, GitHub, and more with secure PKCE OAuth flows
 - **Quick filters** — control what agents can see: date ranges, senders, subjects, hidden fields
 - **Action staging** — every outbound action (drafts, replies, sends) is queued for your review and approval before execution
-- **MCP server** — agents discover tools via the Model Context Protocol (works with Claude Code, Cursor, Windsurf)
-- **Skills** — high-level workflows (e.g., email-assistant) that orchestrate multi-step tasks on top of MCP tools
+- **Agent registration**: you create a one-time join link in Settings → Agents and choose what the agent may read and propose, per source. You can change its permissions or revoke it at any time. No key is copied by hand.
+- **`query-hub` command**: a registered agent reads data and proposes actions with `query-hub pull` and `query-hub propose`. Its token stays in a file only the command reads.
+- **Skills**: high-level workflows (e.g., email-assistant) that orchestrate multi-step tasks on top of `query-hub`
 - **REST API** — pull data and propose actions via simple HTTP endpoints under `/agent/*`
-- **Agent keys** — every agent call carries a key you create and can revoke; the audit log records which key made each call
 - **Web GUI** — built-in admin dashboard for managing sources, filters, staging, and audit logs
-- **Audit log** — every data access and action is logged with purpose, timestamp, source, and initiator
+- **Audit log** — every data access and action is logged with purpose, timestamp, source, and the name of the agent that made the call
 - **AES-256-GCM encryption** — OAuth tokens are encrypted at rest
-- **Multiple agents** — connect Claude Code, Cursor, Windsurf, or any MCP-compatible client simultaneously
+- **Multiple agents**: register any number of agents, each with its own name, permissions, and token. Any agent that can run a shell command can use `query-hub`.
 - **Extensible** — add new data sources by implementing the `SourceConnector` interface
 
 ### Data Sources
@@ -47,7 +47,7 @@ PersonalDataHub connects to your accounts via OAuth2 and lets AI agents query th
 git clone https://github.com/AISmithLab/PersonalDataHub.git
 cd PersonalDataHub && pnpm install && pnpm build
 
-# Initialize (save the owner password it prints)
+# Initialize
 npx pdh init
 
 # Start the server
@@ -64,69 +64,61 @@ Open `http://localhost:3000` in your browser.
 
 > To use your own OAuth credentials instead of the defaults, see [OAuth Setup](systemdesigns/OAUTH-SETUP.md).
 
-### 3. Connect Claude Code
+### 3. Connect an agent
 
-Add PersonalDataHub as an MCP server in `.claude/settings.json`:
+An agent registers with the hub once, using a join link you create.
 
-```json
-{
-  "mcpServers": {
-    "personaldatahub": {
-      "command": "npx",
-      "args": ["pdh", "mcp"]
-    }
-  }
-}
+1. In the GUI, open **Settings → Agents** and click **Add agent**.
+2. Tick what the agent may do for each source (read, propose). Sources are `gmail`, `google_calendar`, `github`, and `photo`.
+3. Copy the join link. It looks like `http://127.0.0.1:3000/agent/join/<code>`, works once, and expires after 15 minutes.
+
+On the machine where the agent runs, make the `query-hub` command available and join:
+
+```bash
+# In the PersonalDataHub repo. Or skip this and run `node bin/query-hub.mjs` in place of `query-hub`.
+npm link
+
+query-hub join http://127.0.0.1:3000/agent/join/<code> --name my-agent
 ```
 
-**Cursor / Windsurf** — add PersonalDataHub as an MCP server using the same command: `npx pdh mcp`
+With smithagent: `smithagent joinhub <agent> <link>`.
+
+The name is 1-63 characters of `a-z`, `0-9`, and `-`. The hub returns the agent's token once. `query-hub` stores it in `~/.pdh/agent.json` (or the file named by `$QUERY_HUB_CONFIG`) with mode `0600` and never prints it.
+
+You can edit an agent's permissions or revoke it in **Settings → Agents**. A revoked agent gets 401 on its next call.
 
 > For **OpenClaw** setup (with OS-level user separation for stronger isolation), see the [OpenClaw Setup Guide](systemdesigns/OPENCLAW-SETUP.md).
 
 ---
 
-## Available Tools
+## Agent commands
 
-Tools are source-specific and only appear when the source is connected via OAuth:
+A registered agent uses `query-hub`. Output is JSON on stdout.
 
-### `read_emails`
-
-Pull emails filtered by the owner's quick filter policy.
-
-```json
-{
-  "source": "gmail",
-  "purpose": "Find emails about Q4 report to summarize for user"
-}
+```
+query-hub me          This agent's name and what it may do
+query-hub sources     The sources it may read, and whether each is connected
+query-hub pull <source> --purpose <why> [--query <search>] [--limit <n>]
+query-hub propose <source> <action-type> --purpose <why> --data '<json>'
+query-hub leave       Remove this agent from the hub and delete its token
 ```
 
-### `draft_email`
+Every pull and propose needs `--purpose`. The hub records it in the audit log.
 
-Create a draft email (staged for owner approval before saving).
+**Pull** returns data filtered by the owner's quick filters:
 
-```json
-{
-  "to": "bob@company.com",
-  "subject": "Re: Q4 Report",
-  "body": "Thanks Bob, the numbers look good."
-}
+```bash
+query-hub pull gmail --purpose "Find emails about Q4 report to summarize for user" --query "subject:Q4 newer_than:30d" --limit 20
 ```
 
-### `send_email`
+**Propose** stages an action. Nothing is carried out until the owner approves it in the GUI:
 
-Send an email directly (staged for owner approval before sending).
+```bash
+query-hub propose gmail draft_email --purpose "Draft reply about Q4 report" \
+  --data '{"to":"bob@company.com","subject":"Re: Q4 Report","body":"Thanks Bob, the numbers look good."}'
+```
 
-### `reply_to_email`
-
-Reply to an existing email thread (staged for owner approval).
-
-### `search_github_issues`
-
-Search issues across selected repositories.
-
-### `search_github_prs`
-
-Search pull requests across selected repositories.
+Gmail action types are `draft_email`, `send_email`, and `reply_email`. If the agent lacks a permission, the command names the missing one (for example `pull:gmail`).
 
 ---
 
@@ -148,7 +140,7 @@ Control what data agents can see using simple toggle-based filters in the GUI:
 
 ## Skills
 
-Skills are high-level workflows that orchestrate PersonalDataHub's REST API to handle multi-step tasks.
+Skills are high-level workflows that use `query-hub` to handle multi-step tasks.
 
 | Skill | Description |
 |-------|-------------|
@@ -165,7 +157,6 @@ npx pdh init [app-name]     Bootstrap a new installation
 npx pdh start               Start the server in the background
 npx pdh stop                Stop the background server
 npx pdh status              Check if the server is running
-npx pdh mcp                 Start a stdio MCP server for agent access
 npx pdh install-service     Install a systemd/launchd service for auto-start on reboot
 npx pdh uninstall-service   Remove the auto-start service
 npx pdh reset               Remove all generated files and start fresh
@@ -221,7 +212,7 @@ See the [Android Build Guide](systemdesigns/ANDROID-BUILD-GUIDE.md) for full set
 - [Development Guide](systemdesigns/DEVELOPMENT.md) — codebase structure, adding connectors, testing
 - [Security & Threat Model](systemdesigns/SECURITY.md) — detailed attack surface analysis
 - [Design Doc v2](systemdesigns/architecture-design/design-v2.md) — full architecture and design rationale
-- [Skills vs MCP](systemdesigns/architecture-design/skills-vs-mcp.md) — when to use skills vs MCP tools
+- [Skills vs MCP](systemdesigns/architecture-design/skills-vs-mcp.md): historical note. The MCP server it discusses has been removed.
 
 ## License
 

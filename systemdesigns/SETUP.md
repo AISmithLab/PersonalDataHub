@@ -53,9 +53,9 @@ npx pdh init
 | `.env` | Master encryption key for OAuth tokens |
 | `hub-config.yaml` | Server config with OAuth credentials and port |
 | `pdh.db` | SQLite database (owned by `personaldatahub`, mode `0600`) |
-| `~personaldatahub/.pdh/config.json` | Hub URL, directory, and the first agent key |
+| `~personaldatahub/.pdh/config.json` | Hub URL and directory, used by the `pdh` command itself |
 
-It prints an **agent key** (`pk_...`). Save it: agents must send it on every call, and Step 5 needs it. You can create more keys later in the GUI under **Settings → Agent Keys**.
+`npx pdh init` does not create any agent credential. Agents register later with a join link (Step 5).
 
 ## Step 3: Start the Server
 
@@ -110,7 +110,7 @@ sudo npx pdh uninstall-service
 
 ## Step 4: Connect Data Sources
 
-To connect Gmail, GitHub, and other sources, you need to open the PersonalDataHub GUI at `http://localhost:3000` and log in with the owner password from Step 2.
+To connect Gmail, GitHub, and other sources, you need to open the PersonalDataHub GUI at `http://localhost:3000` and sign in. The first visit asks you to create the owner account.
 
 Open the GUI in a browser session that the agent cannot access. This prevents the agent from reading the session cookie and calling admin endpoints. See the [Browser Session Security](./architecture-design/design-v2.md#browser-session-security) section in the design doc for a detailed explanation.
 
@@ -166,45 +166,38 @@ To use your own OAuth credentials instead of the defaults, see [OAUTH-SETUP.md](
 
 ## Step 5: Connect Your Agent (Main User)
 
-Back as your **main user**, set up the MCP config so `~/.pdh/config.json` points to the running server. Create it if it doesn't exist:
+Each agent registers with the hub once, using a join link. No key is copied by hand. You can register several agents; each gets its own name, permissions, and token.
+
+### Create a join link (in the GUI, as the owner)
+
+1. Open **Settings → Agents** and click **Add agent**.
+2. Tick what the agent may do for each source: read (`pull:<source>`) and propose (`propose:<source>`). Sources are `gmail`, `google_calendar`, `github`, and `photo`.
+3. Copy the join link. It looks like `http://127.0.0.1:3000/agent/join/<code>`. It works once and expires after 15 minutes.
+
+### Join (as your main user)
+
+The agent's client is `query-hub`, a single Node file with no dependencies at `bin/query-hub.mjs` in the repository. Your main user needs its own copy of that file (for example from a clone of the repository). Run `npm link` in the clone to get a `query-hub` command, or run `node bin/query-hub.mjs` in its place.
 
 ```bash
-mkdir -p ~/.pdh
-echo '{"hubUrl":"http://localhost:3000","hubDir":"/Users/personaldatahub/PersonalDataHub","apiKey":"pk_..."}' > ~/.pdh/config.json
-chmod 600 ~/.pdh/config.json
+query-hub join http://127.0.0.1:3000/agent/join/<code> --name my-agent
 ```
 
-Replace `pk_...` with the agent key from Step 2, or a new one from **Settings → Agent Keys**. Without a valid key every agent call is rejected with 401.
+With smithagent: `smithagent joinhub <agent> <link>`.
 
-Then connect your AI agents. You can connect multiple agents — each one that needs access to your personal data should be configured below.
+The name is 1-63 characters of `a-z`, `0-9`, and `-`. The hub returns the agent's token (`pdh_...`) once. `query-hub` stores it in `~/.pdh/agent.json` with mode `0600` and never prints it. To keep the file elsewhere, or to register a second agent under the same OS user, set `QUERY_HUB_CONFIG` to another path before joining.
 
-### Claude Code, Cursor, Windsurf (via MCP)
-
-Add PersonalDataHub as an MCP server in your agent's config.
-
-**Claude Code** — add to `.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "personaldatahub": {
-      "command": "npx",
-      "args": ["pdh", "mcp"]
-    }
-  }
-}
-```
-
-**Cursor / Windsurf** — add the same `command` and `args` in MCP settings.
-
-The MCP server reads `hubUrl` and `apiKey` from `~/.pdh/config.json`, verifies the server is running, and registers source-specific tools (`read_emails`, `draft_email`, `search_github_issues`, etc.) for connected sources only.
-
-You can test it standalone:
+Check the registration:
 
 ```bash
-npx pdh mcp
-# Prints registered tools to stderr, then listens on stdio
+query-hub me        # the agent's name and permissions
+query-hub sources   # the sources it may read, and whether each is connected
 ```
+
+From then on the agent reads data with `query-hub pull` and proposes actions with `query-hub propose`. See [Agent commands](../README.md#agent-commands).
+
+### Change or revoke an agent
+
+In **Settings → Agents** you can edit an agent's permissions or revoke it. A revoked agent gets 401 on its next call. An agent can also remove itself with `query-hub leave`.
 
 ### OpenClaw (via ClawHub)
 
@@ -214,7 +207,7 @@ Install the PersonalDataHub skill from ClawHub:
 clawhub install personaldatahub
 ```
 
-The skill reads the server address and agent key from `~/.pdh/config.json` and registers `pull` and `propose` tools. See [`packages/personaldatahub/SKILL.md`](../packages/personaldatahub/SKILL.md) for tool details.
+The plugin reads the hub address and token from the file `query-hub join` writes, so join first. You can instead set `hubUrl` and `apiKey` (the agent's token) in the plugin's settings. It registers `personal_data_pull` and `personal_data_propose` tools. See [`packages/personaldatahub/SKILL.md`](../packages/personaldatahub/SKILL.md).
 
 ## Step 6: Verify
 
@@ -248,20 +241,22 @@ To approve staged actions or change filters, switch to the `personaldatahub` use
 
 ## Direct API Usage
 
-Every route needs a credential:
+`query-hub` is the normal way for an agent to reach the hub. It calls the routes below and keeps the token out of the agent's conversation. Call the API directly only if you are writing your own client.
 
 | Prefix | For | Credential |
 |---|---|---|
-| `/agent/*` | Agents: pull data, propose actions | An agent key: `Authorization: Bearer pk_...` |
-| `/web/*` | The GUI: settings, approvals, audit log | The owner's session cookie, set by signing in |
+| `/agent/*` | Agents: pull data, propose actions | A registered agent's token: `Authorization: Bearer pdh_...` |
+| `/web/*` | The GUI: settings, approvals, audit log, agents | The owner's session cookie, set by signing in |
 
-`GET /health` is the only data-free route that needs neither.
+`GET /health` needs no credential and returns no data. The two join routes (`GET /agent/join/:code`, `POST /agent/join`) also take no credential. They are protected by the one-time code in the link.
+
+In the examples, `$TOKEN` is an agent token: the `token` value in the file `query-hub join` wrote.
 
 **Pull data:**
 
 ```bash
 curl -X POST http://localhost:3000/agent/pull \
-  -H "Authorization: Bearer $PDH_API_KEY" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"source": "gmail", "purpose": "Find recent emails"}'
 ```
@@ -270,7 +265,7 @@ curl -X POST http://localhost:3000/agent/pull \
 
 ```bash
 curl -X POST http://localhost:3000/agent/propose \
-  -H "Authorization: Bearer $PDH_API_KEY" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "source": "gmail",
@@ -283,23 +278,31 @@ curl -X POST http://localhost:3000/agent/propose \
 **Discover connected sources:**
 
 ```bash
-curl -H "Authorization: Bearer $PDH_API_KEY" http://localhost:3000/agent/sources
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/agent/sources
 ```
 
 ---
 
 ## Troubleshooting
 
-**MCP server says "No PersonalDataHub config found"**
-- Create `~/.pdh/config.json` in your main user's home directory (see Step 5)
+**`query-hub` says "Not registered with a hub"**
+- The agent has not joined. Create a join link in **Settings → Agents** and run `query-hub join <link> --name <name>` (see Step 5)
 
-**MCP server says "not reachable"**
-- The server runs as the `personaldatahub` user: `sudo -u personaldatahub npx pdh status`
-- If not running: `sudo -u personaldatahub -i`, then `cd ~/PersonalDataHub && npx pdh start`
+**`query-hub join` says the link "was already used or has expired"**
+- A join link works once and lasts 15 minutes. Create a new one in **Settings → Agents**
 
-**No tools appear in MCP**
-- Connect at least one source via OAuth in the GUI (as `personaldatahub` user)
-- Only sources with active OAuth tokens get tools registered
+**`query-hub` says "The hub is not running"**
+- The server runs as the `personaldatahub` user: `sudo -u personaldatahub -i`, then `cd ~/PersonalDataHub && npx pdh status`
+- If not running: `npx pdh start` in the same shell
+
+**`query-hub` says the agent "was revoked"**
+- The owner revoked it, or it was never registered with this hub. Run `query-hub leave` to clear the old token, then join again with a new link
+
+**`query-hub` says "Not allowed: this agent lacks the ... permission"**
+- Grant the named permission to the agent in **Settings → Agents**
+
+**`query-hub pull` says the source "is not connected"**
+- Connect the source via OAuth in the GUI (as the `personaldatahub` user)
 
 **`npx pdh init` fails with ".env already exists"**
 - Already initialized. Start the server: `npx pdh start`

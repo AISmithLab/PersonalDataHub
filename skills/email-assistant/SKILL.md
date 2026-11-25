@@ -10,13 +10,19 @@ Given a natural language email request, pull relevant data from connected source
 
 ## Instructions
 
-### 1. Read the PersonalDataHub config
+### 1. Check that this agent is registered
 
-Read `~/.pdh/config.json` to get the `hubUrl` and `apiKey`. Send the key on every call as `Authorization: Bearer <apiKey>`. If the file doesn't exist, tell the user to run `npx pdh init` and `npx pdh start` first.
+Run `query-hub me` via Bash. It prints this agent's name and permissions.
 
-### 2. Verify the hub is running
+If it fails because the agent is not registered, ask the owner for a join link from **Settings → Agents** in the PersonalDataHub GUI, then run:
 
-Run `curl -s <hubUrl>/health` via Bash. If it fails, tell the user to start the server with `npx pdh start`.
+```bash
+query-hub join <link> --name <name>
+```
+
+### 2. Verify the source is available
+
+Run `query-hub sources`. It lists the sources this agent may read and whether each is connected. If the command says the hub is not running, tell the user to start the server with `npx pdh start`. If `gmail` is missing or not connected, tell the user to grant the permission in Settings → Agents or connect the source in the GUI.
 
 ### 3. Parse the user's request
 
@@ -42,13 +48,10 @@ Example strategy for "I've been discussing a proposal with Diego@UCSF, we mentio
 
 ### 5. Execute the searches
 
-Pull data from PersonalDataHub using the REST API. Make **parallel calls** when queries are independent:
+Pull data from PersonalDataHub with `query-hub pull`. Make **parallel calls** when queries are independent:
 
 ```bash
-curl -s -X POST <hubUrl>/agent/pull \
-  -H "Authorization: Bearer <apiKey>" \
-  -H "Content-Type: application/json" \
-  -d '{"source": "gmail", "query": "<query>", "limit": 20, "purpose": "<why>"}'
+query-hub pull gmail --purpose "<why>" --query "<query>" --limit 20
 ```
 
 **Query syntax (Gmail):**
@@ -59,12 +62,9 @@ curl -s -X POST <hubUrl>/agent/pull \
 - `has:attachment` — emails with attachments
 - Combine freely: `from:diego subject:proposal newer_than:90d`
 
-**Cross-source pulls:** For non-email sources, change the `source` field:
+**Cross-source pulls:** For non-email sources, change the source argument:
 ```bash
-curl -s -X POST <hubUrl>/agent/pull \
-  -H "Authorization: Bearer <apiKey>" \
-  -H "Content-Type: application/json" \
-  -d '{"source": "github", "query": "<query>", "limit": 10, "purpose": "<why>"}'
+query-hub pull github --purpose "<why>" --query "<query>" --limit 10
 ```
 
 **Guidelines:**
@@ -98,23 +98,21 @@ Show the draft to the user and ask if they'd like any changes.
 
 ### 8. Propose the draft through PersonalDataHub
 
-Once the user approves the draft, propose it via the staging API:
+Once the user approves the draft, propose it with `query-hub propose`:
 
 ```bash
-curl -s -X POST <hubUrl>/agent/propose \
-  -H "Authorization: Bearer <apiKey>" \
-  -H "Content-Type: application/json" \
-  -d '{"source": "gmail", "action_type": "draft_email", "action_data": {"to": "<recipient>", "subject": "<subject>", "body": "<body>"}, "purpose": "<why this draft is being created>"}'
+query-hub propose gmail draft_email --purpose "<why this draft is being created>" \
+  --data '{"to": "<recipient>", "subject": "<subject>", "body": "<body>"}'
 ```
 
-If the email is a reply to an existing thread, include `"in_reply_to": "<threadId>"` in `action_data`.
+If the email is a reply to an existing thread, include `"in_reply_to": "<threadId>"` in the `--data` JSON.
 
-Tell the user the draft has been proposed and is waiting for their approval in the PersonalDataHub GUI at `<hubUrl>`.
+Tell the user the draft has been proposed and is waiting for their approval in the PersonalDataHub GUI (by default `http://localhost:3000`).
 
 ## Important notes
 
 - **All data goes through PersonalDataHub's access control.** The gateway applies the owner's filters and policies. You will only see data the owner has authorized.
-- **Drafts require owner approval.** The `propose` endpoint stages the draft — it does NOT send. The owner must approve it in the PersonalDataHub GUI.
+- **Drafts require owner approval.** `query-hub propose` stages the draft — it does NOT send. The owner must approve it in the PersonalDataHub GUI.
 - **Always state your purpose.** Every pull and propose call requires a `purpose` string that gets logged in the audit trail.
 - **Show your work.** Always show the user what you found and what context you extracted before drafting. Transparency is key.
 - **Deduplicate across queries.** The same item may appear in multiple query results. Use `source_item_id` to identify duplicates and merge the context.

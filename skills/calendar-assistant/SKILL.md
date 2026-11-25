@@ -10,13 +10,19 @@ Help users manage their schedule by checking for conflicts, listing upcoming eve
 
 ## Instructions
 
-### 1. Read the PersonalDataHub config
+### 1. Check that this agent is registered
 
-Read `~/.pdh/config.json` to get the `hubUrl` and `apiKey`. Send the key on every call as `Authorization: Bearer <apiKey>`. If the file doesn't exist, tell the user to run `npx pdh init` and `npx pdh start` first.
+Run `query-hub me` via Bash. It prints this agent's name and permissions.
 
-### 2. Verify the hub is running
+If it fails because the agent is not registered, ask the owner for a join link from **Settings → Agents** in the PersonalDataHub GUI, then run:
 
-Run `curl -s <hubUrl>/health` via Bash. If it fails, tell the user to start the server with `npx pdh start`.
+```bash
+query-hub join <link> --name <name>
+```
+
+### 2. Verify the source is available
+
+Run `query-hub sources`. It lists the sources this agent may read and whether each is connected. If the command says the hub is not running, tell the user to start the server with `npx pdh start`. If `google_calendar` is missing or not connected, tell the user to grant the permission in Settings → Agents or connect the source in the GUI.
 
 ### 3. Parse the user's request
 
@@ -37,15 +43,12 @@ Before scheduling or responding, check existing commitments. Plan queries for:
 Pull calendar data from PersonalDataHub:
 
 ```bash
-curl -s -X POST <hubUrl>/agent/pull \
-  -H "Authorization: Bearer <apiKey>" \
-  -H "Content-Type: application/json" \
-  -d '{"source": "google_calendar", "query": "<optional_search_term>", "after": "<iso_timestamp>", "limit": 20, "purpose": "Checking availability for <context>"}'
+query-hub pull google_calendar --purpose "Checking availability for <context>" --query "<optional_search_term>" --limit 20
 ```
 
 **Guidelines:**
-- Use the `after` field to limit results to relevant upcoming times.
-- If checking a specific day, pull events for that entire 24h window.
+- `query-hub pull` takes `--query` and `--limit` only. It has no time-range option. Events come back in start-time order, beginning at the owner's configured start date (7 days ago if none is set). Raise `--limit` if needed and pick out the relevant times yourself.
+- If checking a specific day, look at every returned event that falls in that 24h window.
 - Deduplicate results if running multiple queries.
 
 ### 6. Analyze and synthesize
@@ -59,65 +62,41 @@ Present a summary of the current schedule or the proposed time to the user.
 
 ### 7. Propose Actions
 
-Calendar modifications require user approval via the `propose` endpoint.
+Calendar modifications require user approval. Propose them with `query-hub propose`.
 
 #### Create an Event:
 ```bash
-curl -s -X POST <hubUrl>/agent/propose \
-  -H "Authorization: Bearer <apiKey>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "source": "google_calendar",
-    "action_type": "create_event",
-    "action_data": {
-      "title": "<summary>",
-      "body": "<description>",
-      "location": "<location>",
-      "start": "<iso_timestamp>",
-      "end": "<iso_timestamp>",
-      "timeZone": "UTC",
-      "attendees": [{"email": "user@example.com"}]
-    },
-    "purpose": "Scheduling <title> as requested by user"
+query-hub propose google_calendar create_event --purpose "Scheduling <title> as requested by user" \
+  --data '{
+    "title": "<summary>",
+    "body": "<description>",
+    "location": "<location>",
+    "start": "<iso_timestamp>",
+    "end": "<iso_timestamp>",
+    "timeZone": "UTC",
+    "attendees": [{"email": "user@example.com"}]
   }'
 ```
 
 #### Update an Event:
 ```bash
-curl -s -X POST <hubUrl>/agent/propose \
-  -H "Authorization: Bearer <apiKey>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "source": "google_calendar",
-    "action_type": "update_event",
-    "action_data": {
-      "eventId": "<id>",
-      "title": "<new_summary>"
-    },
-    "purpose": "Updating event title"
-  }'
+query-hub propose google_calendar update_event --purpose "Updating event title" \
+  --data '{"eventId": "<id>", "title": "<new_summary>"}'
 ```
 
 #### Delete an Event:
 ```bash
-curl -s -X POST <hubUrl>/agent/propose \
-  -H "Authorization: Bearer <apiKey>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "source": "google_calendar",
-    "action_type": "delete_event",
-    "action_data": { "eventId": "<id>" },
-    "purpose": "Deleting cancelled event"
-  }'
+query-hub propose google_calendar delete_event --purpose "Deleting cancelled event" \
+  --data '{"eventId": "<id>"}'
 ```
 
 ### 8. Finalize
 
-Tell the user the action has been proposed and is waiting for their approval in the PersonalDataHub GUI at `<hubUrl>`.
+Tell the user the action has been proposed and is waiting for their approval in the PersonalDataHub GUI (by default `http://localhost:3000`).
 
 ## Important notes
 
 - **All data goes through PersonalDataHub's access control.** You will only see events the owner has authorized.
-- **Modifications require owner approval.** The `propose` endpoint stages the change — it does NOT immediately update the calendar.
-- **Always provide a clear `purpose`.** Every API call is audited.
+- **Modifications require owner approval.** `query-hub propose` stages the change — it does NOT immediately update the calendar.
+- **Always provide a clear `purpose`.** Every pull and propose is audited.
 - **Show your work.** List the events you found that led to your recommendation or time suggestion.
