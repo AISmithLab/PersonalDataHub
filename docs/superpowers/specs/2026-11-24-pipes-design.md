@@ -15,7 +15,7 @@ Why: today an agent can only call `POST /app/v1/pull`, which returns everything 
 - Each pipe has a URL that ends in a unique code.
 - A table of contents endpoint lists the pipes and their URLs.
 - The Pipe tab shows, for the selected pipe: its API, its program, and its current output.
-- Pipe endpoints answer only callers on the same device.
+- Pipe endpoints answer only callers on the same device that hold an agent key (or the owner).
 
 ## Non-goals
 
@@ -38,6 +38,8 @@ Network exposure, decided by Haojian:
 1. Separate listener on a second port open to the Wi-Fi, serving only pipe routes. Lets a laptop agent call the phone hub; adds a port and address checks.
 2. **Picked: pipes on the existing server, same device only.** The hub binds `127.0.0.1` on desktop, Android and iOS (`src/gateway/server.ts`, `src/android.ts`, `src/ios.ts`). Haojian: "it's by design that only the local device can visit."
 3. Open the main server to the Wi-Fi and block non-pipe routes for outside callers. Rejected: one missed route exposes the GUI or chat.
+
+Routes, decided with Haojian over several rounds: no `/app/v1` prefix; no separate run route for the tab ("isn't GET /pipes/:code same as POST /api/pipes/:id/run?"); no route without authentication ("ideally, all of them requires authentication"). Result: the `/agent` and `/web` layout below.
 
 Program model (my call):
 
@@ -85,7 +87,7 @@ return out;
 
 ### Running a pipe
 
-One function, `runPipe(deps, pipe, { limit })`, used by `GET /pipes/:id` and the `save_pipe` chat tool:
+One function, `runPipe(deps, pipe, { limit })`, used by `GET /agent/pipes/:id` and the `save_pipe` chat tool:
 
 1. Fetch from the connector with the source's configured boundary, the pipe's `query`, and `limit` (default 20, maximum 50). Cut the result to `limit` after fetching, because not every connector honors it.
 2. Apply enabled quick filters (`applyFilters`).
@@ -97,39 +99,29 @@ The example above is sequential for readability; the system prompt's version use
 
 `ask()` answers are cached in memory, keyed by a hash of question and text, so calling a pipe again does not ask the model again about items it has already judged. The cache is lost on restart. (My call.)
 
-### Agent API
+### Routes
 
-Mounted at the top level in `src/gateway/server.ts` (not under `/app/v1`, per Haojian), before the GUI routes. No login, like the `/app/v1` routes. `GET /pipes/:id` executes the pipe's program on every call; nothing is precomputed.
+Pipes follow the hub's route layout (`2026-11-24-api-redesign-design.md`): `/agent/*` takes an agent key or the owner, `/web/*` takes the owner only.
 
 ```
-GET /pipes
-  -> { ok, pipes: [{ name, description, source, url }] }      enabled pipes only
-
-GET /pipes/:id?limit=20&purpose=...
-  -> { ok, pipe: { name, description, source }, data: [...], meta: { itemsFetched, itemsReturned, duration_ms } }
+GET    /agent/pipes            table of contents: id, name, description, source, query, url, program, enabled
+GET    /agent/pipes/:id        executes the pipe's program on every call and returns its result
+PUT    /web/pipes/:id          { enabled }   switch a pipe on or off
+DELETE /web/pipes/:id          delete a pipe
 ```
 
+`GET /agent/pipes/:id?limit=20&purpose=...` returns `{ ok, pipe: { id, name, description, source }, data: [...], meta: { itemsFetched, itemsReturned, duration_ms } }`.
+
+- One list, one run route. The Pipe tab calls the same two `/agent` routes an agent does (the owner's credential is accepted there), so it shows exactly what an agent gets. Reading is open to any key holder; changing a pipe is the owner's.
+- The table of contents includes switched-off pipes, marked `enabled: false`. Running one returns `PIPE_OFF`.
 - `url` is absolute, built from the request's own origin.
-- `purpose` is optional and written to the audit log when given. (My call: `/pull` requires it, but a pipe already states its purpose in its description.)
-- Errors use the existing shape `{ ok: false, error: { code, message } }`: `NOT_FOUND` (unknown or switched-off id), `SOURCE_NOT_CONNECTED`, `PIPE_ERROR` (program threw, timed out, or returned a non-array; message included).
-- Every call writes an audit entry `pipe_run` with the pipe id, name, purpose, counts, duration, and error.
-- Both routes refuse any caller whose socket address is not loopback, with 403. This makes "same device only" an explicit rule instead of a side effect of the bind address, and it also turns pipes off on Lambda, where there is no socket. (My call.)
+- `purpose` is optional and written to the audit log when given; the tab sends `Pipe tab preview`. (My call: `/pull` requires it, but a pipe already states its purpose in its description.)
+- Errors use the existing shape `{ ok: false, error: { code, message } }`: `NOT_FOUND`, `PIPE_OFF`, `SOURCE_NOT_CONNECTED`, `PIPE_ERROR` (program threw, timed out, or returned a non-array; message included).
+- Every run writes an audit entry `pipe_run` with the pipe id, name, caller (key name or `owner`), purpose, counts, duration, and error.
+- "Only the local device can visit" (Haojian) holds because the hub binds `127.0.0.1`; an agent key is now required as well. No separate loopback check.
+- The id at the end of the URL is an identifier, not a secret.
 
-The id at the end of the URL is an identifier, not a secret: the table of contents lists every URL. The loopback rule is the protection.
-
-Add a short Pipes section to `packages/personaldatahub/SKILL.md` describing the two endpoints.
-
-### Owner API
-
-Session-protected, in `src/gateway/gui/routes.ts`:
-
-```
-GET    /api/pipes            all pipes, including program and disabled ones
-PUT    /api/pipes/:id        { enabled }   toggle only
-DELETE /api/pipes/:id
-```
-
-There is no run route here: the tab calls `GET /pipes/:id` itself, with `purpose=Pipe tab preview`, so it shows exactly what an agent gets (per Haojian). There is no create or edit-program route for the GUI. Pipes are written through Chat. (My call.)
+Add a short Pipes section to `packages/personaldatahub/SKILL.md` describing the two agent routes. There is no create or edit-program route: pipes are written through Chat. (My call.)
 
 ### Chat
 
@@ -150,15 +142,15 @@ List:
 ```
 Pipes
 Filter programs that agents on this device can call.
-Table of contents: GET http://127.0.0.1:3000/pipes   [Copy]
+Table of contents: GET http://127.0.0.1:3000/agent/pipes   [Copy]
 
 ┌──────────────────────────────────────────────┐
 │ Recommendation letter requests      [on ●]   │
-│ gmail · /pipes/k7f3q9x2               │
+│ gmail · /agent/pipes/k7f3q9x2               │
 └──────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────┐
 │ Meetings with students              [off ○]  │
-│ google_calendar · /pipes/m2c8t5ya     │
+│ google_calendar · /agent/pipes/m2c8t5ya     │
 └──────────────────────────────────────────────┘
 ```
 
@@ -172,7 +164,7 @@ Recommendation letter requests                [on ●]
 Emails that ask me to write a recommendation letter.
 
 API
-GET http://127.0.0.1:3000/pipes/k7f3q9x2       [Copy]
+GET http://127.0.0.1:3000/agent/pipes/k7f3q9x2       [Copy]
 
 Program
 ┌──────────────────────────────────────────────┐
@@ -189,7 +181,7 @@ Output                    3 of 20 items · 4.1 s   [Run again]
 [Show raw JSON]                               [Delete pipe]
 ```
 
-- Output calls `GET /pipes/:id` when the detail opens and on "Run again". For a switched-off pipe it shows "This pipe is off" instead. While running it shows a spinner; on error it shows the error message in the error style used by the Skill tab.
+- Output calls `GET /agent/pipes/:id` when the detail opens and on "Run again". For a switched-off pipe it shows "This pipe is off" instead. While running it shows a spinner; on error it shows the error message in the error style used by the Skill tab.
 - Each output row shows a title line and a sub line picked from common fields (`title`, `author_email` or `author_name`, timestamp). "Show raw JSON" shows the exact response body an agent would get.
 - The program is read-only.
 - The displayed base URL is the hub's own origin as the client already knows it (`packages/ui/src/api/baseUrl*`).
@@ -198,7 +190,7 @@ State and API calls follow the skills pattern in `useAppState.ts` and `api/clien
 
 ## Left to the builder
 
-- Exact sandbox mechanics and how the loopback check reads the socket address under `@hono/node-server`, including how tests supply it.
+- Exact sandbox mechanics.
 - Whether `runPipe` and the `ask` cache live in one file or two.
 - Icon drawing, spacing, and the field-picking rule for output rows on non-email sources.
 - Copy buttons on native (clipboard module availability); a selectable text field is acceptable if no clipboard module is installed.
@@ -209,6 +201,6 @@ Vitest, alongside the existing tests:
 
 - Pipe runner: returns filtered rows; `require`, `fetch` and `process` are undefined inside; non-array return and thrown errors come back as errors; an endless loop before the first `await` times out; `ask` is cached and limited to 5 at once.
 - Store: pipe create, read, update, delete on the SQLite store.
-- Agent routes: table of contents lists only enabled pipes; run returns filtered data and writes an audit entry; unknown and switched-off ids give 404; a non-loopback caller gets 403; quick filters apply before the program.
+- Routes: table of contents lists every pipe with its on/off state; run returns filtered data and writes an audit entry naming the key; an unknown id gives `NOT_FOUND` and a switched-off one `PIPE_OFF`; no credential gives 401; an agent key cannot `PUT` or `DELETE`; quick filters apply before the program.
 - Chat tool: `save_pipe` creates a pipe and returns the test run; a bad source is rejected.
 - UI: type check, then a manual pass at `/next` in a browser: create a pipe in Chat, open it in the Pipe tab, see API and output, toggle, delete.

@@ -76,6 +76,19 @@ Device secret (found while planning; replaces the earlier `/web/auth/device` ide
 - Desktop and Lambda use email and password. The shared UI gains a sign-in / create-account screen, shown when `/web/auth/status` says not authenticated. (The legacy page already has one.)
 - Mobile changes cannot be verified in this environment (no device build); they are type-checked only.
 
+Added after an independent review of the first implementation:
+
+- **Same-origin rule for the cookie.** `SameSite=Lax` does not separate ports on `127.0.0.1`, so a page a local agent serves on another port could use the owner's cookie. The cookie is now accepted only when the browser does not report another origin (`Origin` host equals the hub's, and `Sec-Fetch-Site` is `same-origin`, `none`, or absent). Signup and login apply the same rule.
+- **No accounts on a device-secret hub.** The phone never creates an account, so "first signup claims the hub" was open to any local app. Signup and login answer 404 when a device secret is configured.
+- **One-time values expire** after ten minutes (OAuth state and store-tokens ticket).
+- **`pdh key [name]`** creates a key for a hub that was set up before keys existed.
+
+Known and not addressed here:
+
+- On desktop, between `pdh init` and the owner creating the account, the first caller to sign up owns the hub. This "first signup claims" rule predates this work.
+- The Android `SmsReceiver` queues missed messages under `files/pdh-data/sms_queue`, while the server under `nodejs-mobile-react-native` appears to keep its data one directory higher. If so, queued messages are never replayed. Predates this work; the receiver now looks in both places for the device secret, but the queue path is unchanged.
+- The old Capacitor shell (`android/`, `www/`) is not built by CI and was not updated; it would get 404 and a sign-in page.
+
 ## Callers to update
 
 `packages/ui` (all calls go through `api/client.ts` and a few direct fetches), `src/gateway/gui/frontend/js/*` (paths only), `src/ai/mcp/server.ts`, `packages/personaldatahub` (client, `SKILL.md`, tests), `src/cli.ts`, `mobile/App.tsx`, `mobile/android/.../SmsReceiver.java`, `src/android.ts` (SMS queue drain), `skills/*/SKILL.md`, `README.md`, `systemdesigns/*.md`, tests.
