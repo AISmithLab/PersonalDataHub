@@ -175,6 +175,8 @@ Known and not addressed:
 
 ## Part 2: smithagent
 
+Built 2026-11-25 on branch `joinhub` in `Lab-AI-Infra` (commit `c72cf97`, not merged). As built it follows this part, with these specifics: the vendored client is `smithagent/bin/query-hub.mjs`, installed as `~/.smithagent/bin/query-hub.mjs` plus a `query-hub` wrapper; `template/library.md` and `template/hub.md` are the appended sections; `node --test smithagent/test/` covers the commands end to end with a fake gateway and a fake hub. `joinlibrary` against the real library gateway was not run.
+
 In `Lab-AI-Infra/smithagent`. Other sessions commit to that repository; pull first and work on a branch.
 
 ### Commands
