@@ -53,7 +53,7 @@ New table `pipes` (SQLite and sql.js schemas; DynamoDB store stubs the methods t
 
 | column | notes |
 |---|---|
-| `id` | primary key and the URL code: 8 random characters from `a-z2-7` |
+| `id` | primary key and the last part of the URL: 8 random characters from `a-z2-7` |
 | `name` | short name |
 | `description` | one sentence, shown in the table of contents |
 | `source` | `gmail`, `google_calendar`, or `github` |
@@ -85,7 +85,7 @@ return out;
 
 ### Running a pipe
 
-One function, `runPipe(deps, pipe, { limit })`, used by the agent endpoint, the tab, and the chat tool:
+One function, `runPipe(deps, pipe, { limit })`, used by `GET /pipes/:id` and the `save_pipe` chat tool:
 
 1. Fetch from the connector with the source's configured boundary, the pipe's `query`, and `limit` (default 20, maximum 50). Cut the result to `limit` after fetching, because not every connector honors it.
 2. Apply enabled quick filters (`applyFilters`).
@@ -99,23 +99,23 @@ The example above is sequential for readability; the system prompt's version use
 
 ### Agent API
 
-In `src/gateway/app-api.ts`, no login, like the other `/app/v1` routes:
+Mounted at the top level in `src/gateway/server.ts` (not under `/app/v1`, per Haojian), before the GUI routes. No login, like the `/app/v1` routes. `GET /pipes/:id` executes the pipe's program on every call; nothing is precomputed.
 
 ```
-GET /app/v1/pipes
+GET /pipes
   -> { ok, pipes: [{ name, description, source, url }] }      enabled pipes only
 
-GET /app/v1/pipes/:code?limit=20&purpose=...
+GET /pipes/:id?limit=20&purpose=...
   -> { ok, pipe: { name, description, source }, data: [...], meta: { itemsFetched, itemsReturned, duration_ms } }
 ```
 
 - `url` is absolute, built from the request's own origin.
 - `purpose` is optional and written to the audit log when given. (My call: `/pull` requires it, but a pipe already states its purpose in its description.)
-- Errors use the existing shape `{ ok: false, error: { code, message } }`: `NOT_FOUND` (unknown or disabled code), `SOURCE_NOT_CONNECTED`, `PIPE_ERROR` (program threw, timed out, or returned a non-array; message included).
-- Every call writes an audit entry `pipe_run` with the pipe id, name, caller (`agent` or `owner`), counts, duration, and error.
+- Errors use the existing shape `{ ok: false, error: { code, message } }`: `NOT_FOUND` (unknown or switched-off id), `SOURCE_NOT_CONNECTED`, `PIPE_ERROR` (program threw, timed out, or returned a non-array; message included).
+- Every call writes an audit entry `pipe_run` with the pipe id, name, purpose, counts, duration, and error.
 - Both routes refuse any caller whose socket address is not loopback, with 403. This makes "same device only" an explicit rule instead of a side effect of the bind address, and it also turns pipes off on Lambda, where there is no socket. (My call.)
 
-The code is an identifier, not a secret: the table of contents lists every URL. The loopback rule is the protection.
+The id at the end of the URL is an identifier, not a secret: the table of contents lists every URL. The loopback rule is the protection.
 
 Add a short Pipes section to `packages/personaldatahub/SKILL.md` describing the two endpoints.
 
@@ -127,10 +127,9 @@ Session-protected, in `src/gateway/gui/routes.ts`:
 GET    /api/pipes            all pipes, including program and disabled ones
 PUT    /api/pipes/:id        { enabled }   toggle only
 DELETE /api/pipes/:id
-POST   /api/pipes/:id/run    same result shape as the agent endpoint; works for disabled pipes
 ```
 
-There is no create or edit-program route for the GUI. Pipes are written through Chat. (My call.)
+There is no run route here: the tab calls `GET /pipes/:id` itself, with `purpose=Pipe tab preview`, so it shows exactly what an agent gets (per Haojian). There is no create or edit-program route for the GUI. Pipes are written through Chat. (My call.)
 
 ### Chat
 
@@ -151,15 +150,15 @@ List:
 ```
 Pipes
 Filter programs that agents on this device can call.
-Table of contents: GET http://127.0.0.1:3000/app/v1/pipes   [Copy]
+Table of contents: GET http://127.0.0.1:3000/pipes   [Copy]
 
 ┌──────────────────────────────────────────────┐
 │ Recommendation letter requests      [on ●]   │
-│ gmail · /app/v1/pipes/k7f3q9x2               │
+│ gmail · /pipes/k7f3q9x2               │
 └──────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────┐
 │ Meetings with students              [off ○]  │
-│ google_calendar · /app/v1/pipes/m2c8t5ya     │
+│ google_calendar · /pipes/m2c8t5ya     │
 └──────────────────────────────────────────────┘
 ```
 
@@ -173,7 +172,7 @@ Recommendation letter requests                [on ●]
 Emails that ask me to write a recommendation letter.
 
 API
-GET http://127.0.0.1:3000/app/v1/pipes/k7f3q9x2       [Copy]
+GET http://127.0.0.1:3000/pipes/k7f3q9x2       [Copy]
 
 Program
 ┌──────────────────────────────────────────────┐
@@ -190,7 +189,7 @@ Output                    3 of 20 items · 4.1 s   [Run again]
 [Show raw JSON]                               [Delete pipe]
 ```
 
-- Output runs when the detail opens and on "Run again". While running it shows a spinner; on error it shows the error message in the error style used by the Skill tab.
+- Output calls `GET /pipes/:id` when the detail opens and on "Run again". For a switched-off pipe it shows "This pipe is off" instead. While running it shows a spinner; on error it shows the error message in the error style used by the Skill tab.
 - Each output row shows a title line and a sub line picked from common fields (`title`, `author_email` or `author_name`, timestamp). "Show raw JSON" shows the exact response body an agent would get.
 - The program is read-only.
 - The displayed base URL is the hub's own origin as the client already knows it (`packages/ui/src/api/baseUrl*`).
@@ -210,6 +209,6 @@ Vitest, alongside the existing tests:
 
 - Pipe runner: returns filtered rows; `require`, `fetch` and `process` are undefined inside; non-array return and thrown errors come back as errors; an endless loop before the first `await` times out; `ask` is cached and limited to 5 at once.
 - Store: pipe create, read, update, delete on the SQLite store.
-- Agent routes: table of contents lists only enabled pipes; run returns filtered data and writes an audit entry; unknown and disabled codes give 404; a non-loopback caller gets 403; quick filters apply before the program.
+- Agent routes: table of contents lists only enabled pipes; run returns filtered data and writes an audit entry; unknown and switched-off ids give 404; a non-loopback caller gets 403; quick filters apply before the program.
 - Chat tool: `save_pipe` creates a pipe and returns the test run; a bad source is rejected.
 - UI: type check, then a manual pass at `/next` in a browser: create a pipe in Chat, open it in the Pipe tab, see API and output, toggle, delete.
