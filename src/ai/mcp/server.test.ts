@@ -160,7 +160,7 @@ describe('MCP Server', () => {
   });
 
   describe('tool handlers', () => {
-    it('read_emails calls POST /app/v1/pull with gmail source', async () => {
+    it('read_emails calls POST /agent/pull with gmail source', async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
       mockReadConfig.mockReturnValue({ hubUrl: 'http://localhost:3000', hubDir: '/tmp' });
       mockHealthOk();
@@ -185,7 +185,7 @@ describe('MCP Server', () => {
       // verify the fetch was called correctly during startup
       const startupCalls = mockFetch.mock.calls;
       expect(startupCalls[0][0]).toBe('http://localhost:3000/health');
-      expect(startupCalls[1][0]).toBe('http://localhost:3000/app/v1/sources');
+      expect(startupCalls[1][0]).toBe('http://localhost:3000/agent/sources');
 
       vi.mocked(console.error).mockRestore();
     });
@@ -296,7 +296,7 @@ describe('MCP Server integration with Client', () => {
         const reqBody: Record<string, unknown> = { source: 'gmail', purpose };
         if (query) reqBody.query = query;
 
-        fetchCalls.push({ url: 'http://localhost:3000/app/v1/pull', body: reqBody });
+        fetchCalls.push({ url: 'http://localhost:3000/agent/pull', body: reqBody });
 
         return {
           content: [{ type: 'text' as const, text: JSON.stringify({ ok: true, data: [] }) }],
@@ -316,7 +316,7 @@ describe('MCP Server integration with Client', () => {
     });
 
     expect(fetchCalls).toHaveLength(1);
-    expect(fetchCalls[0].url).toBe('http://localhost:3000/app/v1/pull');
+    expect(fetchCalls[0].url).toBe('http://localhost:3000/agent/pull');
     expect(fetchCalls[0].body).toEqual({
       source: 'gmail',
       query: 'is:unread',

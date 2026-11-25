@@ -44,7 +44,7 @@ describe('HubClient', () => {
         purpose: 'Collect unanswered emails to draft responses',
       });
 
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:7007/app/v1/pull', {
+      expect(mockFetch).toHaveBeenCalledWith('http://localhost:7007/agent/pull', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -113,7 +113,7 @@ describe('HubClient', () => {
 
       await clientWithSlash.pull({ source: 'gmail', purpose: 'test' });
 
-      expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:7007/app/v1/pull');
+      expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:7007/agent/pull');
     });
   });
 
@@ -142,7 +142,7 @@ describe('HubClient', () => {
         purpose: 'Draft reply to unanswered email from Alice about Q4 report',
       });
 
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:7007/app/v1/propose', {
+      expect(mockFetch).toHaveBeenCalledWith('http://localhost:7007/agent/propose', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

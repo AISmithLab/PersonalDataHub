@@ -18,6 +18,7 @@ import { discoverHub, readConfig } from './setup.js';
 
 export interface PersonalDataHubPluginConfig {
   hubUrl: string;
+  apiKey?: string;
 }
 
 export default {
@@ -47,6 +48,7 @@ export default {
       additionalProperties: false,
       properties: {
         hubUrl: { type: 'string' },
+        apiKey: { type: 'string' },
       },
       required: ['hubUrl'],
     },
@@ -64,7 +66,7 @@ export default {
     if (!config?.hubUrl) {
       const envHubUrl = process.env.PDH_HUB_URL;
       if (envHubUrl) {
-        config = { hubUrl: envHubUrl };
+        config = { hubUrl: envHubUrl, apiKey: process.env.PDH_API_KEY };
         api.logger.info(`PersonalDataHub: Configured from environment variables (hub: ${envHubUrl})`);
       }
     }
@@ -73,7 +75,7 @@ export default {
     if (!config?.hubUrl) {
       const cfg = readConfig();
       if (cfg) {
-        config = { hubUrl: cfg.hubUrl };
+        config = { hubUrl: cfg.hubUrl, apiKey: cfg.apiKey };
         api.logger.info(`PersonalDataHub: Configured from config file (hub: ${cfg.hubUrl})`);
       }
     }
@@ -107,8 +109,18 @@ export default {
       return;
     }
 
+    // The key may live in the config file even when hubUrl came from elsewhere.
+    const apiKey = config.apiKey ?? process.env.PDH_API_KEY ?? readConfig()?.apiKey;
+    if (!apiKey) {
+      api.logger.warn(
+        'PersonalDataHub: No agent key found. Calls will be rejected with 401.\n' +
+        '  Create one in the hub under Settings → Agent keys and set "apiKey" in ~/.pdh/config.json.',
+      );
+    }
+
     const client = new HubClient({
       hubUrl: config.hubUrl,
+      apiKey,
     });
 
     api.logger.info(`PersonalDataHub: Registering tools (hub: ${config.hubUrl})`);

@@ -1,9 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { init, reset, writeConfig, readConfig, CONFIG_PATH, CONFIG_DIR } from './cli.js';
 import { makeTmpDir } from './test-utils.js';
+
+describe('test isolation', () => {
+  it('does not use the real ~/.pdh', () => {
+    expect(CONFIG_DIR).not.toBe(join(homedir(), '.pdh'));
+  });
+});
 
 describe('CLI init', () => {
   let tmpDir: string;
@@ -70,7 +77,14 @@ describe('CLI init', () => {
     const config = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
     expect(config.hubUrl).toBe('http://localhost:3000');
     expect(config.hubDir).toBe(tmpDir);
-    expect(config).not.toHaveProperty('apiKey');
+    // init creates the first agent key; the file holds the key, the database only its hash
+    expect(config.apiKey).toMatch(/^pk_/);
+    const db = new Database(result.dbPath);
+    const rows = db.prepare('SELECT name, key_hash FROM agent_keys').all() as { name: string; key_hash: string }[];
+    db.close();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe('default');
+    expect(rows[0].key_hash).not.toContain(config.apiKey);
   });
 
   it('writes config with custom port', async () => {

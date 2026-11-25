@@ -12,8 +12,19 @@ interface SourcesResponse {
   sources: Record<string, SourceStatus>;
 }
 
+// Agent key from ~/.pdh/config.json (or PDH_API_KEY), sent on every /agent/* call.
+let agentKey = '';
+
+function hubFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const headers = { ...(init.headers as Record<string, string> | undefined), ...(agentKey ? { Authorization: `Bearer ${agentKey}` } : {}) };
+  return fetch(url, { ...init, headers });
+}
+
 async function discoverSources(hubUrl: string): Promise<Record<string, SourceStatus>> {
-  const res = await fetch(`${hubUrl}/app/v1/sources`);
+  const res = await hubFetch(`${hubUrl}/agent/sources`);
+  if (res.status === 401) {
+    throw new Error('PersonalDataHub rejected the agent key. Set "apiKey" in ~/.pdh/config.json (create a key in the hub\'s Settings → Agent keys).');
+  }
   if (!res.ok) {
     throw new Error(`Failed to discover sources: ${res.status} ${res.statusText}`);
   }
@@ -53,7 +64,7 @@ function registerGmailTools(server: McpServer, hubUrl: string): void {
       if (query) body.query = query;
       if (limit) body.limit = limit;
 
-      const res = await fetch(`${hubUrl}/app/v1/pull`, {
+      const res = await hubFetch(`${hubUrl}/agent/pull`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -76,7 +87,7 @@ function registerGmailTools(server: McpServer, hubUrl: string): void {
     },
     { readOnlyHint: false, destructiveHint: false },
     async ({ to, subject, body, in_reply_to, purpose }) => {
-      const res = await fetch(`${hubUrl}/app/v1/propose`, {
+      const res = await hubFetch(`${hubUrl}/agent/propose`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -104,7 +115,7 @@ function registerGmailTools(server: McpServer, hubUrl: string): void {
     },
     { readOnlyHint: false, destructiveHint: false },
     async ({ to, subject, body, in_reply_to, purpose }) => {
-      const res = await fetch(`${hubUrl}/app/v1/propose`, {
+      const res = await hubFetch(`${hubUrl}/agent/propose`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -132,7 +143,7 @@ function registerGmailTools(server: McpServer, hubUrl: string): void {
     },
     { readOnlyHint: false, destructiveHint: false },
     async ({ to, subject, body, in_reply_to, purpose }) => {
-      const res = await fetch(`${hubUrl}/app/v1/propose`, {
+      const res = await hubFetch(`${hubUrl}/agent/propose`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -164,7 +175,7 @@ function registerGitHubTools(server: McpServer, hubUrl: string): void {
       if (query) body.query = query;
       if (limit) body.limit = limit;
 
-      const res = await fetch(`${hubUrl}/app/v1/pull`, {
+      const res = await hubFetch(`${hubUrl}/agent/pull`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -189,7 +200,7 @@ function registerGitHubTools(server: McpServer, hubUrl: string): void {
       if (query) body.query = query;
       if (limit) body.limit = limit;
 
-      const res = await fetch(`${hubUrl}/app/v1/pull`, {
+      const res = await hubFetch(`${hubUrl}/agent/pull`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -218,7 +229,7 @@ function registerCalendarTools(server: McpServer, hubUrl: string): void {
       if (after) body.after = after;
       if (limit) body.limit = limit;
 
-      const res = await fetch(`${hubUrl}/app/v1/pull`, {
+      const res = await hubFetch(`${hubUrl}/agent/pull`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -243,7 +254,7 @@ function registerCalendarTools(server: McpServer, hubUrl: string): void {
     },
     { readOnlyHint: false, destructiveHint: false },
     async ({ title, body, location, start, end, timeZone, purpose }) => {
-      const res = await fetch(`${hubUrl}/app/v1/propose`, {
+      const res = await hubFetch(`${hubUrl}/agent/propose`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -272,7 +283,7 @@ function registerCalendarTools(server: McpServer, hubUrl: string): void {
     },
     { readOnlyHint: false, destructiveHint: false },
     async ({ eventId, title, body, start, end, purpose }) => {
-      const res = await fetch(`${hubUrl}/app/v1/propose`, {
+      const res = await hubFetch(`${hubUrl}/agent/propose`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -297,7 +308,7 @@ function registerCalendarTools(server: McpServer, hubUrl: string): void {
     },
     { readOnlyHint: false, destructiveHint: true },
     async ({ eventId, purpose }) => {
-      const res = await fetch(`${hubUrl}/app/v1/propose`, {
+      const res = await hubFetch(`${hubUrl}/agent/propose`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -323,6 +334,7 @@ export async function startMcpServer(): Promise<McpServer> {
   }
 
   const { hubUrl } = config;
+  agentKey = process.env.PDH_API_KEY ?? config.apiKey ?? '';
 
   await checkHealth(hubUrl);
 

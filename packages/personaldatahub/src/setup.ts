@@ -18,10 +18,11 @@ export interface HealthCheckResult {
 export interface HubConfig {
   hubUrl: string;
   hubDir?: string;
+  apiKey?: string;
 }
 
 /** Path to the config file written by `npx pdh init`. */
-export const CONFIG_PATH = join(homedir(), '.pdh', 'config.json');
+export const CONFIG_PATH = join(process.env.PDH_CONFIG_DIR ?? join(homedir(), '.pdh'), 'config.json');
 
 /**
  * Read config from ~/.pdh/config.json.

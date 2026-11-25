@@ -20,18 +20,23 @@ import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { spawn, execSync } from 'node:child_process';
 import { getDb } from './database/db.js';
+import { SqliteDataStore } from './database/sqlite-store.js';
+import { newAgentKey } from './gateway/auth/access.js';
 import { osUserExists, createOsUser, lockdownFiles, checkProcessOwner, PDH_USER, ensureSudo, isRunningAsPdhUser } from './os-user.js';
 
 
 // --- Config file path ---
 
-export const CONFIG_DIR = join(homedir(), '.pdh');
+// PDH_CONFIG_DIR lets tests (and unusual setups) keep this out of the real home directory.
+export const CONFIG_DIR = process.env.PDH_CONFIG_DIR ?? join(homedir(), '.pdh');
 export const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 const PID_PATH = join(CONFIG_DIR, 'server.pid');
 
 export interface HubConfig {
   hubUrl: string;
   hubDir: string;
+  /** Agent key for /agent/* calls. Created by `pdh init`; more can be made in Settings. */
+  apiKey?: string;
 }
 
 /**
@@ -40,7 +45,8 @@ export interface HubConfig {
  */
 export function writeConfig(config: HubConfig): void {
   mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+  // Holds an agent key, so keep it readable by the owner only.
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
 }
 
 /**
@@ -175,13 +181,15 @@ export async function init(targetDir?: string, options?: InitOptions): Promise<I
 
   writeFileSync(configPath, configContent, 'utf-8');
 
-  // Initialize database
+  // Initialize database and create the first agent key
   const db = getDb(dbPath);
+  const { key: apiKey, hash } = newAgentKey();
+  new SqliteDataStore(db).insertAgentKey({ id: `key_${randomBytes(6).toString('hex')}`, name: 'default', key_hash: hash });
   db.close();
 
   // Write config file for auto-discovery by agents
   const hubUrl = `http://localhost:${port}`;
-  writeConfig({ hubUrl, hubDir: dir });
+  writeConfig({ hubUrl, hubDir: dir, apiKey });
 
   return { secret, dbPath, configPath, envPath, globalConfigPath: CONFIG_PATH, credentialsFetched };
 }
