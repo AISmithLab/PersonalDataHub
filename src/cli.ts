@@ -196,6 +196,27 @@ export async function init(targetDir?: string, options?: InitOptions): Promise<I
   return { secret, dbPath, configPath, envPath, globalConfigPath: CONFIG_PATH, credentialsFetched, apiKey };
 }
 
+/**
+ * Create an agent key in an existing installation and save it to the config file,
+ * for hubs set up before agent keys existed. Replaces a key of the same name.
+ */
+export function createKey(name: string, hubDir?: string): { name: string; apiKey: string } {
+  const config = readConfig();
+  const dir = hubDir ?? config?.hubDir ?? process.cwd();
+  const dbPath = resolve(dir, 'pdh.db');
+  if (!existsSync(dbPath)) throw new Error(`No database at ${dbPath}. Run "npx pdh init" first.`);
+  const db = getDb(dbPath);
+  const store = new SqliteDataStore(db);
+  for (const existing of store.listAgentKeys()) {
+    if (existing.name === name) store.deleteAgentKey(existing.id);
+  }
+  const { key: apiKey, hash } = newAgentKey();
+  store.insertAgentKey({ id: `key_${randomBytes(6).toString('hex')}`, name, key_hash: hash });
+  db.close();
+  writeConfig({ hubUrl: config?.hubUrl ?? 'http://localhost:3000', hubDir: config?.hubDir ?? dir, apiKey });
+  return { name, apiKey };
+}
+
 // --- Start / Stop / Status ---
 
 /**
@@ -553,6 +574,16 @@ if (isDirectRun) {
       console.error(`Error: ${(err as Error).message}`);
       process.exit(1);
     }
+  } else if (command === 'key') {
+    try {
+      const { name, apiKey } = createKey(process.argv[3] ?? 'default');
+      console.log(`\n  Agent key ("${name}")    ${apiKey}`);
+      console.log(`  Saved as "apiKey" in    ${CONFIG_PATH}`);
+      console.log('  It is not shown again. Manage keys in the GUI under Settings → Agent Keys.\n');
+    } catch (err) {
+      console.error(`Error: ${(err as Error).message}`);
+      process.exit(1);
+    }
   } else if (command === 'reset') {
     try {
       const removed = reset();
@@ -576,6 +607,7 @@ if (isDirectRun) {
     console.log('  npx pdh start             Start the server in the background');
     console.log('  npx pdh stop              Stop the background server');
     console.log('  npx pdh status            Check if the server is running');
+    console.log('  npx pdh key [name]        Create an agent key and save it for local agents');
     console.log('  npx pdh mcp               Start a stdio MCP server for agent access');
     console.log('  npx pdh install-service   Install a systemd/launchd service for auto-start');
     console.log('  npx pdh uninstall-service Remove the auto-start service');

@@ -38,11 +38,41 @@ function matchesDeviceSecret(given: string | undefined): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/** True where this hub authenticates the owner by device secret (the phone app). */
+export function usesDeviceSecret(): boolean {
+  return !!process.env.PDH_DEVICE_SECRET;
+}
+
+/**
+ * False when a browser says the request was made by a page from another origin.
+ *
+ * The session cookie is sent by the browser automatically, and SameSite=Lax does
+ * not tell ports apart: a page served from 127.0.0.1:8081 (which a local agent
+ * can start) is "same site" as the hub on 127.0.0.1:3000. Without this check such
+ * a page could approve an action or create a key with the owner's cookie.
+ * Non-browser callers send neither header and are unaffected.
+ */
+export function isSameOrigin(c: Context): boolean {
+  const site = c.req.header('Sec-Fetch-Site');
+  if (site && site !== 'same-origin' && site !== 'none') return false;
+  const origin = c.req.header('Origin');
+  if (!origin) return true;
+  try {
+    const originHost = new URL(origin).host;
+    // X-Forwarded-Host covers a hub behind a proxy or CDN that rewrites Host.
+    const own = [c.req.header('Host'), c.req.header('X-Forwarded-Host'), new URL(c.req.url).host];
+    return own.includes(originHost);
+  } catch {
+    return false;
+  }
+}
+
 /** True for a valid session cookie, or the device secret where one is configured. */
 export async function isOwner(c: Context, store: DataStore): Promise<boolean> {
   if (matchesDeviceSecret(c.req.header(DEVICE_SECRET_HEADER))) return true;
   const cookie = parseCookie(c.req.header('Cookie') ?? '', SESSION_COOKIE);
   if (!cookie) return false;
+  if (!isSameOrigin(c)) return false;
   return (await store.getValidSession(cookie)) !== null;
 }
 

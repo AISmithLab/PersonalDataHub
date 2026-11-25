@@ -31,7 +31,8 @@ export default function App() {
         }
       } catch { /* not ours */ }
     };
-    nodejs.channel.addListener('message', onMessage);
+    // addListener returns a subscription; the channel has no removeListener at runtime.
+    const subscription = nodejs.channel.addListener('message', onMessage) as unknown as { remove?: () => void } | undefined;
     nodejs.start(NODE_ENTRY);
     const t = setInterval(() => {
       if (!secret) {
@@ -44,7 +45,7 @@ export default function App() {
     }, 700);
     return () => {
       clearInterval(t);
-      nodejs.channel.removeListener('message', onMessage);
+      subscription?.remove?.();
     };
   }, []);
 

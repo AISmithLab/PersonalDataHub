@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
 import type Database from 'better-sqlite3';
@@ -250,6 +250,132 @@ describe('access control', () => {
       const start = await (await app.request('/web/oauth/gmail/start', { method: 'POST', headers: { Cookie: cookie } })).json() as { url: string };
       const state = new URL(start.url).searchParams.get('state')!;
       expect((await storeTokens('gmail', state)).status).toBe(401);
+    });
+  });
+
+  describe('every route', () => {
+    // Walks the server's own route table, so a route added later without
+    // protection fails here without anyone having to remember to list it.
+    const OPEN = new Set([
+      'GET /health', 'GET /', 'GET /next',
+      'POST /web/auth/signup', 'POST /web/auth/login', 'POST /web/auth/logout', 'GET /web/auth/status',
+      'GET /oauth/gmail/callback', 'GET /oauth/google_calendar/callback', 'GET /oauth/github/callback',
+      'POST /oauth/gmail/store-tokens', 'POST /oauth/google_calendar/store-tokens', 'POST /oauth/github/store-tokens',
+    ]);
+
+    it('answers 401 without a credential unless it is on the open list', async () => {
+      const routes = app.routes.filter((r) => r.method !== 'ALL');
+      expect(routes.length).toBeGreaterThan(40);
+      const seen = new Set<string>();
+      for (const r of routes) {
+        const id = `${r.method} ${r.path}`;
+        if (seen.has(id) || OPEN.has(id)) continue;
+        seen.add(id);
+        expect(r.path.startsWith('/web/') || r.path.startsWith('/agent/'), `${id} is outside /web and /agent`).toBe(true);
+        const path = r.path.replace(/:\w+/g, 'x');
+        const res = await app.request(path, {
+          method: r.method,
+          ...(r.method === 'GET' ? {} : { headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+        });
+        expect(res.status, id).toBe(401);
+      }
+    });
+
+    it('store-tokens is open only to a ticket holder', async () => {
+      for (const source of ['gmail', 'google_calendar', 'github']) {
+        const res = await app.request(`/oauth/${source}/store-tokens`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ tokens: { access_token: 'x' }, userinfo: {} }),
+        });
+        expect(res.status, source).toBe(401);
+      }
+    });
+  });
+
+  describe('requests from another origin', () => {
+    const resolve = (headers: Record<string, string>) => {
+      store.insertStagingAction({ actionId: 'act_x', manifestId: '', source: 'gmail', actionType: 'draft_email', actionData: '{}', purpose: 'p' });
+      return app.request('/web/staging/act_x/resolve', { method: 'POST', headers: { Cookie: cookie, ...headers }, body: JSON.stringify({ decision: 'reject' }) });
+    };
+
+    it('a page on another local port cannot use the owner cookie', async () => {
+      const res = await resolve({ 'Content-Type': 'text/plain', Origin: 'http://127.0.0.1:8081', Host: '127.0.0.1:3000' });
+      expect(res.status).toBe(401);
+      expect(store.getStagingAction('act_x')!.status).toBe('pending');
+    });
+
+    it('a cross-site or same-site fetch is refused even without an Origin header', async () => {
+      expect((await app.request('/web/staging', { headers: { Cookie: cookie, 'Sec-Fetch-Site': 'same-site' } })).status).toBe(401);
+      expect((await app.request('/web/staging', { headers: { Cookie: cookie, 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(401);
+      expect((await app.request('/agent/sources', { headers: { Cookie: cookie, 'Sec-Fetch-Site': 'cross-site' } })).status).toBe(401);
+    });
+
+    it('the hub\'s own page still works', async () => {
+      const res = await resolve({ 'Content-Type': 'application/json', Origin: 'http://127.0.0.1:3000', Host: '127.0.0.1:3000', 'Sec-Fetch-Site': 'same-origin' });
+      expect(res.status).toBe(200);
+    });
+
+    it('an agent key is not affected by origin headers', async () => {
+      await addTestAgentKey(store);
+      const res = await app.request('/agent/sources', { headers: { ...TEST_AGENT_AUTH, Origin: 'http://elsewhere.test' } });
+      expect(res.status).toBe(200);
+    });
+
+    it('another origin cannot create the first account', async () => {
+      db.prepare('DELETE FROM users').run();
+      const signup = (headers: Record<string, string>) => app.request('/web/auth/signup', {
+        method: 'POST', headers: { 'Content-Type': 'text/plain', ...headers }, body: JSON.stringify({ email: 'evil@x.test', password: 'password123' }),
+      });
+      expect((await signup({ Origin: 'http://127.0.0.1:8081', Host: '127.0.0.1:3000' })).status).toBe(403);
+      expect(store.getUserCount()).toBe(0);
+      expect((await signup({ Origin: 'http://127.0.0.1:3000', Host: '127.0.0.1:3000' })).status).toBe(200);
+    });
+  });
+
+  describe('accounts on a device-secret hub', () => {
+    it('cannot be created or used, so nobody can claim the hub by signing up first', async () => {
+      db.prepare('DELETE FROM users').run();
+      process.env.PDH_DEVICE_SECRET = 's3cret-value';
+      const post = (path: string) => app.request(path, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'evil@x.test', password: 'password123' }),
+      });
+      const signup = await post('/web/auth/signup');
+      expect(signup.status).toBe(404);
+      expect(signup.headers.get('Set-Cookie')).toBeNull();
+      expect(store.getUserCount()).toBe(0);
+      expect((await post('/web/auth/login')).status).toBe(404);
+      const status = await (await app.request('/web/auth/status')).json() as { authenticated: boolean; hasUsers: boolean };
+      expect(status).toEqual({ authenticated: false, hasUsers: true });
+    });
+  });
+
+  describe('one-time values expire', () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('a ticket older than ten minutes is refused', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-11-24T10:00:00Z'));
+      store.createSession('sess2', '2099-01-01T00:00:00.000Z');
+      const start = await (await app.request('/web/oauth/gmail/start', { method: 'POST', headers: { Cookie: 'pdh_session=sess2' } })).json() as { url: string };
+      const state = new URL(start.url).searchParams.get('state')!;
+      const page = await (await app.request(`/oauth/gmail/callback?code=c&state=${state}`)).text();
+      const ticket = page.match(/store-tokens\?ticket=(ticket_[0-9a-f]+)/)![1];
+      vi.setSystemTime(new Date('2026-11-24T10:11:00Z'));
+      const res = await app.request(`/oauth/gmail/store-tokens?ticket=${ticket}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tokens: { access_token: 'at' }, userinfo: {} }),
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it('a state older than ten minutes is refused', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-11-24T10:00:00Z'));
+      store.createSession('sess3', '2099-01-01T00:00:00.000Z');
+      const start = await (await app.request('/web/oauth/gmail/start', { method: 'POST', headers: { Cookie: 'pdh_session=sess3' } })).json() as { url: string };
+      const state = new URL(start.url).searchParams.get('state')!;
+      vi.setSystemTime(new Date('2026-11-24T10:11:00Z'));
+      const res = await app.request(`/oauth/gmail/callback?code=c&state=${state}`);
+      expect(res.status).toBe(302);
+      expect(res.headers.get('Location')).toContain('invalid_state');
     });
   });
 });

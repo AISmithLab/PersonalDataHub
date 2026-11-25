@@ -152,16 +152,25 @@ public class SmsReceiver extends BroadcastReceiver {
     // Null until the server has started once. The request is then rejected (401) and
     // the message stays queued, to be replayed by the server on its next start.
     private String readDeviceSecret(Context context) {
-        File file = new File(context.getFilesDir(), DEVICE_SECRET_FILE);
-        if (!file.exists()) return null;
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-                new java.io.FileInputStream(file), StandardCharsets.UTF_8))) {
-            String line = reader.readLine();
-            return line == null ? null : line.trim();
-        } catch (Exception e) {
-            Log.w(TAG, "Could not read device secret: " + e.getMessage());
-            return null;
+        // The server keeps its data directory beside its own project directory, which
+        // is directly under files/ or one level above it depending on how the Node
+        // runtime unpacks the project. Check both rather than assume one.
+        File files = context.getFilesDir();
+        File[] candidates = new File[] {
+            new File(files, DEVICE_SECRET_FILE),
+            new File(files.getParentFile(), DEVICE_SECRET_FILE),
+        };
+        for (File file : candidates) {
+            if (!file.exists()) continue;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                    new java.io.FileInputStream(file), StandardCharsets.UTF_8))) {
+                String line = reader.readLine();
+                if (line != null && !line.trim().isEmpty()) return line.trim();
+            } catch (Exception e) {
+                Log.w(TAG, "Could not read device secret: " + e.getMessage());
+            }
         }
+        return null;
     }
 
     private File writeQueue(Context context, String json) {

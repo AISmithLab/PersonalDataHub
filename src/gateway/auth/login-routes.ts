@@ -17,7 +17,7 @@ import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
 import { hashSync, compareSync } from 'bcryptjs';
 import type { DataStore } from '../../database/datastore.js';
-import { isOwner, parseCookie, SESSION_COOKIE } from './access.js';
+import { isOwner, isSameOrigin, parseCookie, SESSION_COOKIE, usesDeviceSecret } from './access.js';
 
 interface LoginDeps {
   store: DataStore;
@@ -25,6 +25,18 @@ interface LoginDeps {
 
 export function createLoginRoutes(deps: LoginDeps): Hono {
   const app = new Hono();
+
+  // Account routes are for browsers on the hub's own page.
+  //  - On the phone the owner is identified by the device secret and no account
+  //    ever exists, so "first signup claims the hub" would let any local app
+  //    claim it. Accounts are switched off there.
+  //  - A page from another origin must not be able to create or use an account.
+  app.use('*', async (c, next) => {
+    if (c.req.method !== 'POST') return next();
+    if (usesDeviceSecret()) return c.json({ ok: false, error: 'Accounts are not used on this device' }, 404);
+    if (!isSameOrigin(c)) return c.json({ ok: false, error: 'Cross-origin request refused' }, 403);
+    return next();
+  });
 
   app.post('/signup', async (c) => {
     const body = await c.req.json<{ email?: string; password?: string }>();
@@ -90,7 +102,8 @@ export function createLoginRoutes(deps: LoginDeps): Hono {
   // Also tells the page whether to show "create account" or "sign in".
   app.get('/status', async (c) => {
     const hasUsers = (await deps.store.getUserCount()) > 0;
-    return c.json({ authenticated: await isOwner(c, deps.store), hasUsers });
+    // On a device-secret hub there is nothing to sign up for; never offer it.
+    return c.json({ authenticated: await isOwner(c, deps.store), hasUsers: hasUsers || usesDeviceSecret() });
   });
 
   return app;

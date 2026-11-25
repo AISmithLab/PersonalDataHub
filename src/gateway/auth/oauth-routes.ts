@@ -147,6 +147,13 @@ p{font-size:16px;line-height:1.5}
  *     GET  /:source/callback      the state value issued by start
  *     POST /:source/store-tokens  a ticket issued by callback
  */
+// A sign-in that takes longer than this has been abandoned.
+const ONE_TIME_VALUE_TTL_MS = 10 * 60 * 1000;
+
+function isFresh(createdAt: number): boolean {
+  return Date.now() - createdAt <= ONE_TIME_VALUE_TTL_MS;
+}
+
 export function createOAuthRoutes(deps: OAuthDeps): { owner: Hono; pub: Hono } {
   const owner = new Hono();
   const pub = new Hono();
@@ -161,7 +168,7 @@ export function createOAuthRoutes(deps: OAuthDeps): { owner: Hono; pub: Hono } {
   async function redeemTicket(ticket: string | undefined, source: string): Promise<boolean> {
     if (!ticket || !ticket.startsWith('ticket_')) return false;
     const pending = await deps.store.getAndDeleteOAuthState(ticket);
-    return !!pending && pending.source === source;
+    return !!pending && pending.source === source && isFresh(pending.createdAt);
   }
 
   // --- Gmail OAuth ---
@@ -215,7 +222,7 @@ export function createOAuthRoutes(deps: OAuthDeps): { owner: Hono; pub: Hono } {
     if (!code || !state) return c.redirect(oauthErrorUrl(baseUrl, 'missing_code_or_state'));
 
     const pending = await deps.store.getAndDeleteOAuthState(state);
-    if (!pending || pending.source !== 'gmail') {
+    if (!pending || pending.source !== 'gmail' || !isFresh(pending.createdAt)) {
       return c.redirect(oauthErrorUrl(baseUrl, 'invalid_state'));
     }
 
@@ -351,7 +358,7 @@ export function createOAuthRoutes(deps: OAuthDeps): { owner: Hono; pub: Hono } {
     if (!code || !state) return c.redirect(oauthErrorUrl(baseUrl, 'missing_code_or_state'));
 
     const pending = await deps.store.getAndDeleteOAuthState(state);
-    if (!pending || pending.source !== 'google_calendar') {
+    if (!pending || pending.source !== 'google_calendar' || !isFresh(pending.createdAt)) {
       return c.redirect(oauthErrorUrl(baseUrl, 'invalid_state'));
     }
 
@@ -470,7 +477,7 @@ export function createOAuthRoutes(deps: OAuthDeps): { owner: Hono; pub: Hono } {
     if (!code || !state) return c.redirect(oauthErrorUrl(baseUrl, 'missing_code_or_state'));
 
     const pending = await deps.store.getAndDeleteOAuthState(state);
-    if (!pending || pending.source !== 'github') {
+    if (!pending || pending.source !== 'github' || !isFresh(pending.createdAt)) {
       return c.redirect(oauthErrorUrl(baseUrl, 'invalid_state'));
     }
 

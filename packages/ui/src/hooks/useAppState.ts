@@ -718,6 +718,11 @@ export function useAppState() {
   }, []);
 
   useEffect(() => {
+    api.setUnauthorizedHandler(() => setAuth((cur) => (cur === 'signedIn' ? 'signedOut' : cur)));
+    return () => api.setUnauthorizedHandler(null);
+  }, []);
+
+  useEffect(() => {
     async function bootstrap() {
       try {
         const status = await api.getAuthStatus();

@@ -568,12 +568,20 @@ export class DynamoDataStore implements DataStore {
   }
 
   async listAgentKeys(): Promise<AgentKeyRow[]> {
-    const result = await this.docClient.send(new ScanCommand({
-      TableName: this.tableName,
-      FilterExpression: 'SK = :sk',
-      ExpressionAttributeValues: { ':sk': 'AGENTKEY' },
-    }));
-    const rows = (result.Items ?? []).map((item) => this.toAgentKeyRow(item));
+    // A filtered Scan reads at most 1 MB per call, so page through the table;
+    // otherwise a key could be missing from the list and impossible to delete.
+    const rows: AgentKeyRow[] = [];
+    let startKey: Record<string, unknown> | undefined;
+    do {
+      const result = await this.docClient.send(new ScanCommand({
+        TableName: this.tableName,
+        FilterExpression: 'SK = :sk',
+        ExpressionAttributeValues: { ':sk': 'AGENTKEY' },
+        ExclusiveStartKey: startKey,
+      }));
+      for (const item of result.Items ?? []) rows.push(this.toAgentKeyRow(item));
+      startKey = result.LastEvaluatedKey;
+    } while (startKey);
     rows.sort((a, b) => a.created_at.localeCompare(b.created_at));
     return rows;
   }

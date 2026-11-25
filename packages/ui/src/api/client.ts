@@ -21,8 +21,18 @@ export function hubFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${API_BASE_URL}${path}`, { ...init, headers });
 }
 
+// Called when the hub says we are no longer the owner (session expired or ended
+// elsewhere), so the app can return to the sign-in screen instead of showing an
+// empty hub.
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  onUnauthorized = handler;
+}
+
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await hubFetch(path, init);
+  if (res.status === 401 && !path.startsWith('/web/auth/')) onUnauthorized?.();
   return res.json() as Promise<T>;
 }
 
