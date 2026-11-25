@@ -37,6 +37,7 @@ var currentTab = 'ai';
       settingsProvider: 'anthropic',
       autoReply: { enabled: false, maxToolRounds: 3, loading: false, testResult: null, testLoading: false },
       settingsSection: 'ai',
+      agents: { items: null, loading: false, sources: ['gmail', 'google_calendar', 'github', 'photo'], panel: null, ticked: [], error: null, joined: null },
       onboarding: { active: false, step: 'intro' },
     };
     var ONBOARDING_STEPS = ['intro', 'apikey', 'sms', 'chat', 'memory'];
@@ -188,6 +189,129 @@ var currentTab = 'ai';
       }).catch(function() { state.memories.loading = false; });
     }
     window.loadMemories = loadMemories;
+
+    // --- Agents (Settings → Agents) ---
+    // An agent registers with a one-time join link the owner makes here, then reads data and
+    // proposes actions within what was ticked for it. The owner never sees a token.
+    var _agentPoll = null;
+
+    function loadAgents() {
+      state.agents.loading = true;
+      return fetch('/web/agents').then(function(r) { return r.json(); }).then(function(d) {
+        state.agents.loading = false;
+        if (!d.ok) return;
+        // Notice an agent that appears while a join link is on screen.
+        if (state.agents.items && state.agents.panel && state.agents.panel.kind === 'link') {
+          var known = state.agents.items.map(function(a) { return a.id; });
+          var fresh = d.agents.filter(function(a) { return known.indexOf(a.id) < 0; })[0];
+          if (fresh) { state.agents.joined = fresh.name; agentClosePanel(true); }
+        }
+        state.agents.items = d.agents;
+        if (d.sources && d.sources.length) state.agents.sources = d.sources;
+        if (currentTab === 'settings' && state.settingsSection === 'agents') render();
+      }).catch(function() {
+        // An empty list, not null: null would make the section try to load again on every render.
+        state.agents.loading = false; state.agents.error = 'Could not load agents.';
+        if (state.agents.items === null) state.agents.items = [];
+        if (currentTab === 'settings' && state.settingsSection === 'agents') render();
+      });
+    }
+    window.loadAgents = loadAgents;
+
+    function agentClosePanel(quiet) {
+      state.agents.panel = null;
+      if (_agentPoll) { clearInterval(_agentPoll); _agentPoll = null; }
+      if (quiet !== true) render();
+    }
+    window.agentClosePanel = agentClosePanel;
+
+    function agentAddOpen() {
+      // Start with everything ticked for the sources that are connected.
+      var connected = state.agents.sources.filter(function(s) {
+        return (state.sources || []).some(function(x) { return x.name === s && x.connected; });
+      });
+      state.agents.ticked = [];
+      connected.forEach(function(s) { state.agents.ticked.push('pull:' + s, 'propose:' + s); });
+      state.agents.error = null;
+      state.agents.joined = null;
+      state.agents.panel = { kind: 'add' };
+      render();
+    }
+    window.agentAddOpen = agentAddOpen;
+
+    function agentEditOpen(id) {
+      var a = (state.agents.items || []).filter(function(x) { return x.id === id; })[0];
+      if (!a) return;
+      state.agents.ticked = a.permissions.slice();
+      state.agents.error = null;
+      state.agents.panel = { kind: 'edit', id: a.id, name: a.name };
+      render();
+    }
+    window.agentEditOpen = agentEditOpen;
+
+    function agentToggle(permission) {
+      var i = state.agents.ticked.indexOf(permission);
+      if (i >= 0) state.agents.ticked.splice(i, 1); else state.agents.ticked.push(permission);
+    }
+    window.agentToggle = agentToggle;
+
+    function agentRequest(path, method, body) {
+      return fetch(path, { method: method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+        .then(function(r) { return r.json(); })
+        .catch(function() { return { ok: false, error: 'Could not reach the hub.' }; });
+    }
+
+    function agentCreateLink() {
+      agentRequest('/web/agents/join-links', 'POST', { permissions: state.agents.ticked }).then(function(d) {
+        if (d.ok && d.url) {
+          state.agents.error = null;
+          state.agents.panel = { kind: 'link', url: d.url, expiresAt: d.expires_at, copied: false };
+          // While the link is showing, watch for the agent to arrive.
+          if (_agentPoll) clearInterval(_agentPoll);
+          _agentPoll = setInterval(function() {
+            if (currentTab === 'settings' && state.settingsSection === 'agents' && state.agents.panel && state.agents.panel.kind === 'link') loadAgents();
+            else if (!state.agents.panel) { clearInterval(_agentPoll); _agentPoll = null; }
+          }, 3000);
+        } else state.agents.error = d.error || 'Could not create the join link.';
+        render();
+      });
+    }
+    window.agentCreateLink = agentCreateLink;
+
+    function agentSavePermissions() {
+      var panel = state.agents.panel;
+      if (!panel || panel.kind !== 'edit') return;
+      agentRequest('/web/agents/' + encodeURIComponent(panel.id), 'PUT', { permissions: state.agents.ticked }).then(function(d) {
+        if (d.ok) { state.agents.error = null; state.agents.panel = null; loadAgents(); }
+        else { state.agents.error = d.error || 'Could not save.'; render(); }
+      });
+    }
+    window.agentSavePermissions = agentSavePermissions;
+
+    function agentRevoke(id) {
+      var a = (state.agents.items || []).filter(function(x) { return x.id === id; })[0];
+      if (!a || !confirm('Revoke ' + a.name + '? It will lose access to this hub immediately.')) return;
+      agentRequest('/web/agents/' + encodeURIComponent(id), 'DELETE').then(function(d) {
+        state.agents.error = d.ok ? null : (d.error || 'Could not revoke.');
+        if (state.agents.panel && state.agents.panel.id === id) state.agents.panel = null;
+        if (state.agents.joined === a.name) state.agents.joined = null;
+        loadAgents();
+      });
+    }
+    window.agentRevoke = agentRevoke;
+
+    function agentCopyLink() {
+      var panel = state.agents.panel;
+      if (!panel || panel.kind !== 'link' || !navigator.clipboard) return;
+      navigator.clipboard.writeText(panel.url).then(function() { panel.copied = true; render(); }).catch(function() {});
+    }
+    window.agentCopyLink = agentCopyLink;
+
+    // SQLite stores UTC as "YYYY-MM-DD HH:MM:SS" with no zone marker.
+    function agentTime(value) {
+      var d = new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ? value.replace(' ', 'T') + 'Z' : value);
+      return isNaN(d.getTime()) ? value : d.toLocaleString();
+    }
 
     function deleteMemory(id) {
       fetch('/web/memories/' + encodeURIComponent(id), { method: 'DELETE' }).then(function(r) { return r.json(); }).then(function(d) {

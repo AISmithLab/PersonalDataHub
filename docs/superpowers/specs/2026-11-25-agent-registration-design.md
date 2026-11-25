@@ -171,7 +171,7 @@ Known and not addressed:
 - **First-run window on desktop.** Before the owner creates the account, any local program can call signup and become the owner, and could then mint join links. This predates registration but undermines it during that window. Closing it needs a setup code from `pdh init` that signup must present; Haojian to decide.
 - DynamoDB looks agents up by id with a table scan on every agent call. Fine at a handful of agents.
 - The sql.js and DynamoDB implementations of the new store methods have no automated tests; only SQLite does.
-- The legacy page at `/` has no Agents screen.
+- (Fixed 2026-11-25.) The desktop page at `/` now has Settings → Agents too. Leaving it out was a wrong call: `/` is the desktop layout Haojian uses, and `/next` is the phone-shaped rewrite.
 
 ## Part 2: smithagent
 

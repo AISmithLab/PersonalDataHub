@@ -21,6 +21,7 @@ function renderSettingsTab() {
       var sections = [
         { key: 'ai', label: 'AI Settings', icon: 'smart_toy' },
         { key: 'sms', label: 'SMS Auto-Reply', icon: 'sms' },
+        { key: 'agents', label: 'Agents', icon: 'robot_2' },
         { key: 'integrations', label: 'Integrations', icon: 'extension' },
         { key: 'audit', label: 'Activity Log', icon: 'list_alt' },
         { key: 'support', label: 'Support', icon: 'bug_report' }
@@ -133,6 +134,102 @@ function renderSettingsTab() {
         }
         html += '    </div>';
         html += '  </div>';
+        html += '</div>';
+      }
+
+      else if (activeSection === 'agents') {
+        // Agents register with a one-time join link made here. No secret is ever shown:
+        // the hub hands the token to the agent when it joins.
+        var ag = state.agents;
+        if (ag.items === null && !ag.loading) loadAgents();
+        var SRC = { gmail: 'Gmail', google_calendar: 'Calendar', github: 'GitHub', photo: 'Photos' };
+        var grid = function() {
+          var g = '<table class="text-body-sm font-body-sm"><thead><tr><th></th>';
+          g += '<th class="px-md py-1 font-semibold text-on-surface-variant text-xs">Read</th>';
+          g += '<th class="px-md py-1 font-semibold text-on-surface-variant text-xs">Propose actions</th></tr></thead><tbody>';
+          ag.sources.forEach(function(src) {
+            g += '<tr><td class="pr-lg py-1 text-on-surface">' + escapeHtml(SRC[src] || src) + '</td>';
+            ['pull', 'propose'].forEach(function(kind) {
+              var perm = kind + ':' + src;
+              g += '<td class="px-md py-1 text-center"><input type="checkbox" class="w-4 h-4 accent-primary" aria-label="' + escapeAttr((kind === 'pull' ? 'Read ' : 'Propose actions for ') + (SRC[src] || src)) + '"' + (ag.ticked.indexOf(perm) >= 0 ? ' checked' : '') + ' onchange="agentToggle(\x27' + perm + '\x27)"></td>';
+            });
+            g += '</tr>';
+          });
+          return g + '</tbody></table>';
+        };
+        var summary = function(perms) {
+          var parts = [];
+          ag.sources.forEach(function(src) {
+            var can = [];
+            if (perms.indexOf('pull:' + src) >= 0) can.push('read');
+            if (perms.indexOf('propose:' + src) >= 0) can.push('propose');
+            if (can.length) parts.push((SRC[src] || src) + ' (' + can.join(', ') + ')');
+          });
+          return parts.length ? parts.join(' · ') : 'No permissions';
+        };
+        var btn = 'font-label-caps text-label-caps px-4 py-2 rounded-lg transition-all active:scale-95';
+        var primary = btn + ' bg-primary hover:bg-primary-hover text-on-primary shadow-sm';
+        var ghost = btn + ' border border-outline hover:bg-surface-container-high text-on-surface-variant';
+
+        html += '<div class="space-y-lg">';
+        html += '  <div class="border-b border-outline-variant pb-xs">';
+        html += '    <h2 class="font-headline-lg text-headline-lg text-on-surface">Agents</h2>';
+        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Agents read your data and propose actions through this hub. Each one registers with a join link and can be revoked on its own. Proposed actions always wait for your approval.</p>';
+        html += '  </div>';
+
+        if (ag.error) html += '<div class="bg-error/10 border border-error/30 rounded-lg p-3 text-error text-body-sm">' + escapeHtml(ag.error) + '</div>';
+        if (ag.joined) {
+          html += '<div class="bg-primary/10 border border-primary/40 rounded-lg p-3 flex items-center justify-between gap-md text-body-sm">';
+          html += '<span><b>' + escapeHtml(ag.joined) + '</b> joined.</span>';
+          html += '<button onclick="state.agents.joined=null; render()" class="text-on-surface-variant text-xs">Dismiss</button></div>';
+        }
+
+        var panel = ag.panel;
+        if (!panel) {
+          html += '<button onclick="agentAddOpen()" class="' + primary + '">Add agent</button>';
+        } else if (panel.kind === 'add' || panel.kind === 'edit') {
+          html += '<div class="bg-white border border-primary/40 rounded-xl shadow-sm p-md space-y-md max-w-xl">';
+          html += '<div class="font-body-md text-body-md font-semibold text-on-surface">' + (panel.kind === 'add' ? 'What may this agent do?' : 'What may ' + escapeHtml(panel.name) + ' do?') + '</div>';
+          html += grid();
+          html += '<div class="flex gap-sm">';
+          html += panel.kind === 'add'
+            ? '<button onclick="agentCreateLink()" class="' + primary + '">Create join link</button>'
+            : '<button onclick="agentSavePermissions()" class="' + primary + '">Save</button>';
+          html += '<button onclick="agentClosePanel()" class="' + ghost + '">Cancel</button></div></div>';
+        } else if (panel.kind === 'link') {
+          var until = new Date(panel.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          html += '<div class="bg-white border border-primary/40 rounded-xl shadow-sm p-md space-y-sm max-w-2xl">';
+          html += '<div class="font-body-md text-body-md font-semibold text-on-surface">Join link, valid once, until ' + escapeHtml(until) + '</div>';
+          html += '<div id="agent-join-link" class="bg-surface-container rounded-lg p-3 font-mono text-xs break-all select-all">' + escapeHtml(panel.url) + '</div>';
+          html += '<button onclick="agentCopyLink()" class="' + ghost + '">' + (panel.copied ? 'Copied' : 'Copy link') + '</button>';
+          html += '<div class="text-body-sm text-on-surface-variant">On the machine where the agent runs:</div>';
+          html += '<div class="bg-surface-container rounded-lg p-3 font-mono text-xs break-all select-all">smithagent joinhub &lt;agent&gt; ' + escapeHtml(panel.url) + '</div>';
+          html += '<div class="text-body-sm text-on-surface-variant">Waiting for the agent to join…</div>';
+          html += '<button onclick="agentClosePanel()" class="' + ghost + '">Close</button></div>';
+        }
+
+        if (ag.items === null) {
+          html += '<div class="text-body-sm text-on-surface-variant">Loading…</div>';
+        } else if (!ag.items.length) {
+          html += '<div class="bg-white border border-outline-variant rounded-xl p-lg text-center max-w-2xl">';
+          html += '<div class="font-body-md text-body-md font-bold text-on-surface">No agents yet</div>';
+          html += '<div class="text-body-sm text-on-surface-variant mt-xs">Add one to let an agent use this hub.</div></div>';
+        } else {
+          html += '<div class="bg-white border border-outline-variant rounded-xl shadow-sm overflow-hidden"><div class="overflow-x-auto">';
+          html += '<table class="w-full border-collapse text-left text-body-sm font-body-sm"><thead><tr class="bg-surface-container border-b border-outline-variant">';
+          ['Agent', 'May do', 'Last used', ''].forEach(function(h) { html += '<th class="px-md py-3 font-semibold text-on-surface-variant uppercase text-xs tracking-wider">' + h + '</th>'; });
+          html += '</tr></thead><tbody class="divide-y divide-outline-variant/60">';
+          ag.items.forEach(function(a) {
+            html += '<tr><td class="px-md py-3 font-semibold text-on-surface whitespace-nowrap">' + escapeHtml(a.name) + '</td>';
+            html += '<td class="px-md py-3 text-on-surface-variant">' + escapeHtml(summary(a.permissions)) + '</td>';
+            html += '<td class="px-md py-3 text-on-surface-variant whitespace-nowrap">' + (a.last_used_at ? escapeHtml(agentTime(a.last_used_at)) : 'never') + '</td>';
+            html += '<td class="px-md py-3 text-right whitespace-nowrap">';
+            html += '<button onclick="agentEditOpen(\x27' + escapeAttr(a.id) + '\x27)" class="border border-outline hover:bg-surface-container-high text-on-surface-variant text-xs px-3 py-1.5 rounded-lg mr-2">Edit</button>';
+            html += '<button onclick="agentRevoke(\x27' + escapeAttr(a.id) + '\x27)" class="border border-error/40 hover:bg-error/10 text-error text-xs px-3 py-1.5 rounded-lg">Revoke</button>';
+            html += '</td></tr>';
+          });
+          html += '</tbody></table></div></div>';
+        }
         html += '</div>';
       }
 
