@@ -37,6 +37,8 @@ var currentTab = 'ai';
       settingsProvider: 'anthropic',
       autoReply: { enabled: false, maxToolRounds: 3, loading: false, testResult: null, testLoading: false },
       settingsSection: 'ai',
+      pageChats: { skills: { messages: [], loading: false, error: null, draft: '' }, pipes: { messages: [], loading: false, error: null, draft: '' } },
+      pipes: { items: null, loading: false, selectedId: null, output: null, raw: false, copied: false, error: null },
       agents: { items: null, loading: false, sources: ['gmail', 'google_calendar', 'github', 'photo'], panel: null, ticked: [], error: null, joined: null },
       onboarding: { active: false, step: 'intro' },
     };
@@ -189,6 +191,156 @@ var currentTab = 'ai';
       }).catch(function() { state.memories.loading = false; });
     }
     window.loadMemories = loadMemories;
+
+    // --- Skills and Pipes pages: embedded chat ---
+    function scrollPageChat() {
+      var el = document.getElementById('page-chat-messages');
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+
+    function pageTab(scope) { return scope === 'pipes' ? 'pipe' : 'skill'; }
+
+    async function sendPageChat(scope) {
+      var chat = state.pageChats[scope];
+      var text = (chat.draft || '').trim();
+      if (!text || chat.loading) return;
+      chat.draft = '';
+      chat.messages.push({ role: 'user', content: text });
+      chat.loading = true;
+      chat.error = null;
+      if (currentTab === pageTab(scope)) render();
+
+      var focus = pageChatFocus(scope);
+      try {
+        var res = await fetch('/web/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: chat.messages.slice(-50).map(function(m) { return { role: m.role, content: m.content }; }),
+            page: scope,
+            focusId: focus ? focus.id : undefined
+          })
+        });
+        var data = await res.json();
+        chat.loading = false;
+        if (data.ok) {
+          chat.messages.push({ role: 'assistant', content: data.reply, toolOutputs: data.toolOutputs || [] });
+          await syncAfterChat(scope, data.toolOutputs || []);
+        } else {
+          chat.error = data.error || 'Unknown error';
+        }
+      } catch (err) {
+        chat.loading = false;
+        chat.error = err.message || 'Network error';
+      }
+      if (currentTab === pageTab(scope)) render();
+    }
+    window.sendPageChat = sendPageChat;
+
+    // The right panel follows the chat: whatever the AI just saved is reloaded and selected.
+    async function syncAfterChat(scope, toolOutputs) {
+      var touched = function(names) { return toolOutputs.some(function(t) { return names.indexOf(t.name) >= 0; }); };
+      var savedId = function(name) {
+        var id = null;
+        toolOutputs.forEach(function(t) {
+          if (t.name !== name) return;
+          try { var o = JSON.parse(t.output); if (o && o.ok !== false && o.id) id = o.id; } catch (e) { /* not JSON */ }
+        });
+        return id;
+      };
+      if (touched(['save_pipe', 'delete_pipe'])) {
+        await loadPipes();
+        var pid = savedId('save_pipe');
+        if (pid) selectPipe(pid, true);
+        else if (state.pipes.selectedId && !(state.pipes.items || []).some(function(p) { return p.id === state.pipes.selectedId; })) state.pipes.selectedId = null;
+      }
+      if (touched(['save_skill', 'delete_skill'])) {
+        var d = await fetch('/web/skills').then(function(r) { return r.json(); }).catch(function() { return {}; });
+        if (d.ok) { state.skills.items = d.skills; state.skills.loaded = true; }
+      }
+    }
+
+    function clearPageChat(scope) {
+      state.pageChats[scope].messages = [];
+      state.pageChats[scope].error = null;
+      render();
+    }
+    window.clearPageChat = clearPageChat;
+
+    // --- Pipes page ---
+    function loadPipes() {
+      state.pipes.loading = true;
+      return fetch('/agent/pipes').then(function(r) { return r.json(); }).then(function(d) {
+        state.pipes.loading = false;
+        if (d.ok) { state.pipes.items = d.pipes; state.pipes.error = null; }
+        else { state.pipes.error = 'Could not load pipes.'; if (state.pipes.items === null) state.pipes.items = []; }
+        if (currentTab === 'pipe' || (currentTab === 'settings' && state.settingsSection === 'agents')) render();
+      }).catch(function() {
+        state.pipes.loading = false; state.pipes.error = 'Could not load pipes.';
+        if (state.pipes.items === null) state.pipes.items = [];
+        if (currentTab === 'pipe') render();
+      });
+    }
+    window.loadPipes = loadPipes;
+
+    function selectPipe(id, quiet) {
+      state.pipes.selectedId = id;
+      state.pipes.copied = false;
+      state.pipes.output = null;
+      if (id) runSelectedPipe(true);
+      if (quiet !== true) render();
+    }
+    window.selectPipe = selectPipe;
+
+    // Runs the selected pipe through the same endpoint an agent calls, so the panel shows exactly what an agent gets.
+    function runSelectedPipe(quiet) {
+      var id = state.pipes.selectedId;
+      var pipe = (state.pipes.items || []).filter(function(p) { return p.id === id; })[0];
+      if (!pipe || !pipe.enabled) return;
+      state.pipes.output = { id: id, loading: true };
+      if (quiet !== true) render();
+      fetch('/agent/pipes/' + id + '?purpose=' + encodeURIComponent('Pipes page preview')).then(function(r) { return r.json(); }).then(function(d) {
+        if (state.pipes.selectedId !== id) return;
+        state.pipes.output = d.ok
+          ? { id: id, loading: false, data: d.data, meta: d.meta, body: d }
+          : { id: id, loading: false, error: (d.error && d.error.message) || 'The pipe failed.' };
+        if (currentTab === 'pipe') render();
+      }).catch(function() {
+        if (state.pipes.selectedId !== id) return;
+        state.pipes.output = { id: id, loading: false, error: 'Could not reach the hub.' };
+        if (currentTab === 'pipe') render();
+      });
+    }
+    window.runSelectedPipe = runSelectedPipe;
+
+    function togglePipe(id, enabled) {
+      fetch('/web/pipes/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !!enabled }) })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (!d.ok) state.pipes.error = d.error || 'Could not change the pipe.';
+          return loadPipes();
+        })
+        .then(function() { if (state.pipes.selectedId === id) { state.pipes.output = null; runSelectedPipe(); } });
+    }
+    window.togglePipe = togglePipe;
+
+    function deletePipe(id) {
+      var pipe = (state.pipes.items || []).filter(function(p) { return p.id === id; })[0];
+      if (!pipe || !confirm('Delete the pipe "' + pipe.name + '"? Agents that call it will get an error.')) return;
+      fetch('/web/pipes/' + id, { method: 'DELETE' }).then(function(r) { return r.json(); }).then(function(d) {
+        if (!d.ok) state.pipes.error = d.error || 'Could not delete the pipe.';
+        if (state.pipes.selectedId === id) { state.pipes.selectedId = null; state.pipes.output = null; }
+        loadPipes();
+      });
+    }
+    window.deletePipe = deletePipe;
+
+    function copyPipeUrl() {
+      var pipe = (state.pipes.items || []).filter(function(p) { return p.id === state.pipes.selectedId; })[0];
+      if (!pipe || !navigator.clipboard) return;
+      navigator.clipboard.writeText(pipe.url).then(function() { state.pipes.copied = true; render(); }).catch(function() {});
+    }
+    window.copyPipeUrl = copyPipeUrl;
 
     // --- Agents (Settings → Agents) ---
     // An agent registers with a one-time join link the owner makes here, then reads data and
@@ -420,7 +572,8 @@ var currentTab = 'ai';
         case 'sms': content.innerHTML = renderSmsTab(); loadContacts(); loadSmsMessages(); break;
         case 'photo': content.innerHTML = renderPhotoTab(); loadPhotos(false); break;
         case 'ai': content.innerHTML = renderAiTab(); var _cm = document.getElementById('chat-messages'); if (_cm) _cm.scrollTop = _cm.scrollHeight; break;
-        case 'skill': content.innerHTML = renderSkillTab(); loadSkills(); break;
+        case 'skill': content.innerHTML = renderSkillPage(); loadSkills(); scrollPageChat(); break;
+        case 'pipe': content.innerHTML = renderPipePage(); scrollPageChat(); break;
         case 'memory': content.innerHTML = renderMemoryTab(); loadMemories(); break;
         case 'settings': content.innerHTML = renderSettingsTab(); loadMemories(); break;
       }
@@ -1331,6 +1484,8 @@ var currentTab = 'ai';
 
 
     /* INJECT_renderSkillTab */
+
+    /* INJECT_renderWorkbench */
 
 
     function toggleAddSkill() {

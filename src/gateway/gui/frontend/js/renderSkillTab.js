@@ -5,8 +5,8 @@ function renderSkillTab() {
       // TopBar
       html += '<header class="flex justify-between items-center px-margin h-16 border-b border-outline-variant bg-surface shrink-0">';
       html += '<div class="flex items-center gap-sm">';
-      html += '<span class="material-symbols-outlined text-primary">smart_toy</span>';
-      html += '<h1 class="font-headline-md text-headline-md font-bold text-primary">AI Studio</h1>';
+      html += '<span class="material-symbols-outlined text-primary">bolt</span>';
+      html += '<h1 class="font-headline-md text-headline-md font-bold text-primary">Skills</h1>';
       html += '</div>';
       html += '</header>';
 

@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync, existsSync, lstatSync, mkdirSync, unlinkSy
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 
-const VERSION = '1';
+const VERSION = '2';
 
 const USAGE = `query-hub — read from and propose actions to a PersonalDataHub
 
@@ -22,11 +22,15 @@ const USAGE = `query-hub — read from and propose actions to a PersonalDataHub
   query-hub sources                                the sources it may read, and whether each is connected
   query-hub pull <source> --purpose <why> [--query <search>] [--limit <n>]
   query-hub propose <source> <action-type> --purpose <why> --data '<json>'
+  query-hub pipes                                  the pipes it may run: id, name and what each returns
+  query-hub pipe <id> [--purpose <why>] [--limit <n>]   run a pipe now and print its rows
   query-hub leave                                  remove this agent from the hub and delete its token
 
 Sources: gmail, google_calendar, github, photo.
 Every pull and propose needs --purpose; the hub records it in the owner's audit log.
 Proposed actions are not carried out until the owner approves them in the hub.
+A pipe is a filtered view of one source that the owner prepared ("emails asking for a recommendation
+letter"). Prefer a pipe over pull when one fits: it returns only what the task needs.
 
 The token file is $QUERY_HUB_CONFIG, or ~/.pdh/agent.json. Output is JSON on stdout.`;
 
@@ -215,6 +219,28 @@ const commands = {
       }
     }
     print(await call('/agent/propose', { method: 'POST', body: { source, action_type: actionType, action_data: data, purpose: flags.purpose } }));
+  },
+
+  async pipes() {
+    const { pipes } = await call('/agent/pipes');
+    // The program is the owner's business; an agent needs to know what a pipe returns.
+    print({ ok: true, pipes: pipes.map(({ id, name, description, source, enabled }) => ({ id, name, description, source, enabled })) });
+  },
+
+  async pipe(argv) {
+    const { positional, flags } = parseArgs(argv, ['purpose', 'limit']);
+    const id = positional[0];
+    if (!id) throw new Fail('Usage: query-hub pipe <id> [--purpose <why>] [--limit <n>]   (ids: query-hub pipes)');
+    if (!/^[a-z2-7]{8}$/.test(id)) throw new Fail(`"${id}" is not a pipe id. Run "query-hub pipes" to see the ids.`);
+    const params = new URLSearchParams();
+    if (flags.purpose !== undefined) params.set('purpose', flags.purpose);
+    if (flags.limit !== undefined) {
+      const limit = Number(flags.limit);
+      if (!Number.isInteger(limit) || limit < 1) throw new Fail('--limit must be a positive whole number.');
+      params.set('limit', String(limit));
+    }
+    const qs = params.toString();
+    print(await call(`/agent/pipes/${id}${qs ? `?${qs}` : ''}`));
   },
 
   async leave() {

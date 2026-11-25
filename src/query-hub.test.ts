@@ -32,6 +32,7 @@ describe('query-hub', () => {
   let server: Server;
   let hub: string;
   let tokenFile: string;
+  let serverDeps: Parameters<typeof createServer>[0];
   const owner = { Cookie: 'pdh_session=sess', 'Content-Type': 'application/json' };
 
   beforeAll(async () => {
@@ -49,7 +50,8 @@ describe('query-hub', () => {
       sources: { gmail: { enabled: true, owner_auth: { type: 'oauth2' }, boundary: {} }, github: { enabled: true, owner_auth: { type: 'github_app' }, boundary: {} } },
       port: 0,
     } as unknown as HubConfigParsed;
-    const app = createServer({ store, connectorRegistry: registry, config, tokenManager });
+    serverDeps = { store, connectorRegistry: registry, config, tokenManager };
+    const app = createServer(serverDeps);
     await new Promise<void>((done) => {
       server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 0 }, () => done()) as Server;
     });
@@ -301,6 +303,36 @@ describe('query-hub', () => {
       expect(r.stderr, args.join(' ')).toContain(message);
     }
     for (const r of [nul, await run(['__proto__'])]) expect(r.stderr).not.toMatch(/\n\s+at /);
+  });
+
+  it('lists and runs the pipes the agent was given', async () => {
+    const { savePipe } = await import('./gateway/pipes.js');
+    const { pipeAsk } = await import('./gateway/chat/routes.js');
+    const pipeDeps = { ...serverDeps, ask: pipeAsk(serverDeps) };
+    const mine = (await savePipe(pipeDeps, { name: 'Gmail items', description: 'Every gmail item, title only.', source: 'gmail', program: 'return rows.map((r) => ({ title: r.data.title }));' })).id as string;
+    const other = (await savePipe(pipeDeps, { name: 'Not mine', source: 'gmail', program: 'return rows;' })).id as string;
+    await run(['join', await link([`pipe:${mine}`]), '--name', 'piper']);
+
+    const list = await run(['pipes']);
+    expect(list.json).toEqual({ ok: true, pipes: [{ id: mine, name: 'Gmail items', description: 'Every gmail item, title only.', source: 'gmail', enabled: true }] });
+    expect(list.stdout).not.toContain('return rows');
+
+    const out = await run(['pipe', mine, '--purpose', 'weekly triage', '--limit', '5']);
+    expect(out.code).toBe(0);
+    expect(out.json.data).toEqual([{ title: 'gmail item' }]);
+    expect(out.json.pipe.name).toBe('Gmail items');
+    expect(JSON.parse(store.queryAuditEntries({ event: 'pipe_run' })[0].details)).toMatchObject({ initiatedBy: 'piper', purpose: 'weekly triage' });
+
+    const denied = await run(['pipe', other]);
+    expect(denied.code).toBe(1);
+    expect(denied.stderr).toContain(`lacks the "pipe:${other}" permission`);
+    // it has the pipe, not the source
+    expect((await run(['pull', 'gmail', '--purpose', 'x'])).stderr).toContain('lacks the "pull:gmail" permission');
+
+    expect((await run(['pipe'])).stderr).toContain('Usage: query-hub pipe <id>');
+    expect((await run(['pipe', 'NOT-AN-ID'])).stderr).toContain('is not a pipe id');
+    await fetch(`${hub}/web/pipes/${mine}`, { method: 'PUT', headers: owner, body: JSON.stringify({ enabled: false }) });
+    expect((await run(['pipe', mine])).stderr).toContain('is switched off');
   });
 
   it('prints help with no arguments', async () => {

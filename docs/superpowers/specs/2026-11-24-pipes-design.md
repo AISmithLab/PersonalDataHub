@@ -1,6 +1,21 @@
 # Pipes design
 
-Date: 2026-11-24. Status: awaiting approval.
+Date: 2026-11-24. Status: built 2026-11-25 on branch `pipes`, with the changes in "As built" below.
+
+## As built (2026-11-25)
+
+Haojian asked for the feature to be built and changed the page design: "Chat should be integrated into the skills and pipes, so the user can configure skills and pipes iteratively in the chat. so it can be two panels. the left panel is chat, while the right panel is the skills/pipes." Then: "skills and pipes are two different objects. better to separate them."
+
+- **Two pages, each two panels.** The desktop page (`/`) has Skills and Pipes as separate sidebar items. Each shows its own chat on the left and its objects on the right. Each page keeps its own conversation. The plain Chat tab stays. (The last two are my calls.)
+- **The chat knows the selection.** `POST /web/chat` takes `page` (`skills` or `pipes`) and `focusId`; the system prompt then carries the selected pipe or skill, so "also drop mailing lists" edits it in place. The right panel reloads and selects whatever the AI saved.
+- **Routes.** `GET /agent/pipes` (the pipes the caller may run; the owner sees all, with program and on/off state), `GET /agent/pipes/:id` (runs the program), `PUT /web/pipes/:id {enabled}`, `DELETE /web/pipes/:id`. No route writes a program.
+- **Per-pipe permission.** An agent needs `pipe:<id>`, ticked in Settings → Agents. It does not need `pull:<source>`: a pipe is a way to give an agent one filtered view without the source. Having the source does not give the pipes over it either.
+- **A switched-off pipe** answers 409 `PIPE_OFF` for everyone, the owner included.
+- **`query-hub pipes`** and **`query-hub pipe <id> [--purpose] [--limit]`**.
+- **Desktop page only.** `packages/ui` (the phone-shaped page and the mobile app) has no Pipes page.
+- Not changed from the design: the program contract (`rows`, `ask`, return an array), the sandbox and its stated limits, `ask` caching and its limit of five at once, 20 items by default and 50 at most, the optional `query`, quick filters applied first, the audit entry per run.
+
+The sections below are the original design; where they disagree with this list, this list is what was built.
 
 ## Intent
 

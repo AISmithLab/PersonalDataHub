@@ -142,6 +142,8 @@ function renderSettingsTab() {
         // the hub hands the token to the agent when it joins.
         var ag = state.agents;
         if (ag.items === null && !ag.loading) loadAgents();
+        if (state.pipes.items === null && !state.pipes.loading) loadPipes();
+        var pipeList = state.pipes.items || [];
         var SRC = { gmail: 'Gmail', google_calendar: 'Calendar', github: 'GitHub', photo: 'Photos' };
         var grid = function() {
           var g = '<table class="text-body-sm font-body-sm"><thead><tr><th></th>';
@@ -155,7 +157,15 @@ function renderSettingsTab() {
             });
             g += '</tr>';
           });
-          return g + '</tbody></table>';
+          g += '</tbody></table>';
+          // A pipe is ticked on its own: it gives the agent that one filtered view, without the source.
+          g += '<div class="pt-sm mt-sm border-t border-outline-variant/60"><div class="font-semibold text-on-surface-variant text-xs mb-xs">Pipes it may run</div>';
+          if (!pipeList.length) g += '<div class="text-xs text-on-surface-variant">No pipes yet. Create one on the Pipes page.</div>';
+          pipeList.forEach(function(p) {
+            var perm = 'pipe:' + p.id;
+            g += '<label class="flex items-center gap-sm py-1 text-body-sm cursor-pointer"><input type="checkbox" class="w-4 h-4 accent-primary"' + (ag.ticked.indexOf(perm) >= 0 ? ' checked' : '') + ' onchange="agentToggle(\x27' + perm + '\x27)"><span class="text-on-surface">' + escapeHtml(p.name) + '</span><span class="text-xs text-on-surface-variant">' + escapeHtml(SRC[p.source] || p.source) + (p.enabled ? '' : ' · off') + '</span></label>';
+          });
+          return g + '</div>';
         };
         var summary = function(perms) {
           var parts = [];
@@ -164,6 +174,11 @@ function renderSettingsTab() {
             if (perms.indexOf('pull:' + src) >= 0) can.push('read');
             if (perms.indexOf('propose:' + src) >= 0) can.push('propose');
             if (can.length) parts.push((SRC[src] || src) + ' (' + can.join(', ') + ')');
+          });
+          perms.forEach(function(perm) {
+            if (perm.indexOf('pipe:') !== 0) return;
+            var p = pipeList.filter(function(x) { return x.id === perm.slice(5); })[0];
+            parts.push('pipe: ' + (p ? p.name : perm.slice(5) + ' (deleted)'));
           });
           return parts.length ? parts.join(' · ') : 'No permissions';
         };
