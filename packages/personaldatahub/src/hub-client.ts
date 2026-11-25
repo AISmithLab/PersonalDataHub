@@ -38,7 +38,7 @@ export interface ProposeResult {
 
 export interface HubClientConfig {
   hubUrl: string;
-  /** Agent key, sent as Authorization: Bearer on every call. */
+  /** The agent's hub token, sent as Authorization: Bearer on every call. */
   apiKey?: string;
 }
 

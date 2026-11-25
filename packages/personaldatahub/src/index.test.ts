@@ -144,7 +144,7 @@ describe('PersonalDataHub Plugin', () => {
       );
     });
 
-    it('uses config file when pluginConfig and env vars are missing', async () => {
+    it('uses the agent registration file when pluginConfig and env vars are missing', async () => {
       const { readConfig } = await import('./setup.js');
       const mockedReadConfig = vi.mocked(readConfig);
       mockedReadConfig.mockReturnValueOnce({
@@ -164,7 +164,7 @@ describe('PersonalDataHub Plugin', () => {
 
       expect(registerTool).toHaveBeenCalledTimes(2);
       expect(api.logger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Configured from config file'),
+        expect.stringContaining("Configured from the agent's registration"),
       );
     });
 

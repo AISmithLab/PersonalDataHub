@@ -17,23 +17,28 @@ export interface HealthCheckResult {
 
 export interface HubConfig {
   hubUrl: string;
-  hubDir?: string;
+  /** The agent's token, from its registration with the hub. */
   apiKey?: string;
 }
 
-/** Path to the config file written by `npx pdh init`. */
-export const CONFIG_PATH = join(process.env.PDH_CONFIG_DIR ?? join(homedir(), '.pdh'), 'config.json');
+/**
+ * The token file written by `query-hub join` when this agent registered with a
+ * hub: { hub, token, agent_name, agent_id }. Same location query-hub uses.
+ */
+export const CONFIG_PATH = process.env.QUERY_HUB_CONFIG
+  ?? join(process.env.PDH_CONFIG_DIR ?? join(homedir(), '.pdh'), 'agent.json');
 
 /**
- * Read config from ~/.pdh/config.json.
- * Returns null if the file doesn't exist or is malformed.
+ * Read the agent's registration. Returns null if this agent has not joined a hub
+ * (no file) or the file is malformed.
  */
 export function readConfig(): HubConfig | null {
   try {
     if (!existsSync(CONFIG_PATH)) return null;
-    const raw = readFileSync(CONFIG_PATH, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (parsed.hubUrl) return parsed as HubConfig;
+    const parsed = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
+    if (typeof parsed.hub === 'string' && typeof parsed.token === 'string') {
+      return { hubUrl: parsed.hub, apiKey: parsed.token };
+    }
     return null;
   } catch {
     return null;
