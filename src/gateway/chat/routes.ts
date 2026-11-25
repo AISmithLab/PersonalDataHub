@@ -849,11 +849,35 @@ async function executeToolInner(
   }
 }
 
-async function callChatCompletionWithRetry(
+/**
+ * The reply-length limit has two names. OpenAI's newer models accept only
+ * `max_completion_tokens` and reject `max_tokens`; other providers' compatible
+ * endpoints know `max_tokens`. Callers always pass `max_tokens`; this picks the
+ * name the model wants.
+ *
+ * `max_completion_tokens` also counts the tokens a model spends thinking before it
+ * answers, so a small limit meant for a short answer can leave no room for the
+ * answer itself. It is raised to a floor.
+ */
+const COMPLETION_TOKENS_FLOOR = 4096;
+const wantsCompletionTokens = new Set<string>();
+
+function withTokenLimitName(params: OpenAI.ChatCompletionCreateParamsNonStreaming): OpenAI.ChatCompletionCreateParamsNonStreaming {
+  const limit = params.max_tokens ?? params.max_completion_tokens;
+  if (limit == null) return params;
+  const { max_tokens: _a, max_completion_tokens: _b, ...rest } = params;
+  const openaiStyle = wantsCompletionTokens.has(params.model) || /^(gpt-|o\d|chatgpt-)/.test(params.model);
+  return openaiStyle
+    ? { ...rest, max_completion_tokens: Math.max(limit, COMPLETION_TOKENS_FLOOR) }
+    : { ...rest, max_tokens: limit };
+}
+
+export async function callChatCompletionWithRetry(
   client: OpenAI,
   params: OpenAI.ChatCompletionCreateParamsNonStreaming,
   maxAttempts = 3,
 ): Promise<OpenAI.ChatCompletion> {
+  params = withTokenLimitName(params);
   const tried = new Set<string>([params.model]);
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -864,6 +888,13 @@ async function callChatCompletionWithRetry(
     } catch (err: any) {
       const status = err?.status || err?.statusCode;
       const msg = String(err?.message || '');
+      // A model we did not recognise that wants the other name for the limit: learn it and resend.
+      if (status === 400 && /max_tokens/.test(msg) && /max_completion_tokens/.test(msg) && params.max_tokens != null && !wantsCompletionTokens.has(params.model)) {
+        wantsCompletionTokens.add(params.model);
+        params = withTokenLimitName(params);
+        attempt--;
+        continue;
+      }
       // Overloaded (503) or retired (404) model: another model of the same provider will do.
       const timedOut = !status && (err?.name === 'APIConnectionTimeoutError' || /timed out|timeout/i.test(msg));
       const unavailable = status === 503 || timedOut || (status === 404 && /model/i.test(msg));
@@ -872,7 +903,7 @@ async function callChatCompletionWithRetry(
       if (next) {
         console.warn(`[chat] ${params.model} is unavailable (${timedOut ? 'no answer in time' : status}); using ${next} instead.`);
         tried.add(next);
-        params = { ...params, model: next };
+        params = withTokenLimitName({ ...params, model: next });
         attempt--; // switching models is not a retry
         continue;
       }

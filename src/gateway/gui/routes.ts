@@ -13,7 +13,7 @@ import { GitHubConnector } from '../connectors/github/connector.js';
 import { PhotoConnector } from '../connectors/photo/connector.js';
 import { Octokit } from 'octokit';
 import { FILTER_TYPES, applyFilters, type QuickFilter } from '../filters.js';
-import { getClient, getModel } from '../chat/routes.js';
+import { getClient, getModel, callChatCompletionWithRetry } from '../chat/routes.js';
 
 interface GuiDeps {
   store: DataStore;
@@ -281,7 +281,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
       const client = getClient(deps as any);
       const model = getModel(deps as any);
       
-      const response = await client.chat.completions.create({
+      const response = await callChatCompletionWithRetry(client, {
         model,
         messages: [
           {
@@ -314,7 +314,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
       const client = getClient(deps as any);
       const model = getModel(deps as any);
       
-      const response = await client.chat.completions.create({
+      const response = await callChatCompletionWithRetry(client, {
         model,
         messages: [
           {
