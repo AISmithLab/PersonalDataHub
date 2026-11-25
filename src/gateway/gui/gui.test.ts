@@ -72,13 +72,13 @@ describe('GUI Routes', () => {
     expect(text).toContain('PersonalDataHub');
   });
 
-  it('GET /api/sources returns 401 without session', async () => {
-    const res = await app.request('/api/sources');
+  it('GET /web/sources returns 401 without session', async () => {
+    const res = await app.request('/web/sources');
     expect(res.status).toBe(401);
   });
 
-  it('GET /api/sources returns configured sources with session', async () => {
-    const res = await app.request('/api/sources', { headers: { Cookie: cookie } });
+  it('GET /web/sources returns configured sources with session', async () => {
+    const res = await app.request('/web/sources', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; sources: Array<{ name: string }> };
     expect(json.ok).toBe(true);
@@ -86,29 +86,29 @@ describe('GUI Routes', () => {
     expect(json.sources.map((s: { name: string }) => s.name).sort()).toEqual(['github', 'gmail']);
   });
 
-  it('GET /api/auth/status returns authenticated:false without session', async () => {
-    const res = await app.request('/api/auth/status');
+  it('GET /web/auth/status returns authenticated:false without session', async () => {
+    const res = await app.request('/web/auth/status');
     expect(res.status).toBe(200);
     const json = await res.json() as { authenticated: boolean };
     expect(json.authenticated).toBe(false);
   });
 
-  it('GET /api/auth/status returns authenticated:true with valid session', async () => {
-    const res = await app.request('/api/auth/status', { headers: { Cookie: cookie } });
+  it('GET /web/auth/status returns authenticated:true with valid session', async () => {
+    const res = await app.request('/web/auth/status', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { authenticated: boolean };
     expect(json.authenticated).toBe(true);
   });
 
-  it('GET /api/auth/status returns hasUsers:true when users exist', async () => {
-    const res = await app.request('/api/auth/status');
+  it('GET /web/auth/status returns hasUsers:true when users exist', async () => {
+    const res = await app.request('/web/auth/status');
     expect(res.status).toBe(200);
     const json = await res.json() as { authenticated: boolean; hasUsers: boolean };
     expect(json.hasUsers).toBe(true);
   });
 
-  it('GET /api/filters returns filters list and types', async () => {
-    const res = await app.request('/api/filters', { headers: { Cookie: cookie } });
+  it('GET /web/filters returns filters list and types', async () => {
+    const res = await app.request('/web/filters', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; filters: unknown[]; filterTypes: Record<string, unknown> };
     expect(json.ok).toBe(true);
@@ -117,8 +117,8 @@ describe('GUI Routes', () => {
     expect(json.filterTypes.time_after).toBeDefined();
   });
 
-  it('POST /api/filters creates a filter', async () => {
-    const res = await app.request('/api/filters', {
+  it('POST /web/filters creates a filter', async () => {
+    const res = await app.request('/web/filters', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({
@@ -134,23 +134,23 @@ describe('GUI Routes', () => {
     expect(json.id).toMatch(/^filter_/);
 
     // Verify via GET
-    const filtersRes = await app.request('/api/filters?source=gmail', { headers: { Cookie: cookie } });
+    const filtersRes = await app.request('/web/filters?source=gmail', { headers: { Cookie: cookie } });
     const filtersJson = await filtersRes.json() as { filters: Array<{ id: string; type: string; value: string }> };
     expect(filtersJson.filters).toHaveLength(1);
     expect(filtersJson.filters[0].type).toBe('time_after');
     expect(filtersJson.filters[0].value).toBe('2026-01-01');
   });
 
-  it('GET /api/staging returns staging queue', async () => {
-    const res = await app.request('/api/staging', { headers: { Cookie: cookie } });
+  it('GET /web/staging returns staging queue', async () => {
+    const res = await app.request('/web/staging', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; actions: unknown[] };
     expect(json.ok).toBe(true);
     expect(json.actions).toEqual([]);
   });
 
-  it('GET /api/audit returns audit log', async () => {
-    const res = await app.request('/api/audit', { headers: { Cookie: cookie } });
+  it('GET /web/audit returns audit log', async () => {
+    const res = await app.request('/web/audit', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; entries: unknown[] };
     expect(json.ok).toBe(true);
@@ -164,7 +164,7 @@ describe('GUI Routes', () => {
     });
 
     // Approve it
-    const res = await app.request('/api/staging/act_test/resolve', {
+    const res = await app.request('/web/staging/act_test/resolve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ decision: 'approve' }),
@@ -172,18 +172,18 @@ describe('GUI Routes', () => {
     expect(res.status).toBe(200);
 
     // Check audit log has approval entry
-    const audit = await app.request('/api/audit?event=action_approved', { headers: { Cookie: cookie } });
+    const audit = await app.request('/web/audit?event=action_approved', { headers: { Cookie: cookie } });
     const auditJson = await audit.json() as { entries: Array<{ event: string }> };
     expect(auditJson.entries.length).toBeGreaterThan(0);
   });
 
-  it('GET /api/staging/:actionId returns single action with parsed action_data', async () => {
+  it('GET /web/staging/:actionId returns single action with parsed action_data', async () => {
     store.insertStagingAction({
       actionId: 'act_single', manifestId: '', source: 'gmail',
       actionType: 'draft_email', actionData: '{"to":"bob@co.com","subject":"Hi"}', purpose: 'Test',
     });
 
-    const res = await app.request('/api/staging/act_single', { headers: { Cookie: cookie } });
+    const res = await app.request('/web/staging/act_single', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; action: { action_id: string; action_data: { to: string; subject: string } } };
     expect(json.ok).toBe(true);
@@ -192,18 +192,18 @@ describe('GUI Routes', () => {
     expect(json.action.action_data.subject).toBe('Hi');
   });
 
-  it('GET /api/staging/:actionId returns 404 for unknown action', async () => {
-    const res = await app.request('/api/staging/nonexistent', { headers: { Cookie: cookie } });
+  it('GET /web/staging/:actionId returns 404 for unknown action', async () => {
+    const res = await app.request('/web/staging/nonexistent', { headers: { Cookie: cookie } });
     expect(res.status).toBe(404);
   });
 
-  it('POST /api/staging/:actionId/edit merges action_data', async () => {
+  it('POST /web/staging/:actionId/edit merges action_data', async () => {
     store.insertStagingAction({
       actionId: 'act_edit', manifestId: '', source: 'gmail',
       actionType: 'draft_email', actionData: '{"to":"alice@co.com","subject":"Old","body":"Hello"}', purpose: 'Test',
     });
 
-    const res = await app.request('/api/staging/act_edit/edit', {
+    const res = await app.request('/web/staging/act_edit/edit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ action_data: { subject: 'New Subject', body: 'Updated body' } }),
@@ -221,14 +221,14 @@ describe('GUI Routes', () => {
     expect(persisted.subject).toBe('New Subject');
   });
 
-  it('POST /api/staging/:actionId/edit rejects non-pending actions', async () => {
+  it('POST /web/staging/:actionId/edit rejects non-pending actions', async () => {
     store.insertStagingAction({
       actionId: 'act_done', manifestId: '', source: 'gmail',
       actionType: 'draft_email', actionData: '{"to":"x@co.com"}', purpose: 'Test',
     });
     store.updateStagingStatus('act_done', 'approved');
 
-    const res = await app.request('/api/staging/act_done/edit', {
+    const res = await app.request('/web/staging/act_done/edit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ action_data: { subject: 'Nope' } }),
@@ -238,8 +238,8 @@ describe('GUI Routes', () => {
     expect(json.ok).toBe(false);
   });
 
-  it('GET /api/photos/preview returns photos with actual image dataUrl strings', async () => {
-    const res = await app.request('/api/photos/preview', { headers: { Cookie: cookie } });
+  it('GET /web/photos/preview returns photos with actual image dataUrl strings', async () => {
+    const res = await app.request('/web/photos/preview', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; photos: Array<{ id: string; title: string; dataUrl: string }> };
     expect(json.ok).toBe(true);
@@ -301,7 +301,7 @@ describe('Action Review — deny / save-to-draft / send', () => {
   it('deny sets status to rejected and does not execute connector action', async () => {
     insertPendingAction('act_deny');
 
-    const res = await app.request('/api/staging/act_deny/resolve', {
+    const res = await app.request('/web/staging/act_deny/resolve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ decision: 'reject' }),
@@ -320,7 +320,7 @@ describe('Action Review — deny / save-to-draft / send', () => {
     expect(executedActions).toHaveLength(0);
 
     // Audit log should have rejection entry
-    const audit = await app.request('/api/audit?event=action_rejected', { headers: { Cookie: cookie } });
+    const audit = await app.request('/web/audit?event=action_rejected', { headers: { Cookie: cookie } });
     const auditJson = await audit.json() as { entries: Array<{ event: string; details: { actionId: string } }> };
     expect(auditJson.entries).toHaveLength(1);
     expect(auditJson.entries[0].details.actionId).toBe('act_deny');
@@ -330,19 +330,19 @@ describe('Action Review — deny / save-to-draft / send', () => {
     insertPendingAction('act_deny2');
 
     // Verify it starts as pending
-    const before = await app.request('/api/staging', { headers: { Cookie: cookie } });
+    const before = await app.request('/web/staging', { headers: { Cookie: cookie } });
     const beforeJson = await before.json() as { actions: Array<{ action_id: string; status: string }> };
     expect(beforeJson.actions.some((a) => a.action_id === 'act_deny2' && a.status === 'pending')).toBe(true);
 
     // Deny it
-    await app.request('/api/staging/act_deny2/resolve', {
+    await app.request('/web/staging/act_deny2/resolve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ decision: 'reject' }),
     });
 
     // Should no longer be pending
-    const after = await app.request('/api/staging', { headers: { Cookie: cookie } });
+    const after = await app.request('/web/staging', { headers: { Cookie: cookie } });
     const afterJson = await after.json() as { actions: Array<{ action_id: string; status: string }> };
     const action = afterJson.actions.find((a) => a.action_id === 'act_deny2');
     expect(action?.status).toBe('rejected');
@@ -353,7 +353,7 @@ describe('Action Review — deny / save-to-draft / send', () => {
   it('approve executes connector with draft_email and sets status to committed', async () => {
     insertPendingAction('act_draft', { to: 'bob@co.com', subject: 'Report', body: 'Attached.' });
 
-    const res = await app.request('/api/staging/act_draft/resolve', {
+    const res = await app.request('/web/staging/act_draft/resolve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ decision: 'approve' }),
@@ -373,11 +373,11 @@ describe('Action Review — deny / save-to-draft / send', () => {
     expect(row.status).toBe('committed');
 
     // Audit log should have approved + committed entries
-    const approvedAudit = await app.request('/api/audit?event=action_approved', { headers: { Cookie: cookie } });
+    const approvedAudit = await app.request('/web/audit?event=action_approved', { headers: { Cookie: cookie } });
     const approvedJson = await approvedAudit.json() as { entries: Array<{ details: { actionId: string } }> };
     expect(approvedJson.entries.some((e) => e.details.actionId === 'act_draft')).toBe(true);
 
-    const committedAudit = await app.request('/api/audit?event=action_committed', { headers: { Cookie: cookie } });
+    const committedAudit = await app.request('/web/audit?event=action_committed', { headers: { Cookie: cookie } });
     const committedJson = await committedAudit.json() as { entries: Array<{ details: { actionId: string } }> };
     expect(committedJson.entries.some((e) => e.details.actionId === 'act_draft')).toBe(true);
   });
@@ -388,7 +388,7 @@ describe('Action Review — deny / save-to-draft / send', () => {
     insertPendingAction('act_send', { to: 'carol@co.com', subject: 'Meeting', body: 'See you at 3pm' });
 
     // Step 1: Edit action_data to include send:true (as the frontend sendAction does)
-    const editRes = await app.request('/api/staging/act_send/edit', {
+    const editRes = await app.request('/web/staging/act_send/edit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ action_data: { to: 'carol@co.com', subject: 'Meeting', body: 'See you at 3pm', send: true } }),
@@ -399,7 +399,7 @@ describe('Action Review — deny / save-to-draft / send', () => {
     expect(editJson.action_data.send).toBe(true);
 
     // Step 2: Approve (resolve)
-    const res = await app.request('/api/staging/act_send/resolve', {
+    const res = await app.request('/web/staging/act_send/resolve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ decision: 'approve' }),
@@ -420,14 +420,14 @@ describe('Action Review — deny / save-to-draft / send', () => {
     insertPendingAction('act_send_edit', { to: 'dave@co.com', subject: 'Original', body: 'Original body' });
 
     // Edit fields and add send:true
-    await app.request('/api/staging/act_send_edit/edit', {
+    await app.request('/web/staging/act_send_edit/edit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ action_data: { to: 'dave@co.com', subject: 'Updated Subject', body: 'Updated body', send: true } }),
     });
 
     // Approve
-    await app.request('/api/staging/act_send_edit/resolve', {
+    await app.request('/web/staging/act_send_edit/resolve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({ decision: 'approve' }),
@@ -443,7 +443,7 @@ describe('Action Review — deny / save-to-draft / send', () => {
   // --- Empty state ---
 
   it('staging returns empty array when no actions exist (no demo fallback)', async () => {
-    const res = await app.request('/api/staging', { headers: { Cookie: cookie } });
+    const res = await app.request('/web/staging', { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; actions: unknown[] };
     expect(json.ok).toBe(true);

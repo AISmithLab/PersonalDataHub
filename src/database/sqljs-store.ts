@@ -38,6 +38,7 @@ import type {
   FilterRow,
   AuditRow,
   MemoryRow,
+  AgentKeyRow,
   SkillRow,
   GitHubRepoRow,
   GitHubRepoInput,
@@ -365,6 +366,29 @@ export class SqlJsDataStore implements DataStore {
     if (!data) return null;
     this.pendingStates.delete(state);
     return data;
+  }
+
+  // --- Agent Keys ---
+
+  listAgentKeys(): AgentKeyRow[] {
+    return this.getAll<AgentKeyRow>('SELECT * FROM agent_keys ORDER BY created_at ASC');
+  }
+
+  insertAgentKey(key: { id: string; name: string; key_hash: string }): void {
+    this.run('INSERT INTO agent_keys (id, name, key_hash, created_at) VALUES (?, ?, ?, ?)',
+      [key.id, key.name, key.key_hash, this.now()]);
+  }
+
+  getAgentKeyByHash(keyHash: string): AgentKeyRow | null {
+    return this.getOne<AgentKeyRow>('SELECT * FROM agent_keys WHERE key_hash = ?', [keyHash]);
+  }
+
+  touchAgentKey(id: string): void {
+    this.run('UPDATE agent_keys SET last_used_at = ? WHERE id = ?', [this.now(), id]);
+  }
+
+  deleteAgentKey(id: string): void {
+    this.run('DELETE FROM agent_keys WHERE id = ?', [id]);
   }
 
   // --- AI Memories ---

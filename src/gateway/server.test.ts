@@ -11,7 +11,7 @@ import type { DataRow, SourceConnector, ConnectorRegistry } from './connectors/t
 import type { HubConfigParsed } from '../config/schema.js';
 import type Database from 'better-sqlite3';
 import type { Hono } from 'hono';
-import { makeTmpDir } from '../test-utils.js';
+import { makeTmpDir, addTestAgentKey, TEST_AGENT_AUTH } from '../test-utils.js';
 
 function makeTestRows(): DataRow[] {
   return [
@@ -64,6 +64,7 @@ async function request(app: Hono, method: string, path: string, body?: unknown, 
     method,
     headers: {
       'Content-Type': 'application/json',
+      ...TEST_AGENT_AUTH,
       ...headers,
     },
   };
@@ -79,10 +80,11 @@ describe('HTTP Server', () => {
   let store: DataStore;
   let app: Hono;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tmpDir = makeTmpDir();
     db = getDb(join(tmpDir, 'test.db'));
     store = new SqliteDataStore(db);
+    await addTestAgentKey(store);
 
     const registry: ConnectorRegistry = new Map([['gmail', makeMockConnector()]]);
     const tokenManager = new TokenManager(store, 'test-secret');
@@ -99,8 +101,8 @@ describe('HTTP Server', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('POST /app/v1/pull for unconnected source → 400 with SOURCE_NOT_CONNECTED', async () => {
-    const res = await request(app, 'POST', '/app/v1/pull', {
+  it('POST /agent/pull for unconnected source → 400 with SOURCE_NOT_CONNECTED', async () => {
+    const res = await request(app, 'POST', '/agent/pull', {
       source: 'gmail',
       purpose: 'test',
     });
@@ -111,11 +113,11 @@ describe('HTTP Server', () => {
     expect(json.error.message).toContain('not connected');
   });
 
-  it('POST /app/v1/pull with connected source → 200', async () => {
+  it('POST /agent/pull with connected source → 200', async () => {
     const tokenManager = new TokenManager(store, 'test-secret');
     await tokenManager.storeToken('gmail', { access_token: 'tok', refresh_token: 'ref' });
 
-    const res = await request(app, 'POST', '/app/v1/pull', {
+    const res = await request(app, 'POST', '/agent/pull', {
       source: 'gmail',
       purpose: 'test',
     });
@@ -125,11 +127,11 @@ describe('HTTP Server', () => {
     expect(json.data.length).toBeGreaterThan(0);
   });
 
-  it('POST /app/v1/pull with purpose → returns data, audit log entry', async () => {
+  it('POST /agent/pull with purpose → returns data, audit log entry', async () => {
     const tokenManager = new TokenManager(store, 'test-secret');
     await tokenManager.storeToken('gmail', { access_token: 'tok', refresh_token: 'ref' });
 
-    const res = await request(app, 'POST', '/app/v1/pull', {
+    const res = await request(app, 'POST', '/agent/pull', {
       source: 'gmail',
       type: 'email',
       purpose: 'Find Q4 report emails',
@@ -147,8 +149,8 @@ describe('HTTP Server', () => {
     expect(entries[0].details.purpose).toBe('Find Q4 report emails');
   });
 
-  it('POST /app/v1/pull without purpose → 400', async () => {
-    const res = await request(app, 'POST', '/app/v1/pull', {
+  it('POST /agent/pull without purpose → 400', async () => {
+    const res = await request(app, 'POST', '/agent/pull', {
       source: 'gmail',
     });
 
@@ -158,8 +160,8 @@ describe('HTTP Server', () => {
     expect(json.error.message).toContain('purpose');
   });
 
-  it('POST /app/v1/propose with purpose → creates staging row, audit entry', async () => {
-    const res = await request(app, 'POST', '/app/v1/propose', {
+  it('POST /agent/propose with purpose → creates staging row, audit entry', async () => {
+    const res = await request(app, 'POST', '/agent/propose', {
       source: 'gmail',
       action_type: 'draft_email',
       action_data: { to: 'alice@co.com', subject: 'Re: Q4', body: 'Looks good.' },
@@ -191,9 +193,9 @@ describe('HTTP Server', () => {
     expect(json.ok).toBe(true);
   });
 
-  describe('GET /app/v1/sources', () => {
+  describe('GET /agent/sources', () => {
     it('returns sources with connected status based on oauth tokens', async () => {
-      const res = await app.request('/app/v1/sources');
+      const res = await app.request('/agent/sources', { headers: TEST_AGENT_AUTH });
       expect(res.status).toBe(200);
       const json = await res.json() as { ok: boolean; sources: Record<string, { connected: boolean }> };
       expect(json.ok).toBe(true);
@@ -209,7 +211,7 @@ describe('HTTP Server', () => {
         refresh_token: 'test-refresh',
       });
 
-      const res = await app.request('/app/v1/sources');
+      const res = await app.request('/agent/sources', { headers: TEST_AGENT_AUTH });
       expect(res.status).toBe(200);
       const json = await res.json() as { ok: boolean; sources: Record<string, { connected: boolean }> };
       expect(json.ok).toBe(true);

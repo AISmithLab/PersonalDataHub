@@ -135,22 +135,47 @@ p{font-size:16px;line-height:1.5}
 </html>`;
 }
 
-export function createOAuthRoutes(deps: OAuthDeps): Hono {
-  const app = new Hono();
+/**
+ * OAuth routes, in two groups:
+ *
+ *   owner — mounted at /web/oauth behind requireOwner:
+ *     POST /:source/start       returns { ok, url }; the caller opens the provider URL
+ *     POST /:source/disconnect
+ *
+ *   pub — mounted at /oauth with no login, because the provider and the system
+ *   browser call them. Each is protected by a one-time value instead:
+ *     GET  /:source/callback      the state value issued by start
+ *     POST /:source/store-tokens  a ticket issued by callback
+ */
+export function createOAuthRoutes(deps: OAuthDeps): { owner: Hono; pub: Hono } {
+  const owner = new Hono();
+  const pub = new Hono();
   const auditLog = new AuditLog(deps.store);
+
+  async function issueTicket(source: string): Promise<string> {
+    const ticket = `ticket_${randomBytes(32).toString('hex')}`;
+    await deps.store.setOAuthState(ticket, { source, createdAt: Date.now(), codeVerifier: '' });
+    return ticket;
+  }
+
+  async function redeemTicket(ticket: string | undefined, source: string): Promise<boolean> {
+    if (!ticket || !ticket.startsWith('ticket_')) return false;
+    const pending = await deps.store.getAndDeleteOAuthState(ticket);
+    return !!pending && pending.source === source;
+  }
 
   // --- Gmail OAuth ---
 
-  app.get('/gmail/start', async (c) => {
+  owner.post('/gmail/start', async (c) => {
     const baseUrl = getBaseUrl(deps.config);
     const gmailConfig = deps.config.sources.gmail;
     if (!gmailConfig) {
-      return c.redirect(oauthErrorUrl(baseUrl, 'gmail_not_configured'));
+      return c.json({ ok: false, error: 'gmail_not_configured' }, 400);
     }
 
     const { clientId, clientSecret } = getGmailCredentials(deps.config);
     if (!clientId || !clientSecret) {
-      return c.redirect(oauthErrorUrl(baseUrl, 'gmail_missing_credentials'));
+      return c.json({ ok: false, error: 'gmail_missing_credentials' }, 400);
     }
 
     const codeVerifier = generateCodeVerifier();
@@ -175,12 +200,12 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
       code_challenge_method: 'S256' as any,
     });
 
-    return c.redirect(authUrl);
+    return c.json({ ok: true, url: authUrl });
   });
 
   // Callback: validate CSRF state, then serve an HTML page that does the token
   // exchange in the browser (nodejs-mobile cannot make outbound HTTPS calls).
-  app.get('/gmail/callback', async (c) => {
+  pub.get('/gmail/callback', async (c) => {
     const code = c.req.query('code');
     const state = c.req.query('state');
     const error = c.req.query('error');
@@ -207,7 +232,7 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
         code_verifier: pending.codeVerifier,
       },
       userinfoUrl: 'https://www.googleapis.com/oauth2/v2/userinfo',
-      storeUrl: `${baseUrl}/oauth/gmail/store-tokens`,
+      storeUrl: `${baseUrl}/oauth/gmail/store-tokens?ticket=${await issueTicket('gmail')}`,
       successScheme: oauthSuccessUrl(baseUrl, 'gmail'),
       errorUrlPrefix: oauthErrorUrlPrefix(baseUrl),
       baseUrl,
@@ -217,7 +242,10 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
   // Receives tokens from the browser-side exchange and stores them server-side.
   // Reachable from the system browser because it navigates to http://127.0.0.1:3000
   // (same origin as store-tokens), so no CORS headers needed.
-  app.post('/gmail/store-tokens', async (c) => {
+  pub.post('/gmail/store-tokens', async (c) => {
+    if (!(await redeemTicket(c.req.query('ticket'), 'gmail'))) {
+      return c.json({ ok: false, error: 'Invalid or used ticket' }, 401);
+    }
     const body = await c.req.json() as { tokens: Record<string, unknown>; userinfo: Record<string, unknown> };
     const { tokens, userinfo } = body;
 
@@ -267,7 +295,7 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
     return c.json({ ok: true });
   });
 
-  app.post('/gmail/disconnect', async (c) => {
+  owner.post('/gmail/disconnect', async (c) => {
     await deps.tokenManager.deleteToken('gmail');
     deps.connectorRegistry.delete('gmail');
     await auditLog.insert('oauth_disconnected', 'gmail', {});
@@ -276,16 +304,16 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
 
   // --- Google Calendar OAuth ---
 
-  app.get('/google_calendar/start', async (c) => {
+  owner.post('/google_calendar/start', async (c) => {
     const baseUrl = getBaseUrl(deps.config);
     const calConfig = deps.config.sources.google_calendar;
     if (!calConfig) {
-      return c.redirect(oauthErrorUrl(baseUrl, 'calendar_not_configured'));
+      return c.json({ ok: false, error: 'calendar_not_configured' }, 400);
     }
 
     const { clientId, clientSecret } = getCalendarCredentials(deps.config);
     if (!clientId || !clientSecret) {
-      return c.redirect(oauthErrorUrl(baseUrl, 'calendar_missing_credentials'));
+      return c.json({ ok: false, error: 'calendar_missing_credentials' }, 400);
     }
 
     const codeVerifier = generateCodeVerifier();
@@ -310,10 +338,10 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
       code_challenge_method: 'S256' as any,
     });
 
-    return c.redirect(authUrl);
+    return c.json({ ok: true, url: authUrl });
   });
 
-  app.get('/google_calendar/callback', async (c) => {
+  pub.get('/google_calendar/callback', async (c) => {
     const code = c.req.query('code');
     const state = c.req.query('state');
     const error = c.req.query('error');
@@ -339,14 +367,17 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
         grant_type: 'authorization_code',
         code_verifier: pending.codeVerifier,
       },
-      storeUrl: `${baseUrl}/oauth/google_calendar/store-tokens`,
+      storeUrl: `${baseUrl}/oauth/google_calendar/store-tokens?ticket=${await issueTicket('google_calendar')}`,
       successScheme: oauthSuccessUrl(baseUrl, 'google_calendar'),
       errorUrlPrefix: oauthErrorUrlPrefix(baseUrl),
       baseUrl,
     }));
   });
 
-  app.post('/google_calendar/store-tokens', async (c) => {
+  pub.post('/google_calendar/store-tokens', async (c) => {
+    if (!(await redeemTicket(c.req.query('ticket'), 'google_calendar'))) {
+      return c.json({ ok: false, error: 'Invalid or used ticket' }, 401);
+    }
     const body = await c.req.json() as { tokens: Record<string, unknown>; userinfo: Record<string, unknown> };
     const { tokens } = body;
 
@@ -391,7 +422,7 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
     return c.json({ ok: true });
   });
 
-  app.post('/google_calendar/disconnect', async (c) => {
+  owner.post('/google_calendar/disconnect', async (c) => {
     await deps.tokenManager.deleteToken('google_calendar');
     deps.connectorRegistry.delete('google_calendar');
     await auditLog.insert('oauth_disconnected', 'google_calendar', {});
@@ -400,16 +431,16 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
 
   // --- GitHub OAuth ---
 
-  app.get('/github/start', async (c) => {
+  owner.post('/github/start', async (c) => {
     const baseUrl = getBaseUrl(deps.config);
     const githubConfig = deps.config.sources.github;
     if (!githubConfig) {
-      return c.redirect(oauthErrorUrl(baseUrl, 'github_not_configured'));
+      return c.json({ ok: false, error: 'github_not_configured' }, 400);
     }
 
     const { clientId } = getGitHubCredentials(deps.config);
     if (!clientId) {
-      return c.redirect(oauthErrorUrl(baseUrl, 'github_missing_credentials'));
+      return c.json({ ok: false, error: 'github_missing_credentials' }, 400);
     }
 
     const codeVerifier = generateCodeVerifier();
@@ -426,10 +457,10 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
       `&code_challenge=${encodeURIComponent(codeChallenge)}` +
       `&code_challenge_method=S256`;
 
-    return c.redirect(authUrl);
+    return c.json({ ok: true, url: authUrl });
   });
 
-  app.get('/github/callback', async (c) => {
+  pub.get('/github/callback', async (c) => {
     const code = c.req.query('code');
     const state = c.req.query('state');
     const error = c.req.query('error');
@@ -455,14 +486,17 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
       },
       tokenHeaders: { Accept: 'application/json' },
       userinfoUrl: 'https://api.github.com/user',
-      storeUrl: `${baseUrl}/oauth/github/store-tokens`,
+      storeUrl: `${baseUrl}/oauth/github/store-tokens?ticket=${await issueTicket('github')}`,
       successScheme: oauthSuccessUrl(baseUrl, 'github'),
       errorUrlPrefix: oauthErrorUrlPrefix(baseUrl),
       baseUrl,
     }));
   });
 
-  app.post('/github/store-tokens', async (c) => {
+  pub.post('/github/store-tokens', async (c) => {
+    if (!(await redeemTicket(c.req.query('ticket'), 'github'))) {
+      return c.json({ ok: false, error: 'Invalid or used ticket' }, 401);
+    }
     const body = await c.req.json() as { tokens: Record<string, unknown>; userinfo: Record<string, unknown> };
     const { tokens, userinfo } = body;
 
@@ -503,12 +537,12 @@ export function createOAuthRoutes(deps: OAuthDeps): Hono {
     return c.json({ ok: true });
   });
 
-  app.post('/github/disconnect', async (c) => {
+  owner.post('/github/disconnect', async (c) => {
     await deps.tokenManager.deleteToken('github');
     deps.connectorRegistry.delete('github');
     await auditLog.insert('oauth_disconnected', 'github', {});
     return c.json({ ok: true });
   });
 
-  return app;
+  return { owner, pub };
 }

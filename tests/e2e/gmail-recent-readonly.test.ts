@@ -22,7 +22,7 @@ describe('E2E: Gmail with Time and Sender Filters', () => {
       "INSERT INTO filters (id, source, type, value, enabled) VALUES (?, ?, ?, ?, 1)",
     ).run('f1', 'gmail', 'time_after', '2026-02-19T09:00:00Z');
 
-    const res = await request(app, 'POST', '/app/v1/pull', {
+    const res = await request(app, 'POST', '/agent/pull', {
       source: 'gmail',
       purpose: 'Time filter check',
     });
@@ -40,7 +40,7 @@ describe('E2E: Gmail with Time and Sender Filters', () => {
       "INSERT INTO filters (id, source, type, value, enabled) VALUES (?, ?, ?, ?, 1)",
     ).run('f1', 'gmail', 'from_include', 'bob');
 
-    const res = await request(app, 'POST', '/app/v1/pull', {
+    const res = await request(app, 'POST', '/agent/pull', {
       source: 'gmail',
       purpose: 'Sender filter check',
     });
@@ -52,7 +52,7 @@ describe('E2E: Gmail with Time and Sender Filters', () => {
   });
 
   it('creates audit log entry', async () => {
-    await request(app, 'POST', '/app/v1/pull', {
+    await request(app, 'POST', '/agent/pull', {
       source: 'gmail',
       purpose: 'Audit test',
     });

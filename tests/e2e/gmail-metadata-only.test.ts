@@ -20,7 +20,7 @@ describe('E2E: Gmail with Quick Filters', () => {
       "INSERT INTO filters (id, source, type, value, enabled) VALUES (?, ?, ?, ?, 1)",
     ).run('f1', 'gmail', 'subject_include', 'Q4');
 
-    const res = await request(app, 'POST', '/app/v1/pull', {
+    const res = await request(app, 'POST', '/agent/pull', {
       source: 'gmail',
       purpose: 'Subject filter check',
     });
@@ -36,7 +36,7 @@ describe('E2E: Gmail with Quick Filters', () => {
       "INSERT INTO filters (id, source, type, value, enabled) VALUES (?, ?, ?, ?, 1)",
     ).run('f1', 'gmail', 'exclude_sender', 'alice');
 
-    const res = await request(app, 'POST', '/app/v1/pull', {
+    const res = await request(app, 'POST', '/agent/pull', {
       source: 'gmail',
       purpose: 'Exclude sender check',
     });
@@ -55,7 +55,7 @@ describe('E2E: Gmail with Quick Filters', () => {
       "INSERT INTO filters (id, source, type, value, enabled) VALUES (?, ?, ?, ?, 0)",
     ).run('f1', 'gmail', 'subject_include', 'Q4');
 
-    const res = await request(app, 'POST', '/app/v1/pull', {
+    const res = await request(app, 'POST', '/agent/pull', {
       source: 'gmail',
       purpose: 'Disabled filter check',
     });

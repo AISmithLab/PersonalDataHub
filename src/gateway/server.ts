@@ -6,9 +6,10 @@ import type { HubConfigParsed } from '../config/schema.js';
 import type { TokenManager } from './auth/token-manager.js';
 import { createAppApi } from './app-api.js';
 import { createChatRoutes } from './chat/routes.js';
-import { createGuiRoutes } from './gui/routes.js';
+import { createGuiRoutes, createPageRoutes } from './gui/routes.js';
 import { createOAuthRoutes } from './auth/oauth-routes.js';
 import { createLoginRoutes } from './auth/login-routes.js';
+import { requireAgent, requireOwner, type AccessEnv } from './auth/access.js';
 
 export interface ServerDeps {
   store: DataStore;
@@ -17,6 +18,20 @@ export interface ServerDeps {
   tokenManager: TokenManager;
 }
 
+/**
+ * Route layout. Two prefixes, each with its own credential:
+ *
+ *   /web/*    the website and the mobile app — owner only (session cookie, or the
+ *             device secret on the phone). /web/auth/{signup,login,logout,status}
+ *             are the only ones that work before signing in.
+ *   /agent/*  the data flow to agents — an agent key, or the owner.
+ *
+ * Outside the two prefixes, and unauthenticated by necessity:
+ *   GET  /health                        liveness ping, no data
+ *   GET  /oauth/:source/callback        called by the provider; one-time state
+ *   POST /oauth/:source/store-tokens    called by the callback page; one-time ticket
+ *   GET  /, /next                       the pages themselves
+ */
 export function createServer(deps: ServerDeps): Hono {
   const app = new Hono();
 
@@ -27,37 +42,30 @@ export function createServer(deps: ServerDeps): Hono {
     return c.json({ ok: true, version: '0.1.0' });
   });
 
-  // Mount App API
-  const appApi = createAppApi(deps);
-  app.route('/app/v1', appApi);
+  const oauth = createOAuthRoutes(deps);
+  app.route('/oauth', oauth.pub);
 
-  // Mount OAuth routes
-  const oauthRoutes = createOAuthRoutes({
-    store: deps.store,
-    connectorRegistry: deps.connectorRegistry,
-    config: deps.config,
-    tokenManager: deps.tokenManager,
+  // --- /web ---
+  const web = new Hono<AccessEnv>();
+  web.route('/auth', createLoginRoutes({ store: deps.store }));
+  const ownerOnly = requireOwner(deps.store);
+  web.use('*', async (c, next) => {
+    if (c.req.path.startsWith('/web/auth/')) return next();
+    return ownerOnly(c, next);
   });
-  app.route('/oauth', oauthRoutes);
+  web.route('/oauth', oauth.owner);
+  web.route('/', createChatRoutes(deps));
+  web.route('/', createGuiRoutes(deps));
+  app.route('/web', web);
 
-  // Mount login routes (email + password)
-  const loginRoutes = createLoginRoutes({
-    store: deps.store,
-  });
-  app.route('/auth', loginRoutes);
+  // --- /agent ---
+  const agent = new Hono<AccessEnv>();
+  agent.use('*', requireAgent(deps.store));
+  agent.route('/', createAppApi(deps));
+  app.route('/agent', agent);
 
-  // Mount chat routes (before GUI so /api/chat* isn't caught by the SPA catch-all)
-  const chatRoutes = createChatRoutes(deps);
-  app.route('/', chatRoutes);
-
-  // Mount GUI routes (must be last — catches '/')
-  const guiRoutes = createGuiRoutes({
-    store: deps.store,
-    connectorRegistry: deps.connectorRegistry,
-    config: deps.config,
-    tokenManager: deps.tokenManager,
-  });
-  app.route('/', guiRoutes);
+  // Pages (last)
+  app.route('/', createPageRoutes());
 
   return app;
 }

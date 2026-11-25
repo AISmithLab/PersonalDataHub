@@ -20,7 +20,7 @@ describe('E2E: Gmail Staged Action', () => {
   afterEach(() => cleanup(db, tmpDir));
 
   it('propose a draft email → staging row created with pending status', async () => {
-    const res = await request(app, 'POST', '/app/v1/propose', {
+    const res = await request(app, 'POST', '/agent/propose', {
       source: 'gmail',
       action_type: 'draft_email',
       action_data: { to: 'alice@co.com', subject: 'Re: Q4 Report', body: 'Looks good!' },
@@ -42,7 +42,7 @@ describe('E2E: Gmail Staged Action', () => {
 
   it('approve action → connector executeAction called → audit trail', async () => {
     // Propose
-    const proposeRes = await request(app, 'POST', '/app/v1/propose', {
+    const proposeRes = await request(app, 'POST', '/agent/propose', {
       source: 'gmail',
       action_type: 'draft_email',
       action_data: { to: 'alice@co.com', subject: 'Re: Q4', body: 'LGTM' },
@@ -51,7 +51,7 @@ describe('E2E: Gmail Staged Action', () => {
     const { actionId } = await proposeRes.json() as { actionId: string };
 
     // Approve via GUI API (requires session auth)
-    const approveRes = await app.request(`/api/staging/${actionId}/resolve`, {
+    const approveRes = await app.request(`/web/staging/${actionId}/resolve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: sessionCookie },
       body: JSON.stringify({ decision: 'approve' }),
@@ -71,7 +71,7 @@ describe('E2E: Gmail Staged Action', () => {
   });
 
   it('reject action → audit trail with rejection', async () => {
-    const proposeRes = await request(app, 'POST', '/app/v1/propose', {
+    const proposeRes = await request(app, 'POST', '/agent/propose', {
       source: 'gmail',
       action_type: 'send_email',
       action_data: { to: 'spam@co.com', subject: 'Spam', body: 'Spammy' },
@@ -80,7 +80,7 @@ describe('E2E: Gmail Staged Action', () => {
     const { actionId } = await proposeRes.json() as { actionId: string };
 
     // Reject (requires session auth)
-    await app.request(`/api/staging/${actionId}/resolve`, {
+    await app.request(`/web/staging/${actionId}/resolve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: sessionCookie },
       body: JSON.stringify({ decision: 'reject' }),

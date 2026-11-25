@@ -88,6 +88,14 @@ CREATE TABLE IF NOT EXISTS github_repos (
   fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS agent_keys (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  key_hash TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_used_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS ai_memories (
   id TEXT PRIMARY KEY,
   content TEXT NOT NULL,

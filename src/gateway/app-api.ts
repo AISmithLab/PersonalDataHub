@@ -6,6 +6,7 @@ import type { HubConfigParsed } from '../config/schema.js';
 import type { TokenManager } from './auth/token-manager.js';
 import { AuditLog } from './audit/log.js';
 import { applyFilters, type QuickFilter } from './filters.js';
+import type { AccessEnv } from './auth/access.js';
 
 export interface AppApiDeps {
   store: DataStore;
@@ -14,8 +15,9 @@ export interface AppApiDeps {
   tokenManager: TokenManager;
 }
 
-export function createAppApi(deps: AppApiDeps): Hono {
-  const app = new Hono();
+/** The agent-facing data flow. Mounted at /agent behind requireAgent (see server.ts). */
+export function createAppApi(deps: AppApiDeps): Hono<AccessEnv> {
+  const app = new Hono<AccessEnv>();
   const auditLog = new AuditLog(deps.store);
 
   // POST /pull
@@ -83,7 +85,7 @@ export function createAppApi(deps: AppApiDeps): Hono {
       data: summaryData,
       meta: { itemsFetched: rows.length, itemsReturned: filtered.length },
     });
-    await auditLog.logPull(source, purpose, filtered.length, 'agent', responseSummary);
+    await auditLog.logPull(source, purpose, filtered.length, c.get('caller') ?? 'agent', responseSummary);
 
     return c.json(responsePayload);
   });
@@ -122,7 +124,7 @@ export function createAppApi(deps: AppApiDeps): Hono {
 
     // Log to audit with a summary of what the agent received
     const responseSummary = JSON.stringify(responsePayload);
-    await auditLog.logActionProposed(actionId, source, action_type, purpose, 'agent', responseSummary);
+    await auditLog.logActionProposed(actionId, source, action_type, purpose, c.get('caller') ?? 'agent', responseSummary);
 
     return c.json(responsePayload);
   });

@@ -40,11 +40,6 @@ const MAX_TOOL_ROUNDS = 5;
 // it replays queued SMS via ?drain=true, stores them here, and the WebView picks them up.
 const pendingAutoReplies = new Map<string, { to: string; body: string; createdAt: number }>();
 
-function parseCookie(cookieHeader: string, name: string): string | null {
-  const match = cookieHeader.match(new RegExp('(?:^|;)\\s*' + name + '=([^;]*)'));
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
 export function getClient(deps: ServerDeps): OpenAI {
   const ai = deps.config.ai!;
   const provider = ai.provider ?? 'anthropic';
@@ -1111,20 +1106,8 @@ async function runAutoReplyLoop(
 export function createChatRoutes(deps: ServerDeps): Hono {
   const app = new Hono();
 
-  // Session auth — same pattern as gui/routes.ts
-  app.use('/api/*', async (c, next) => {
-    if (c.req.path === '/api/auth/status') {
-      await next();
-      return;
-    }
-    const cookie = parseCookie(c.req.header('Cookie') ?? '', 'pdh_session');
-    if (!cookie) return c.json({ ok: false, error: 'Unauthorized' }, 401);
-    const session = await deps.store.getValidSession(cookie);
-    if (!session) return c.json({ ok: false, error: 'Unauthorized' }, 401);
-    await next();
-  });
-
-  app.get('/api/chat/status', (c) => {
+  // Mounted under /web behind requireOwner (see server.ts).
+  app.get('/chat/status', (c) => {
     return c.json({
       ok: true,
       configured: !!deps.config.ai?.api_key,
@@ -1133,7 +1116,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     });
   });
 
-  app.post('/api/settings/ai-key', async (c) => {
+  app.post('/settings/ai-key', async (c) => {
     const body = await c.req.json();
     const { api_key, model, provider, base_url } = body;
     if (!api_key || typeof api_key !== 'string' || !api_key.trim()) {
@@ -1171,12 +1154,12 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     return c.json({ ok: true });
   });
 
-  app.get('/api/memories', async (c) => {
+  app.get('/memories', async (c) => {
     const memories = await deps.store.listMemories();
     return c.json({ ok: true, memories });
   });
 
-  app.post('/api/memories', async (c) => {
+  app.post('/memories', async (c) => {
     const body = await c.req.json();
     const content = typeof body.content === 'string' ? body.content.trim() : '';
     if (!content) return c.json({ ok: false, error: 'content is required' }, 400);
@@ -1190,7 +1173,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     return c.json({ ok: true, id });
   });
 
-  app.patch('/api/memories/:id', async (c) => {
+  app.patch('/memories/:id', async (c) => {
     const id = c.req.param('id');
     const body = await c.req.json();
     const content = typeof body.content === 'string' ? body.content.trim() : '';
@@ -1200,14 +1183,14 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     return c.json({ ok: true });
   });
 
-  app.delete('/api/memories/:id', async (c) => {
+  app.delete('/memories/:id', async (c) => {
     const id = c.req.param('id');
     await deps.store.deleteMemory(id);
     await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_memory_deleted', source: null, details: JSON.stringify({ id, deletedBy: 'user' }) });
     return c.json({ ok: true });
   });
 
-  app.post('/api/chat', async (c) => {
+  app.post('/chat', async (c) => {
     if (!deps.config.ai?.api_key) {
       return c.json({ ok: false, error: 'AI not configured. Add an API key in Settings.' }, 400);
     }
@@ -1228,7 +1211,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
 
   // Direct code execution — user-triggered (e.g. "Run" button on a code block in the chat UI).
   // This is NOT the agent's path; the agent uses run_code as a tool via executeTool().
-  app.post('/api/code/run', async (c) => {
+  app.post('/code/run', async (c) => {
     const body = await c.req.json();
     const code = typeof body.code === 'string' ? body.code.trim() : '';
     if (!code) return c.json({ ok: false, error: 'code is required' }, 400);
@@ -1249,7 +1232,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
   });
 
   // Auto-reply toggle — session-protected
-  app.get('/api/settings/auto-reply', async (c) => {
+  app.get('/settings/auto-reply', async (c) => {
     return c.json({
       ok: true,
       enabled: deps.config.autoReply?.enabled ?? false,
@@ -1257,7 +1240,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     });
   });
 
-  app.post('/api/settings/auto-reply', async (c) => {
+  app.post('/settings/auto-reply', async (c) => {
     const body = await c.req.json();
     const enabled = Boolean(body.enabled);
     const maxToolRounds = typeof body.maxToolRounds === 'number'
@@ -1283,11 +1266,11 @@ export function createChatRoutes(deps: ServerDeps): Hono {
   });
 
   // Onboarding completion flag — gates the first-run walkthrough in the frontend
-  app.get('/api/settings/onboarding', async (c) => {
+  app.get('/settings/onboarding', async (c) => {
     return c.json({ ok: true, completed: deps.config.onboardingCompleted ?? false });
   });
 
-  app.post('/api/settings/onboarding', async (c) => {
+  app.post('/settings/onboarding', async (c) => {
     const body = await c.req.json();
     const completed = Boolean(body.completed);
     (deps.config as Record<string, unknown>).onboardingCompleted = completed;
@@ -1307,8 +1290,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
   // Contact list sync — called by the RN app (App.tsx) whenever it (re)reads the device
   // contact list, so backend prompt-building code can resolve phone numbers to names
   // synchronously, in-process, with no extra tool/API call per SMS reply or memory.
-  // Uses /device/ prefix (not /api/) to bypass session middleware, same reasoning as /sms/*.
-  app.post('/device/contacts-sync', async (c) => {
+  app.post('/device/contacts', async (c) => {
     const body = await c.req.json();
     const contacts = Array.isArray(body.contacts) ? body.contacts : [];
     setContacts(contacts);
@@ -1316,8 +1298,8 @@ export function createChatRoutes(deps: ServerDeps): Hono {
   });
 
   // Auto-reply execute — called by Android SmsReceiver.
-  // Uses /sms/ prefix (not /api/) to bypass session middleware; safe because server only binds to 127.0.0.1.
-  app.post('/sms/auto-reply', async (c) => {
+  // The receiver authenticates with the device secret (see auth/access.ts).
+  app.post('/device/sms/auto-reply', async (c) => {
     if (!deps.config.autoReply?.enabled) {
       return c.json({ ok: true, enabled: false });
     }
@@ -1384,7 +1366,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
   });
 
   // Manual one-tap reply from the SMS tab (session-protected, bypasses auto-reply toggle)
-  app.post('/api/sms/manual-reply', async (c) => {
+  app.post('/device/sms/manual-reply', async (c) => {
     if (!deps.config.ai?.api_key) {
       return c.json({ ok: false, error: 'AI not configured — add an API key in Settings.' }, 400);
     }
@@ -1434,7 +1416,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
 
   // WebView polls this to pick up drain-path pending replies and send them via AndroidSms.
   // Only populated when ?drain=true is used (by android.ts drainSmsQueue).
-  app.get('/api/sms/pending-replies', async (c) => {
+  app.get('/device/sms/pending-replies', async (c) => {
     const cutoff = Date.now() - 60_000;
     const replies: Array<{ id: string; to: string; body: string }> = [];
     for (const [id, r] of pendingAutoReplies) {
@@ -1447,7 +1429,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     return c.json({ ok: true, replies });
   });
 
-  app.delete('/api/sms/pending-replies/:id', async (c) => {
+  app.delete('/device/sms/pending-replies/:id', async (c) => {
     pendingAutoReplies.delete(c.req.param('id'));
     return c.json({ ok: true });
   });

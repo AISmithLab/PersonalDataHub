@@ -50,6 +50,15 @@ export interface AuditRow {
   details: string;
 }
 
+export interface AgentKeyRow {
+  id: string;
+  name: string;
+  /** SHA-256 hex of the key; the key itself is never stored. */
+  key_hash: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
 export interface MemoryRow {
   id: string;
   content: string;
@@ -194,6 +203,13 @@ export interface DataStore {
   // --- OAuth State (CSRF) ---
   setOAuthState(state: string, data: OAuthStateData): MaybePromise<void>;
   getAndDeleteOAuthState(state: string): MaybePromise<OAuthStateData | null>;
+
+  // --- Agent Keys ---
+  listAgentKeys(): MaybePromise<AgentKeyRow[]>;
+  insertAgentKey(key: { id: string; name: string; key_hash: string }): MaybePromise<void>;
+  getAgentKeyByHash(keyHash: string): MaybePromise<AgentKeyRow | null>;
+  touchAgentKey(id: string): MaybePromise<void>;
+  deleteAgentKey(id: string): MaybePromise<void>;
 
   // --- AI Memories ---
   listMemories(): MaybePromise<MemoryRow[]>;

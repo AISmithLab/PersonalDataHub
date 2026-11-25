@@ -13,6 +13,7 @@
  *   FILTER#{id}     / FILTER         — data filters
  *   GHREPO#{name}   / GHREPO         — GitHub repos
  *   STATE#{state}   / STATE          — OAuth CSRF state (TTL)
+ *   AGENTKEY#{hash} / AGENTKEY       — agent API keys (hash only)
  */
 
 import {
@@ -37,6 +38,7 @@ import type {
   FilterRow,
   AuditRow,
   MemoryRow,
+  AgentKeyRow,
   SkillRow,
   GitHubRepoRow,
   GitHubRepoInput,
@@ -551,6 +553,71 @@ export class DynamoDataStore implements DataStore {
       createdAt: result.Item.createdAt as number,
       codeVerifier: result.Item.codeVerifier as string,
     };
+  }
+
+  // --- Agent Keys ---
+
+  private toAgentKeyRow(item: Record<string, unknown>): AgentKeyRow {
+    return {
+      id: String(item.id),
+      name: String(item.name),
+      key_hash: String(item.key_hash),
+      created_at: String(item.created_at),
+      last_used_at: item.last_used_at ? String(item.last_used_at) : null,
+    };
+  }
+
+  async listAgentKeys(): Promise<AgentKeyRow[]> {
+    const result = await this.docClient.send(new ScanCommand({
+      TableName: this.tableName,
+      FilterExpression: 'SK = :sk',
+      ExpressionAttributeValues: { ':sk': 'AGENTKEY' },
+    }));
+    const rows = (result.Items ?? []).map((item) => this.toAgentKeyRow(item));
+    rows.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return rows;
+  }
+
+  async insertAgentKey(key: { id: string; name: string; key_hash: string }): Promise<void> {
+    await this.docClient.send(new PutCommand({
+      TableName: this.tableName,
+      Item: {
+        PK: `AGENTKEY#${key.key_hash}`,
+        SK: 'AGENTKEY',
+        id: key.id,
+        name: key.name,
+        key_hash: key.key_hash,
+        created_at: new Date().toISOString(),
+      },
+    }));
+  }
+
+  async getAgentKeyByHash(keyHash: string): Promise<AgentKeyRow | null> {
+    const result = await this.docClient.send(new GetCommand({
+      TableName: this.tableName,
+      Key: { PK: `AGENTKEY#${keyHash}`, SK: 'AGENTKEY' },
+    }));
+    return result.Item ? this.toAgentKeyRow(result.Item) : null;
+  }
+
+  async touchAgentKey(id: string): Promise<void> {
+    const row = (await this.listAgentKeys()).find((k) => k.id === id);
+    if (!row) return;
+    await this.docClient.send(new UpdateCommand({
+      TableName: this.tableName,
+      Key: { PK: `AGENTKEY#${row.key_hash}`, SK: 'AGENTKEY' },
+      UpdateExpression: 'SET last_used_at = :t',
+      ExpressionAttributeValues: { ':t': new Date().toISOString() },
+    }));
+  }
+
+  async deleteAgentKey(id: string): Promise<void> {
+    const row = (await this.listAgentKeys()).find((k) => k.id === id);
+    if (!row) return;
+    await this.docClient.send(new DeleteCommand({
+      TableName: this.tableName,
+      Key: { PK: `AGENTKEY#${row.key_hash}`, SK: 'AGENTKEY' },
+    }));
   }
 
   // --- AI Memories (not implemented for DynamoDB — Android uses SQLite) ---

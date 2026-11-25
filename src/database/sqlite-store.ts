@@ -16,6 +16,7 @@ import type {
   FilterRow,
   AuditRow,
   MemoryRow,
+  AgentKeyRow,
   GitHubRepoRow,
   GitHubRepoInput,
   OAuthStateData,
@@ -324,6 +325,28 @@ export class SqliteDataStore implements DataStore {
     if (!data) return null;
     this.pendingStates.delete(state);
     return data;
+  }
+
+  // --- Agent Keys ---
+
+  listAgentKeys(): AgentKeyRow[] {
+    return this.db.prepare('SELECT * FROM agent_keys ORDER BY created_at ASC').all() as AgentKeyRow[];
+  }
+
+  insertAgentKey(key: { id: string; name: string; key_hash: string }): void {
+    this.db.prepare('INSERT INTO agent_keys (id, name, key_hash) VALUES (?, ?, ?)').run(key.id, key.name, key.key_hash);
+  }
+
+  getAgentKeyByHash(keyHash: string): AgentKeyRow | null {
+    return (this.db.prepare('SELECT * FROM agent_keys WHERE key_hash = ?').get(keyHash) as AgentKeyRow | undefined) ?? null;
+  }
+
+  touchAgentKey(id: string): void {
+    this.db.prepare("UPDATE agent_keys SET last_used_at = datetime('now') WHERE id = ?").run(id);
+  }
+
+  deleteAgentKey(id: string): void {
+    this.db.prepare('DELETE FROM agent_keys WHERE id = ?').run(id);
   }
 
   // --- AI Memories ---
