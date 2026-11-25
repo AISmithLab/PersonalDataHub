@@ -4,7 +4,7 @@
 
     var PAGE_CHAT = {
       skills: { title: 'Skills', icon: 'bolt', placeholder: 'Describe how the AI should behave…', empty: 'Describe a behavior and I will turn it into a skill. Open a skill on the right to change that one.' },
-      pipes: { title: 'Pipes', icon: 'filter_alt', placeholder: 'Describe what an agent should get…', empty: 'Describe a filter, for example "the emails that ask me for a recommendation letter", and I will build a pipe for it. Select a pipe on the right to change that one.' }
+      pipes: { title: 'Pipes', icon: 'filter_alt', placeholder: 'For example: only show the recommendation submission emails to the agents', empty: 'Describe a filter, for example "only show the recommendation submission emails to the agents", and I will build a pipe for it. Select a pipe on the right to change that one.' }
     };
 
     function pageChatFocus(scope) {
