@@ -27,13 +27,15 @@ The hub's routes grew three prefixes (`/auth`, `/api`, `/app/v1`) plus loose one
 
 ## Layout
 
-`/web/*`: the website and the mobile app. Session cookie `pdh_session`, except `signup`, `login`, `device`, `status`.
+`/web/*`: the website and the mobile app. Owner credential (session cookie `pdh_session`, or the device secret on the phone), except `signup`, `login`, `status`.
 
 | Old | New |
 |---|---|
-| `POST /auth/signup`, `/auth/login`, `/auth/device-login` | `POST /web/auth/signup`, `/web/auth/login`, `/web/auth/device` |
+| `POST /auth/signup`, `/auth/login` | `POST /web/auth/signup`, `/web/auth/login` |
+| `POST /auth/device-login` | removed; see Device secret |
 | `POST /api/logout`, `GET /api/auth/status` | `POST /web/auth/logout`, `GET /web/auth/status` |
-| `GET /oauth/:source/start`, `POST /oauth/:source/store-tokens`, `POST /oauth/:source/disconnect` | `/web/oauth/:source/start`, `/web/oauth/:source/store-tokens`, `/web/oauth/:source/disconnect` |
+| `GET /oauth/:source/start` | `POST /web/oauth/:source/start`, returns `{ ok, url }`; the caller opens `url` |
+| `POST /oauth/:source/disconnect` | `POST /web/oauth/:source/disconnect` |
 | `/api/<anything else>` | `/web/<same>` |
 | `POST /device/contacts-sync` | `POST /web/device/contacts` |
 | `POST /api/photos/sync` | `POST /web/device/photos` |
@@ -53,6 +55,7 @@ Exceptions, unauthenticated by necessity:
 
 - `GET /health`.
 - `GET /oauth/:source/callback`: the URL is registered with Google and GitHub; protected by the one-time state value.
+- `POST /oauth/:source/store-tokens?ticket=...`: called by the callback page, which on the phone runs in the system browser and so has neither cookie nor device secret. Protected by a one-time ticket the callback issues. Today it has no protection at all.
 - `GET /` and `GET /next`: serve the page.
 
 ## Authentication
@@ -65,11 +68,13 @@ Agent keys:
 - Settings gets an "Agent keys" section: list, create (shows the key once), delete.
 - CLI: `pdh init` creates a first key named `default` and writes it to `~/.pdh/config.json` beside `hubUrl`, so the MCP server and `packages/personaldatahub` keep working after setup. Both read `apiKey` from that file and send it. (My call.)
 
-Device login:
+Device secret (found while planning; replaces the earlier `/web/auth/device` idea):
 
-- `POST /web/auth/device` requires a header `X-PDH-Device-Secret` equal to `process.env.PDH_DEVICE_SECRET`. If the variable is unset the route answers 404.
-- The mobile shell generates the secret at startup, passes it to the Node process when it starts it, and gives it to the shared UI. The Android `SmsReceiver` and the contacts sync in `mobile/App.tsx` send the same header; `/web/device/*` accepts the device secret as an alternative to the session cookie, since those callers run before or outside the UI's login.
-- Desktop keeps email and password login.
+- The phone app has no login screen. Instead of a login route, every request from the app carries `X-PDH-Device-Secret`, and `/web/*` and `/agent/*` accept it as an owner credential.
+- The secret is `process.env.PDH_DEVICE_SECRET`. Only `src/android.ts` and `src/ios.ts` set it: 32 random bytes, generated on first start and kept in `<dataDir>/device-secret`, inside the app's private storage. On desktop and Lambda the variable is unset and the header is ignored.
+- The Node process hands the secret to the React Native shell over the `rn-bridge` channel; the shell passes it to the shared UI with `setDeviceSecret()`. The Android `SmsReceiver` reads the file.
+- Desktop and Lambda use email and password. The shared UI gains a sign-in / create-account screen, shown when `/web/auth/status` says not authenticated. (The legacy page already has one.)
+- Mobile changes cannot be verified in this environment (no device build); they are type-checked only.
 
 ## Callers to update
 
@@ -80,5 +85,5 @@ Outside the repo: Haojian's `~/.claude/skills/personaldatahub.md` needs the new 
 ## Testing
 
 - Existing suites pass on the new paths.
-- New tests: `/agent/*` without credentials is 401; with a valid key 200; with a deleted key 401; with the owner cookie 200. `/web/*` without a cookie is 401. `/web/auth/device` without the secret is rejected, with it returns a session, with the variable unset is 404. Old paths return 404.
+- New tests: `/agent/*` without credentials is 401; with a valid key 200; with a deleted key 401; with the owner cookie 200. `/web/*` without a cookie is 401. The device secret header is accepted when the variable is set and matches, ignored when unset. `store-tokens` without a valid ticket is 401, and a ticket works once. Old paths return 404.
 - Manual: log in at `/next`, create a key, call `/agent/pull` with curl.
