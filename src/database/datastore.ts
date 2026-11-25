@@ -72,6 +72,23 @@ export interface JoinCodeRow {
   used_at: string | null;
 }
 
+/** A pipe: a small filter program over one source, exposed to agents as its own endpoint. */
+export interface PipeRow {
+  /** Also the last part of the pipe's URL: 8 characters of a-z and 2-7. */
+  id: string;
+  name: string;
+  description: string;
+  /** gmail, google_calendar or github. */
+  source: string;
+  /** Optional connector search string that sets which items the pipe looks at. */
+  query: string;
+  /** JavaScript: the body of an async function that receives `rows` and `ask` and returns an array. */
+  program: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MemoryRow {
   id: string;
   content: string;
@@ -232,6 +249,13 @@ export interface DataStore {
   consumeJoinCode(code: string): MaybePromise<boolean>;
   /** Undoes consumeJoinCode, for a join that failed after consuming. */
   releaseJoinCode(code: string): MaybePromise<void>;
+
+  // --- Pipes ---
+  listPipes(): MaybePromise<PipeRow[]>;
+  getPipe(id: string): MaybePromise<PipeRow | null>;
+  insertPipe(pipe: { id: string; name: string; description: string; source: string; query: string; program: string; enabled: number }): MaybePromise<void>;
+  updatePipe(id: string, fields: { name?: string; description?: string; source?: string; query?: string; program?: string; enabled?: number }): MaybePromise<void>;
+  deletePipe(id: string): MaybePromise<void>;
 
   // --- AI Memories ---
   listMemories(): MaybePromise<MemoryRow[]>;

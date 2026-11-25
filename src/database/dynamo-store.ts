@@ -16,6 +16,7 @@
  *   AGENT#{token hash} / AGENT       — registered agents (token hash only)
  *   AGENTNAME#{name} / AGENTNAME     — reserves an agent name (uniqueness)
  *   JOINCODE#{code} / JOINCODE       — one-time agent join codes
+ *   PIPE#{id}       / PIPE           — pipes (filter programs exposed to agents)
  */
 
 import {
@@ -41,6 +42,7 @@ import type {
   AuditRow,
   MemoryRow,
   AgentRow,
+  PipeRow,
   JoinCodeRow,
   SkillRow,
   GitHubRepoRow,
@@ -728,6 +730,70 @@ export class DynamoDataStore implements DataStore {
     })).catch((err) => {
       if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
     });
+  }
+
+  // --- Pipes ---
+
+  private toPipeRow(item: Record<string, unknown>): PipeRow {
+    return {
+      id: String(item.id),
+      name: String(item.name ?? ''),
+      description: String(item.description ?? ''),
+      source: String(item.source ?? ''),
+      query: String(item.query ?? ''),
+      program: String(item.program ?? ''),
+      enabled: Number(item.enabled ?? 1),
+      created_at: String(item.created_at ?? ''),
+      updated_at: String(item.updated_at ?? ''),
+    };
+  }
+
+  async listPipes(): Promise<PipeRow[]> {
+    const rows: PipeRow[] = [];
+    let startKey: Record<string, unknown> | undefined;
+    do {
+      const result = await this.docClient.send(new ScanCommand({
+        TableName: this.tableName,
+        FilterExpression: 'SK = :sk',
+        ExpressionAttributeValues: { ':sk': 'PIPE' },
+        ExclusiveStartKey: startKey,
+      }));
+      for (const item of result.Items ?? []) rows.push(this.toPipeRow(item));
+      startKey = result.LastEvaluatedKey;
+    } while (startKey);
+    rows.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return rows;
+  }
+
+  async getPipe(id: string): Promise<PipeRow | null> {
+    const result = await this.docClient.send(new GetCommand({ TableName: this.tableName, Key: { PK: `PIPE#${id}`, SK: 'PIPE' } }));
+    return result.Item ? this.toPipeRow(result.Item) : null;
+  }
+
+  async insertPipe(pipe: { id: string; name: string; description: string; source: string; query: string; program: string; enabled: number }): Promise<void> {
+    const now = new Date().toISOString();
+    await this.docClient.send(new PutCommand({
+      TableName: this.tableName,
+      Item: { PK: `PIPE#${pipe.id}`, SK: 'PIPE', ...pipe, created_at: now, updated_at: now },
+    }));
+  }
+
+  async updatePipe(id: string, fields: { name?: string; description?: string; source?: string; query?: string; program?: string; enabled?: number }): Promise<void> {
+    const current = await this.getPipe(id);
+    if (!current) return;
+    const next = { ...current };
+    for (const [k, v] of Object.entries(fields)) if (v !== undefined) (next as Record<string, unknown>)[k] = v;
+    await this.docClient.send(new PutCommand({
+      TableName: this.tableName,
+      Item: { PK: `PIPE#${id}`, SK: 'PIPE', ...next, updated_at: new Date().toISOString() },
+      ConditionExpression: 'attribute_exists(PK)',
+    })).catch((err) => {
+      if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
+    });
+  }
+
+  async deletePipe(id: string): Promise<void> {
+    await this.docClient.send(new DeleteCommand({ TableName: this.tableName, Key: { PK: `PIPE#${id}`, SK: 'PIPE' } }));
   }
 
   // --- AI Memories (not implemented for DynamoDB — Android uses SQLite) ---

@@ -113,6 +113,19 @@ CREATE TABLE IF NOT EXISTS join_codes (
   used_at TEXT
 )`;
 
+const CREATE_PIPES = `
+CREATE TABLE IF NOT EXISTS pipes (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL,
+  query TEXT NOT NULL DEFAULT '',
+  program TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`;
+
 const CREATE_AGENT_SKILLS = `
 CREATE TABLE IF NOT EXISTS agent_skills (
   id TEXT PRIMARY KEY,
@@ -146,6 +159,7 @@ export function createTables(db: Database.Database): void {
   db.exec(CREATE_AGENT_SKILLS);
   db.exec(CREATE_AGENTS);
   db.exec(CREATE_JOIN_CODES);
+  db.exec(CREATE_PIPES);
   // Migrate existing agent_skills tables
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN instructions TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already exists */ }
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN trigger_event TEXT NOT NULL DEFAULT 'sms_received'"); } catch (_) { /* already exists */ }

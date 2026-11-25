@@ -5,7 +5,8 @@ import type { ConnectorRegistry } from './connectors/types.js';
 import type { HubConfigParsed } from '../config/schema.js';
 import type { TokenManager } from './auth/token-manager.js';
 import { createAppApi } from './app-api.js';
-import { createChatRoutes } from './chat/routes.js';
+import { createChatRoutes, pipeAsk } from './chat/routes.js';
+import { createPipeAgentRoutes, createPipeOwnerRoutes } from './pipes.js';
 import { createGuiRoutes, createPageRoutes } from './gui/routes.js';
 import { createOAuthRoutes } from './auth/oauth-routes.js';
 import { createLoginRoutes } from './auth/login-routes.js';
@@ -46,6 +47,7 @@ export function createServer(deps: ServerDeps): Hono {
   });
 
   const oauth = createOAuthRoutes(deps);
+  const pipeDeps = { ...deps, ask: pipeAsk(deps) };
   app.route('/oauth', oauth.pub);
 
   // --- /web ---
@@ -58,6 +60,7 @@ export function createServer(deps: ServerDeps): Hono {
   });
   web.route('/oauth', oauth.owner);
   web.route('/agents', createAgentOwnerRoutes(deps));
+  web.route('/pipes', createPipeOwnerRoutes(pipeDeps));
   web.route('/', createChatRoutes(deps));
   web.route('/', createGuiRoutes(deps));
   app.route('/web', web);
@@ -68,6 +71,7 @@ export function createServer(deps: ServerDeps): Hono {
   agent.route('/', createJoinRoutes(deps));
   agent.use('*', requireAgent(deps.store));
   agent.route('/', createAppApi(deps));
+  agent.route('/', createPipeAgentRoutes(pipeDeps));
   app.route('/agent', agent);
 
   // Pages (last)

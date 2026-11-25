@@ -17,6 +17,7 @@ import type {
   AuditRow,
   MemoryRow,
   AgentRow,
+  PipeRow,
   JoinCodeRow,
   GitHubRepoRow,
   GitHubRepoInput,
@@ -373,6 +374,32 @@ export class SqliteDataStore implements DataStore {
 
   releaseJoinCode(code: string): void {
     this.db.prepare('UPDATE join_codes SET used_at = NULL WHERE code = ?').run(code);
+  }
+
+  // --- Pipes ---
+
+  listPipes(): PipeRow[] {
+    return this.db.prepare('SELECT * FROM pipes ORDER BY created_at ASC, id ASC').all() as PipeRow[];
+  }
+
+  getPipe(id: string): PipeRow | null {
+    return (this.db.prepare('SELECT * FROM pipes WHERE id = ?').get(id) as PipeRow | undefined) ?? null;
+  }
+
+  insertPipe(pipe: { id: string; name: string; description: string; source: string; query: string; program: string; enabled: number }): void {
+    this.db.prepare('INSERT INTO pipes (id, name, description, source, query, program, enabled) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(pipe.id, pipe.name, pipe.description, pipe.source, pipe.query, pipe.program, pipe.enabled);
+  }
+
+  updatePipe(id: string, fields: { name?: string; description?: string; source?: string; query?: string; program?: string; enabled?: number }): void {
+    const keys = (['name', 'description', 'source', 'query', 'program', 'enabled'] as const).filter((k) => fields[k] !== undefined);
+    if (!keys.length) return;
+    this.db.prepare(`UPDATE pipes SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`)
+      .run(...keys.map((k) => fields[k]), id);
+  }
+
+  deletePipe(id: string): void {
+    this.db.prepare('DELETE FROM pipes WHERE id = ?').run(id);
   }
 
   // --- AI Memories ---

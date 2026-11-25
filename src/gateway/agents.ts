@@ -29,18 +29,23 @@ export function isValidAgentName(name: unknown): name is string {
   return typeof name === 'string' && NAME_PATTERN.test(name) && name !== 'owner';
 }
 
+const PIPE_PERMISSION = /^pipe:[a-z2-7]{8}$/;
+
 /**
- * Validates a permission list. Returns it deduplicated in a fixed order
- * (pull before propose, sources in AGENT_SOURCES order), or null if anything in it
- * is not a known `pull:<source>` or `propose:<source>`.
+ * Validates a permission list. Returns it deduplicated in a fixed order (pull,
+ * then propose, sources in AGENT_SOURCES order, then pipes), or null if anything
+ * in it is not a known `pull:<source>`, `propose:<source>` or `pipe:<id>`.
+ * A `pipe:<id>` lets the agent run that one pipe; it does not need `pull` for the
+ * pipe's source, which is the point of a pipe.
  */
 export function normalizePermissions(input: unknown): string[] | null {
   if (!Array.isArray(input)) return null;
-  const all = [...AGENT_SOURCES.map((s) => `pull:${s}`), ...AGENT_SOURCES.map((s) => `propose:${s}`)];
+  const fixed = [...AGENT_SOURCES.map((s) => `pull:${s}`), ...AGENT_SOURCES.map((s) => `propose:${s}`)];
   for (const p of input) {
-    if (typeof p !== 'string' || !all.includes(p)) return null;
+    if (typeof p !== 'string' || !(fixed.includes(p) || PIPE_PERMISSION.test(p))) return null;
   }
-  return all.filter((p) => input.includes(p));
+  const pipes = [...new Set(input.filter((p: string) => PIPE_PERMISSION.test(p)))].sort();
+  return [...fixed.filter((p) => input.includes(p)), ...pipes];
 }
 
 export function parsePermissions(raw: string): string[] {
@@ -75,7 +80,7 @@ export function createAgentOwnerRoutes(deps: AgentDeps): Hono<AccessEnv> {
   app.post('/join-links', async (c) => {
     const body = await c.req.json().catch(() => ({})) as { permissions?: unknown };
     const permissions = normalizePermissions(body.permissions);
-    if (!permissions) return c.json({ ok: false, error: 'permissions must be a list of pull:<source> and propose:<source>' }, 400);
+    if (!permissions) return c.json({ ok: false, error: 'permissions must be a list of pull:<source>, propose:<source> and pipe:<id>' }, 400);
     const code = randomBytes(24).toString('hex');
     const expiresAt = new Date(Date.now() + JOIN_CODE_LIFETIME_MS).toISOString();
     await deps.store.insertJoinCode({ code, permissions: JSON.stringify(permissions), expires_at: expiresAt });
@@ -87,7 +92,7 @@ export function createAgentOwnerRoutes(deps: AgentDeps): Hono<AccessEnv> {
     const id = c.req.param('id');
     const body = await c.req.json().catch(() => ({})) as { permissions?: unknown };
     const permissions = normalizePermissions(body.permissions);
-    if (!permissions) return c.json({ ok: false, error: 'permissions must be a list of pull:<source> and propose:<source>' }, 400);
+    if (!permissions) return c.json({ ok: false, error: 'permissions must be a list of pull:<source>, propose:<source> and pipe:<id>' }, 400);
     const agent = (await deps.store.listAgents()).find((a) => a.id === id);
     if (!agent) return c.json({ ok: false, error: 'No such agent' }, 404);
     await deps.store.updateAgentPermissions(id, JSON.stringify(permissions));

@@ -105,6 +105,18 @@ CREATE TABLE IF NOT EXISTS join_codes (
   used_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS pipes (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL,
+  query TEXT NOT NULL DEFAULT '',
+  program TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS ai_memories (
   id TEXT PRIMARY KEY,
   content TEXT NOT NULL,

@@ -10,6 +10,7 @@ import type { MemoryRow, SkillRow } from '../../database/datastore.js';
 import { parseTriggerEvents, serializeTriggerEvents } from '../../database/datastore.js';
 import { runCode } from '../code-runner/runner.js';
 import { setContacts, labelWithContact } from './contacts-cache.js';
+import { makeAsk, savePipe, describePipe, PIPE_SOURCES, type AskFn, type PipeDeps } from '../pipes.js';
 
 type SmsMessage = { address: string; body: string; date: number };
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
@@ -50,6 +51,73 @@ export function getClient(deps: ServerDeps): OpenAI {
 export function getModel(deps: ServerDeps): string {
   const ai = deps.config.ai!;
   return ai.model ?? DEFAULT_MODELS[ai.provider ?? 'anthropic'] ?? 'claude-sonnet-4-6';
+}
+
+// The `ask(question, text)` helper that pipe programs call: one yes/no question to the
+// configured model. One instance per server, so its answer cache is shared by every run.
+const pipeAsks = new WeakMap<ServerDeps, AskFn>();
+
+export function pipeAsk(deps: ServerDeps): AskFn {
+  let ask = pipeAsks.get(deps);
+  if (!ask) {
+    ask = makeAsk(async (system, user) => {
+      if (!deps.config.ai?.api_key) throw new Error('ask() needs an AI key. Add one in Settings → AI Settings.');
+      const response = await getClient(deps).chat.completions.create({
+        model: getModel(deps),
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+        max_tokens: 5,
+      });
+      return response.choices[0]?.message.content ?? '';
+    });
+    pipeAsks.set(deps, ask);
+  }
+  return ask;
+}
+
+function pipeDeps(deps: ServerDeps): PipeDeps {
+  return { ...deps, ask: pipeAsk(deps) };
+}
+
+/** What a pipe program is, for the model that writes them. */
+const PIPE_CONTRACT = [
+  'A pipe is a small filter program over ONE source that agents can call as their own endpoint. Use list_pipes() to see them, save_pipe() to create or change one, delete_pipe(id) to remove one.',
+  `Sources: ${PIPE_SOURCES.join(', ')}. Optional "query" is the source's own search string and sets which items the pipe looks at (Gmail example: "newer_than:60d"); leave it empty for the newest items. A pipe looks at 20 items by default, 50 at most.`,
+  'The program is the BODY of an async JavaScript function. Two names are in scope: `rows` and `ask`. It must `return` an array.',
+  '- `rows`: array of { source, source_item_id, type, timestamp, data }. For gmail, data has title (the subject), body, snippet, author_name, author_email, participants, labels, attachments. Quick filters set by the owner are already applied.',
+  '- `ask(question, text)`: asks the AI model a yes/no question about the text and resolves to true or false. Use it for judgments a keyword test cannot make ("does this email ask me to write a recommendation letter?"). Call it for all rows at once with Promise.all; it limits its own concurrency and caches answers.',
+  '- Nothing else exists: no require, fetch, process, Buffer or timers. Do not use console for output.',
+  '- Return the rows to keep. You may also return trimmed copies (for example without the body) when the agent does not need every field.',
+  'Example program:',
+  '  const keep = await Promise.all(rows.map((r) => ask("Does this email ask the recipient to write a recommendation letter?", r.data.title + "\\n" + (r.data.snippet || r.data.body || ""))));',
+  '  return rows.filter((_, i) => keep[i]);',
+  'save_pipe saves the pipe and then test-runs it on up to 10 items; read the `test` field of its result. If test.error is set, fix the program and call save_pipe again with the same id. To change an existing pipe pass its id; only the fields you pass are changed. Tell the user what the pipe keeps and how many of the tested items matched. Agents need the owner to tick the pipe for them in Settings → Agents before they can call it.',
+].join('\n');
+
+/** Which page the chat is embedded in, and what the user has selected there. */
+export type ChatPage = { page?: 'skills' | 'pipes'; focusId?: string };
+
+async function pageContext(deps: ServerDeps, where: ChatPage): Promise<string[]> {
+  if (where.page === 'pipes') {
+    const lines = ['', 'The user is on the Pipes page: this conversation is for creating and refining pipes. Their pipes are shown beside this chat and refresh when you save one, so do not paste a whole program back unless asked.'];
+    const pipe = where.focusId ? await deps.store.getPipe(where.focusId) : null;
+    if (pipe) {
+      lines.push('The pipe the user has selected is below. A request like "also drop newsletters" or "make it stricter" means: change THIS pipe (save_pipe with this id), not create a new one.', JSON.stringify(describePipe(pipe, '')));
+    } else {
+      lines.push('No pipe is selected. A request that describes a new filter means: create a pipe.');
+    }
+    return lines;
+  }
+  if (where.page === 'skills') {
+    const lines = ['', 'The user is on the Skills page: this conversation is for creating and refining skills. Their skills are shown beside this chat and refresh when you save one.'];
+    const skill = where.focusId ? (await deps.store.listSkills()).find((s) => s.id === where.focusId) : null;
+    if (skill) {
+      lines.push('The skill the user has selected is below. A request to adjust behavior means: change THIS skill (save_skill with this id), not create a new one.', JSON.stringify({ id: skill.id, name: skill.name, instructions: skill.instructions, trigger_events: parseTriggerEvents(skill.trigger_event), primitive_type: skill.primitive_type, enabled: !!skill.enabled }));
+    } else {
+      lines.push('No skill is selected. A request that describes new behavior means: create a skill.');
+    }
+    return lines;
+  }
+  return [];
 }
 
 async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]> {
@@ -289,6 +357,44 @@ async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]
   tools.push({
     type: 'function',
     function: {
+      name: 'list_pipes',
+      description: 'List all pipes: id, name, description, source, query, program, enabled.',
+      parameters: { type: 'object', properties: {} },
+    },
+  });
+
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'save_pipe',
+      description: 'Create a pipe, or change one when id is given. Saves it, then test-runs it on up to 10 items and returns the result in `test` (itemsFetched, itemsReturned, sample, or error).',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Id of the pipe to change. Omit to create a new pipe.' },
+          name: { type: 'string', description: 'Short name, e.g. "Recommendation letter requests"' },
+          description: { type: 'string', description: 'One sentence saying what the pipe returns. Agents read this to decide whether to call it.' },
+          source: { type: 'string', enum: [...PIPE_SOURCES], description: 'The one source the pipe reads' },
+          query: { type: 'string', description: 'Optional search string for the source that sets which items are looked at. Empty for the newest items.' },
+          program: { type: 'string', description: 'Body of an async JavaScript function with `rows` and `ask` in scope; must return an array.' },
+          enabled: { type: 'boolean', description: 'Whether agents can call it (default true)' },
+        },
+      },
+    },
+  });
+
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'delete_pipe',
+      description: 'Delete a pipe by id.',
+      parameters: { type: 'object', properties: { id: { type: 'string', description: 'Pipe id' } }, required: ['id'] },
+    },
+  });
+
+  tools.push({
+    type: 'function',
+    function: {
       name: 'delete_skill',
       description: 'Delete an agent skill by ID.',
       parameters: {
@@ -348,6 +454,7 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
 
   lines.push('', 'Memory: Use save_memory() to record important facts the user shares (preferences, ongoing projects, personal context). Use update_memory(id) when a fact changes. Use delete_memory(id) for stale facts. Be proactive but concise — one clear sentence per memory. If a memory is about someone in an SMS conversation, refer to them by their contact name (shown in the conversation header) rather than their phone number.');
   lines.push('', 'Skills: Skills are primitive rules (labels and actions). Use list_skills() to view them. Use save_skill(name, instructions, trigger_events, enabled) to create/update a primitive. A skill can be tagged with multiple trigger_events (e.g. both sms_received and photo_added) and is only pulled into a task when that task\'s context matches one of its tags. Labels classify incoming events and append tags to the context ground truth. Actions define how to respond based on the context. Ensure one primitive per rule. Do not disable other skills for the same trigger unless explicitly replacing them, as multiple primitives compose together. Currently supported triggers: sms_received, photo_added, email_received, calendar_event_starting, manual_shortcut. Specify allowed_sources to scope permissions.');
+  lines.push('', 'Pipes: ' + PIPE_CONTRACT);
   lines.push('', 'Code execution: Use run_code() to run JavaScript on this device. Supports top-level await, fetch, require (fs, path, etc.), Buffer, and __dataDir (path to app data). Use console.log() to emit output — return values are ignored. Each call is a fresh context; write files at __dataDir to persist data between calls. When asked to find photos matching some criteria, or to clean up duplicates/clutter, prefer writing this logic yourself in run_code over guessing from read_photos summaries alone — see the run_code tool description for the __photos bindings.');
 
   if (sms && sms.length > 0) {
@@ -613,6 +720,24 @@ async function executeToolInner(
       return JSON.stringify({ ok: true });
     }
 
+    case 'list_pipes': {
+      const pipes = (await deps.store.listPipes()).map((p) => describePipe(p, ''));
+      return JSON.stringify({ ok: true, pipes });
+    }
+
+    case 'save_pipe': {
+      return JSON.stringify(await savePipe(pipeDeps(deps), input));
+    }
+
+    case 'delete_pipe': {
+      const id = String(input.id ?? '').trim();
+      const pipe = id ? await deps.store.getPipe(id) : null;
+      if (!pipe) return JSON.stringify({ ok: false, error: `No pipe with id "${id}"` });
+      await deps.store.deletePipe(id);
+      await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'pipe_deleted', source: pipe.source, details: JSON.stringify({ id, name: pipe.name, deletedBy: 'chat' }) });
+      return JSON.stringify({ ok: true });
+    }
+
     case 'run_code': {
       const code = String(input.code ?? '').trim();
       if (!code) return JSON.stringify({ error: 'code is required' });
@@ -674,12 +799,13 @@ async function runAgentLoop(
   deps: ServerDeps,
   messages: ChatMessage[],
   sms: SmsMessage[] | null,
+  where: ChatPage = {},
 ): Promise<{ reply: string; toolsUsed: string[]; stagedActionIds: string[]; toolOutputs: ToolOutput[] }> {
   const client = getClient(deps);
   const model = getModel(deps);
   const tools = await buildTools(deps);
   const memories = await deps.store.listMemories();
-  const system = buildSystemPrompt(deps, sms, memories);
+  const system = [buildSystemPrompt(deps, sms, memories), ...(await pageContext(deps, where))].join('\n');
 
   const chatMessages: OpenAI.ChatCompletionMessageParam[] = [
     { role: 'system', content: system },
@@ -1199,8 +1325,13 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     if (!Array.isArray(messages)) {
       return c.json({ ok: false, error: 'messages array required' }, 400);
     }
+    // The Skills and Pipes pages embed this chat and say what is selected beside it.
+    const where: ChatPage = {
+      page: body.page === 'skills' || body.page === 'pipes' ? body.page : undefined,
+      focusId: typeof body.focusId === 'string' ? body.focusId : undefined,
+    };
     try {
-      const result = await runAgentLoop(deps, messages as ChatMessage[], sms ?? null);
+      const result = await runAgentLoop(deps, messages as ChatMessage[], sms ?? null, where);
       return c.json({ ok: true, reply: result.reply, toolsUsed: result.toolsUsed, stagedActionIds: result.stagedActionIds, toolOutputs: result.toolOutputs });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
