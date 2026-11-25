@@ -15,6 +15,17 @@ Haojian asked for the feature to be built and changed the page design: "Chat sho
 - **Desktop page only.** `packages/ui` (the phone-shaped page and the mobile app) has no Pipes page.
 - Not changed from the design: the program contract (`rows`, `ask`, return an array), the sandbox and its stated limits, `ask` caching and its limit of five at once, 20 items by default and 50 at most, the optional `query`, quick filters applied first, the audit entry per run.
 
+Changed after an independent review (2026-11-25):
+
+- `save_pipe` test-runs the program first and saves only if the run succeeds. An update never replaces a working pipe with a failing one. A pipe's source cannot be changed after creation, so a grant cannot move to another source. (This replaces "the pipe is saved even if the test run fails" below.)
+- An agent's `GET /agent/pipes` shows a pipe's name, description, source and state, not its program or query. When a pipe fails, an agent is told only that it failed; the reason goes to the owner and the Activity Log.
+- Deleting a pipe removes its permission from every agent.
+- A program may return at most 200 rows and 2 MB.
+- An unawaited `ask()` that fails can no longer end the hub process, and the server now logs unhandled rejections instead of exiting.
+- A model reply that is neither yes nor no is an error, not a cached "no".
+
+Known limit, accepted: **the sender of an item can influence `ask`.** The text of an email is shown to the model inside the question, so a sender can write text meant to make their message pass or fail a pipe's filter. `ask` only ever returns true or false, so the worst case is that one item is wrongly included in or left out of that pipe's result. A pipe is a convenience filter over data the agent was allowed to see, not a guarantee about content.
+
 The sections below are the original design; where they disagree with this list, this list is what was built.
 
 ## Intent

@@ -145,6 +145,7 @@ A pipe is a filtered view of one source that an agent can be allowed to call, wi
 - **Create one by chat.** Open **Pipes** in the GUI and describe the filter in the chat on the left. The AI writes a small program, saves it, and test-runs it; the right panel shows the pipe's API, its program and its current output. Select a pipe and keep chatting to refine it.
 - **What a pipe is.** A short JavaScript program that receives the source's rows (after your quick filters) and returns the rows to keep. For judgments a keyword test cannot make it can ask the configured AI model a yes/no question about each row.
 - **Give it to an agent.** In **Settings → Agents**, tick the pipe for the agent. The agent then runs it with `query-hub pipe <id>`, and lists what it has with `query-hub pipes`. It does not need read access to the source.
+- **A filter, not a guarantee.** When a pipe asks the AI model to judge an item, the item's own text is part of the question, so a sender could word a message to slip past or into a pipe. Treat a pipe as a way to narrow what an agent sees, not as a security boundary on content.
 - **Every run is live.** `GET /agent/pipes/<id>` fetches the source and runs the program each time, and writes an entry to the Activity Log.
 
 ## Skills
