@@ -16,7 +16,8 @@ import type {
   FilterRow,
   AuditRow,
   MemoryRow,
-  AgentKeyRow,
+  AgentRow,
+  JoinCodeRow,
   GitHubRepoRow,
   GitHubRepoInput,
   OAuthStateData,
@@ -327,26 +328,51 @@ export class SqliteDataStore implements DataStore {
     return data;
   }
 
-  // --- Agent Keys ---
+  // --- Agents ---
 
-  listAgentKeys(): AgentKeyRow[] {
-    return this.db.prepare('SELECT * FROM agent_keys ORDER BY created_at ASC').all() as AgentKeyRow[];
+  listAgents(): AgentRow[] {
+    return this.db.prepare('SELECT * FROM agents ORDER BY created_at ASC, id ASC').all() as AgentRow[];
   }
 
-  insertAgentKey(key: { id: string; name: string; key_hash: string }): void {
-    this.db.prepare('INSERT INTO agent_keys (id, name, key_hash) VALUES (?, ?, ?)').run(key.id, key.name, key.key_hash);
+  insertAgent(agent: { id: string; name: string; token_hash: string; permissions: string }): void {
+    this.db.prepare('INSERT INTO agents (id, name, token_hash, permissions) VALUES (?, ?, ?, ?)')
+      .run(agent.id, agent.name, agent.token_hash, agent.permissions);
   }
 
-  getAgentKeyByHash(keyHash: string): AgentKeyRow | null {
-    return (this.db.prepare('SELECT * FROM agent_keys WHERE key_hash = ?').get(keyHash) as AgentKeyRow | undefined) ?? null;
+  getAgentByTokenHash(tokenHash: string): AgentRow | null {
+    return (this.db.prepare('SELECT * FROM agents WHERE token_hash = ?').get(tokenHash) as AgentRow | undefined) ?? null;
   }
 
-  touchAgentKey(id: string): void {
-    this.db.prepare("UPDATE agent_keys SET last_used_at = datetime('now') WHERE id = ?").run(id);
+  touchAgent(id: string): void {
+    this.db.prepare("UPDATE agents SET last_used_at = datetime('now') WHERE id = ?").run(id);
   }
 
-  deleteAgentKey(id: string): void {
-    this.db.prepare('DELETE FROM agent_keys WHERE id = ?').run(id);
+  updateAgentPermissions(id: string, permissions: string): void {
+    this.db.prepare('UPDATE agents SET permissions = ? WHERE id = ?').run(permissions, id);
+  }
+
+  deleteAgent(id: string): void {
+    this.db.prepare('DELETE FROM agents WHERE id = ?').run(id);
+  }
+
+  // --- Join codes ---
+
+  insertJoinCode(code: { code: string; permissions: string; expires_at: string }): void {
+    this.db.prepare('INSERT INTO join_codes (code, permissions, expires_at) VALUES (?, ?, ?)')
+      .run(code.code, code.permissions, code.expires_at);
+  }
+
+  getJoinCode(code: string): JoinCodeRow | null {
+    return (this.db.prepare('SELECT * FROM join_codes WHERE code = ?').get(code) as JoinCodeRow | undefined) ?? null;
+  }
+
+  consumeJoinCode(code: string): boolean {
+    const result = this.db.prepare("UPDATE join_codes SET used_at = datetime('now') WHERE code = ? AND used_at IS NULL").run(code);
+    return result.changes === 1;
+  }
+
+  releaseJoinCode(code: string): void {
+    this.db.prepare('UPDATE join_codes SET used_at = NULL WHERE code = ?').run(code);
   }
 
   // --- AI Memories ---

@@ -9,8 +9,8 @@ import { createServer } from '../server.js';
 import { TokenManager } from './token-manager.js';
 import type { ConnectorRegistry, SourceConnector } from '../connectors/types.js';
 import type { HubConfigParsed } from '../../config/schema.js';
-import { makeTmpDir, addTestAgentKey, TEST_AGENT_AUTH } from '../../test-utils.js';
-import { DEVICE_SECRET_HEADER, newAgentKey, hashAgentKey } from './access.js';
+import { makeTmpDir, addTestAgent, TEST_AGENT_AUTH } from '../../test-utils.js';
+import { DEVICE_SECRET_HEADER } from './access.js';
 
 const connector: SourceConnector = {
   name: 'gmail',
@@ -58,21 +58,21 @@ describe('access control', () => {
       expect(json.error.code).toBe('UNAUTHORIZED');
     });
 
-    it('rejects an unknown key', async () => {
-      const res = await app.request('/agent/sources', { headers: { Authorization: 'Bearer pk_nope' } });
+    it('rejects an unknown token', async () => {
+      const res = await app.request('/agent/sources', { headers: { Authorization: 'Bearer pdh_nope' } });
       expect(res.status).toBe(401);
     });
 
-    it('accepts a valid key and records last use', async () => {
-      await addTestAgentKey(store);
+    it('accepts a registered agent and records last use', async () => {
+      await addTestAgent(store);
       const res = await app.request('/agent/sources', { headers: TEST_AGENT_AUTH });
       expect(res.status).toBe(200);
-      expect(store.listAgentKeys()[0].last_used_at).not.toBeNull();
+      expect(store.listAgents()[0].last_used_at).not.toBeNull();
     });
 
-    it('rejects a key once it is deleted', async () => {
-      const id = await addTestAgentKey(store);
-      store.deleteAgentKey(id);
+    it('rejects an agent once it is revoked', async () => {
+      const id = await addTestAgent(store);
+      store.deleteAgent(id);
       const res = await app.request('/agent/sources', { headers: TEST_AGENT_AUTH });
       expect(res.status).toBe(401);
     });
@@ -82,8 +82,8 @@ describe('access control', () => {
       expect(res.status).toBe(200);
     });
 
-    it('records the key name in the audit log', async () => {
-      await addTestAgentKey(store, 'claude-code');
+    it('records the agent name in the audit log', async () => {
+      await addTestAgent(store, 'claude-code');
       await app.request('/agent/propose', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...TEST_AGENT_AUTH },
@@ -96,14 +96,14 @@ describe('access control', () => {
 
   describe('/web/*', () => {
     it('rejects a call with no credential', async () => {
-      for (const path of ['/web/sources', '/web/filters', '/web/staging', '/web/audit', '/web/skills', '/web/memories', '/web/agent-keys', '/web/chat/status']) {
+      for (const path of ['/web/sources', '/web/filters', '/web/staging', '/web/audit', '/web/skills', '/web/memories', '/web/agents', '/web/chat/status']) {
         const res = await app.request(path);
         expect(res.status, path).toBe(401);
       }
     });
 
-    it('rejects an agent key', async () => {
-      await addTestAgentKey(store);
+    it('rejects an agent token', async () => {
+      await addTestAgent(store);
       const res = await app.request('/web/staging', { headers: TEST_AGENT_AUTH });
       expect(res.status).toBe(401);
     });
@@ -150,39 +150,6 @@ describe('access control', () => {
       expect((await app.request('/web/sources', { headers: { [DEVICE_SECRET_HEADER]: 's3cret-valuX' } })).status).toBe(401);
       const status = await (await app.request('/web/auth/status', { headers: { [DEVICE_SECRET_HEADER]: 's3cret-value' } })).json() as { authenticated: boolean };
       expect(status.authenticated).toBe(true);
-    });
-  });
-
-  describe('agent keys', () => {
-    it('creates a key that is shown once, lists without it, and deletes it', async () => {
-      const created = await (await app.request('/web/agent-keys', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ name: 'laptop' }),
-      })).json() as { ok: boolean; id: string; key: string };
-      expect(created.key).toMatch(/^pk_[A-Za-z0-9_-]{43}$/);
-      expect(store.listAgentKeys()[0].key_hash).toBe(hashAgentKey(created.key));
-
-      const listed = await (await app.request('/web/agent-keys', { headers: { Cookie: cookie } })).json() as { keys: Record<string, unknown>[] };
-      expect(listed.keys).toHaveLength(1);
-      expect(JSON.stringify(listed)).not.toContain(created.key);
-      expect(listed.keys[0]).not.toHaveProperty('key_hash');
-
-      expect((await app.request('/agent/sources', { headers: { Authorization: `Bearer ${created.key}` } })).status).toBe(200);
-      await app.request(`/web/agent-keys/${created.id}`, { method: 'DELETE', headers: { Cookie: cookie } });
-      expect((await app.request('/agent/sources', { headers: { Authorization: `Bearer ${created.key}` } })).status).toBe(401);
-    });
-
-    it('rejects a missing, duplicate or reserved name', async () => {
-      const post = (name: string) => app.request('/web/agent-keys', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ name }),
-      });
-      expect((await post('')).status).toBe(400);
-      expect((await post('owner')).status).toBe(400);
-      expect((await post('a')).status).toBe(200);
-      expect((await post('a')).status).toBe(409);
-    });
-
-    it('newAgentKey gives distinct keys', () => {
-      expect(newAgentKey().key).not.toBe(newAgentKey().key);
     });
   });
 
@@ -258,6 +225,7 @@ describe('access control', () => {
     // protection fails here without anyone having to remember to list it.
     const OPEN = new Set([
       'GET /health', 'GET /', 'GET /next',
+      'GET /agent/join/:code', 'POST /agent/join',
       'POST /web/auth/signup', 'POST /web/auth/login', 'POST /web/auth/logout', 'GET /web/auth/status',
       'GET /oauth/gmail/callback', 'GET /oauth/google_calendar/callback', 'GET /oauth/github/callback',
       'POST /oauth/gmail/store-tokens', 'POST /oauth/google_calendar/store-tokens', 'POST /oauth/github/store-tokens',
@@ -314,8 +282,8 @@ describe('access control', () => {
       expect(res.status).toBe(200);
     });
 
-    it('an agent key is not affected by origin headers', async () => {
-      await addTestAgentKey(store);
+    it('an agent token is not affected by origin headers', async () => {
+      await addTestAgent(store);
       const res = await app.request('/agent/sources', { headers: { ...TEST_AGENT_AUTH, Origin: 'http://elsewhere.test' } });
       expect(res.status).toBe(200);
     });

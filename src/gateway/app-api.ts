@@ -6,7 +6,8 @@ import type { HubConfigParsed } from '../config/schema.js';
 import type { TokenManager } from './auth/token-manager.js';
 import { AuditLog } from './audit/log.js';
 import { applyFilters, type QuickFilter } from './filters.js';
-import type { AccessEnv } from './auth/access.js';
+import { allows, type AccessEnv } from './auth/access.js';
+import { AGENT_SOURCES } from './agents.js';
 
 export interface AppApiDeps {
   store: DataStore;
@@ -19,6 +20,31 @@ export interface AppApiDeps {
 export function createAppApi(deps: AppApiDeps): Hono<AccessEnv> {
   const app = new Hono<AccessEnv>();
   const auditLog = new AuditLog(deps.store);
+
+  const forbidden = (permission: string) => ({
+    ok: false,
+    error: { code: 'FORBIDDEN', permission, message: `This agent does not have the "${permission}" permission. The owner can grant it in Settings → Agents.` },
+  });
+
+  // Who am I, and what may I do.
+  app.get('/me', (c) => {
+    const permissions = c.get('permissions');
+    return c.json({
+      ok: true,
+      name: c.get('caller'),
+      owner: permissions === null,
+      permissions: permissions ?? [...AGENT_SOURCES.map((s) => `pull:${s}`), ...AGENT_SOURCES.map((s) => `propose:${s}`)],
+    });
+  });
+
+  // An agent removes its own registration (the agent side of "revoke").
+  app.post('/leave', async (c) => {
+    const agentId = c.get('agentId');
+    if (!agentId) return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Only a registered agent can leave.' } }, 400);
+    await deps.store.deleteAgent(agentId);
+    await auditLog.insert('agent_left', null, { id: agentId, name: c.get('caller') });
+    return c.json({ ok: true });
+  });
 
   // POST /pull
   app.post('/pull', async (c) => {
@@ -34,6 +60,8 @@ export function createAppApi(deps: AppApiDeps): Hono<AccessEnv> {
     if (!source) {
       return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required field: source' } }, 400);
     }
+
+    if (!allows(c, `pull:${source}`)) return c.json(forbidden(`pull:${source}`), 403);
 
     const sourceConfig = deps.config.sources[source];
     if (!sourceConfig) {
@@ -104,6 +132,8 @@ export function createAppApi(deps: AppApiDeps): Hono<AccessEnv> {
       return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required fields: source, action_type' } }, 400);
     }
 
+    if (!allows(c, `propose:${source}`)) return c.json(forbidden(`propose:${source}`), 403);
+
     // Insert into staging
     const actionId = `act_${randomUUID().slice(0, 12)}`;
     await deps.store.insertStagingAction({
@@ -129,10 +159,11 @@ export function createAppApi(deps: AppApiDeps): Hono<AccessEnv> {
     return c.json(responsePayload);
   });
 
-  // GET /sources — discover which sources are connected (have OAuth tokens)
+  // GET /sources — the sources this caller may pull, and whether each is connected
   app.get('/sources', async (c) => {
     const sources: Record<string, { connected: boolean }> = {};
     for (const [name] of deps.connectorRegistry) {
+      if (!allows(c, `pull:${name}`)) continue;
       const hasToken = await deps.tokenManager.hasToken(name);
       sources[name] = { connected: hasToken };
     }

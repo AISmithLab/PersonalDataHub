@@ -7,7 +7,6 @@ import type { HubConfigParsed } from '../../config/schema.js';
 import type { TokenManager } from '../auth/token-manager.js';
 import { google } from 'googleapis';
 import { AuditLog } from '../audit/log.js';
-import { newAgentKey } from '../auth/access.js';
 import { GmailConnector } from '../connectors/gmail/connector.js';
 import { GoogleCalendarConnector } from '../connectors/calendar/connector.js';
 import { GitHubConnector } from '../connectors/github/connector.js';
@@ -714,35 +713,6 @@ Rules:
       const message = err instanceof Error ? err.message : 'unknown_error';
       return c.json({ ok: false, error: message }, 500);
     }
-  });
-
-  // --- Agent keys ---
-
-  app.get('/agent-keys', async (c) => {
-    const keys = (await deps.store.listAgentKeys()).map(({ id, name, created_at, last_used_at }) => ({ id, name, created_at, last_used_at }));
-    return c.json({ ok: true, keys });
-  });
-
-  // The key is returned once here and never again; only its hash is stored.
-  app.post('/agent-keys', async (c) => {
-    const body = await c.req.json().catch(() => ({})) as { name?: string };
-    const name = String(body.name ?? '').trim();
-    if (!name) return c.json({ ok: false, error: 'name is required' }, 400);
-    if (name.toLowerCase() === 'owner') return c.json({ ok: false, error: '"owner" is reserved' }, 400);
-    const existing = await deps.store.listAgentKeys();
-    if (existing.some((k) => k.name === name)) return c.json({ ok: false, error: `A key named "${name}" already exists` }, 409);
-    const id = `key_${randomUUID().slice(0, 12)}`;
-    const { key, hash } = newAgentKey();
-    await deps.store.insertAgentKey({ id, name, key_hash: hash });
-    await auditLog.insert('agent_key_created', null, { id, name });
-    return c.json({ ok: true, id, name, key });
-  });
-
-  app.delete('/agent-keys/:id', async (c) => {
-    const id = c.req.param('id');
-    await deps.store.deleteAgentKey(id);
-    await auditLog.insert('agent_key_deleted', null, { id });
-    return c.json({ ok: true });
   });
 
   return app;

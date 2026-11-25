@@ -94,13 +94,23 @@ CREATE TABLE IF NOT EXISTS ai_memories (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`;
 
-const CREATE_AGENT_KEYS = `
-CREATE TABLE IF NOT EXISTS agent_keys (
+const CREATE_AGENTS = `
+CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  key_hash TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL UNIQUE,
+  token_hash TEXT NOT NULL UNIQUE,
+  permissions TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   last_used_at TEXT
+)`;
+
+const CREATE_JOIN_CODES = `
+CREATE TABLE IF NOT EXISTS join_codes (
+  code TEXT PRIMARY KEY,
+  permissions TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  used_at TEXT
 )`;
 
 const CREATE_AGENT_SKILLS = `
@@ -134,7 +144,8 @@ export function createTables(db: Database.Database): void {
   db.exec(CREATE_GITHUB_REPOS);
   db.exec(CREATE_AI_MEMORIES);
   db.exec(CREATE_AGENT_SKILLS);
-  db.exec(CREATE_AGENT_KEYS);
+  db.exec(CREATE_AGENTS);
+  db.exec(CREATE_JOIN_CODES);
   // Migrate existing agent_skills tables
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN instructions TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already exists */ }
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN trigger_event TEXT NOT NULL DEFAULT 'sms_received'"); } catch (_) { /* already exists */ }

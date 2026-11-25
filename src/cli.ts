@@ -7,7 +7,6 @@
  *   npx pdh start              Start the server in the background
  *   npx pdh stop               Stop the background server
  *   npx pdh status             Check if the server is running
- *   npx pdh mcp                Start a stdio MCP server for agent access
  *   npx pdh install-service    Install a systemd/launchd service for auto-start
  *   npx pdh uninstall-service  Remove the auto-start service
  *   npx pdh reset              Remove all generated files and start fresh
@@ -20,8 +19,6 @@ import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { spawn, execSync } from 'node:child_process';
 import { getDb } from './database/db.js';
-import { SqliteDataStore } from './database/sqlite-store.js';
-import { newAgentKey } from './gateway/auth/access.js';
 import { osUserExists, createOsUser, lockdownFiles, checkProcessOwner, PDH_USER, ensureSudo, isRunningAsPdhUser } from './os-user.js';
 
 
@@ -35,8 +32,6 @@ const PID_PATH = join(CONFIG_DIR, 'server.pid');
 export interface HubConfig {
   hubUrl: string;
   hubDir: string;
-  /** Agent key for /agent/* calls. Created by `pdh init`; more can be made in Settings. */
-  apiKey?: string;
 }
 
 /**
@@ -45,8 +40,7 @@ export interface HubConfig {
  */
 export function writeConfig(config: HubConfig): void {
   mkdirSync(CONFIG_DIR, { recursive: true });
-  // Holds an agent key, so keep it readable by the owner only.
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
 
 /**
@@ -91,8 +85,6 @@ export interface InitResult {
   envPath: string;
   globalConfigPath: string;
   credentialsFetched: boolean;
-  /** The first agent key. Also written to the config file; the database has only its hash. */
-  apiKey: string;
 }
 
 export interface InitOptions {
@@ -104,8 +96,7 @@ export interface InitOptions {
  * Bootstrap a new PersonalDataHub installation.
  *
  * Generates a master secret, writes .env and hub-config.yaml,
- * initializes the database, creates the first API key,
- * and writes config to ~/.pdh/config.json.
+ * initializes the database, and writes config to ~/.pdh/config.json.
  */
 export async function init(targetDir?: string, options?: InitOptions): Promise<InitResult> {
   const dir = targetDir ?? process.cwd();
@@ -183,38 +174,16 @@ export async function init(targetDir?: string, options?: InitOptions): Promise<I
 
   writeFileSync(configPath, configContent, 'utf-8');
 
-  // Initialize database and create the first agent key
+  // Initialize database
   const db = getDb(dbPath);
-  const { key: apiKey, hash } = newAgentKey();
-  new SqliteDataStore(db).insertAgentKey({ id: `key_${randomBytes(6).toString('hex')}`, name: 'default', key_hash: hash });
   db.close();
 
-  // Write config file for auto-discovery by agents
+  // Remember where the hub lives, so start/stop/reset work from any directory.
+  // Agents do not read this file; they register through a join link.
   const hubUrl = `http://localhost:${port}`;
-  writeConfig({ hubUrl, hubDir: dir, apiKey });
+  writeConfig({ hubUrl, hubDir: dir });
 
-  return { secret, dbPath, configPath, envPath, globalConfigPath: CONFIG_PATH, credentialsFetched, apiKey };
-}
-
-/**
- * Create an agent key in an existing installation and save it to the config file,
- * for hubs set up before agent keys existed. Replaces a key of the same name.
- */
-export function createKey(name: string, hubDir?: string): { name: string; apiKey: string } {
-  const config = readConfig();
-  const dir = hubDir ?? config?.hubDir ?? process.cwd();
-  const dbPath = resolve(dir, 'pdh.db');
-  if (!existsSync(dbPath)) throw new Error(`No database at ${dbPath}. Run "npx pdh init" first.`);
-  const db = getDb(dbPath);
-  const store = new SqliteDataStore(db);
-  for (const existing of store.listAgentKeys()) {
-    if (existing.name === name) store.deleteAgentKey(existing.id);
-  }
-  const { key: apiKey, hash } = newAgentKey();
-  store.insertAgentKey({ id: `key_${randomBytes(6).toString('hex')}`, name, key_hash: hash });
-  db.close();
-  writeConfig({ hubUrl: config?.hubUrl ?? 'http://localhost:3000', hubDir: config?.hubDir ?? dir, apiKey });
-  return { name, apiKey };
+  return { secret, dbPath, configPath, envPath, globalConfigPath: CONFIG_PATH, credentialsFetched };
 }
 
 // --- Start / Stop / Status ---
@@ -485,10 +454,6 @@ if (isDirectRun) {
       console.log(`  hub-config.yaml created  ${result.configPath}`);
       console.log(`  Database created         ${result.dbPath}`);
       console.log(`  Config saved             ${result.globalConfigPath}`);
-      console.log(`\n  Agent key ("default")    ${result.apiKey}`);
-      console.log('    Agents send this key on every call. It is saved in the config file above.');
-      console.log('    If your agent runs as another user, copy it into that user\'s ~/.pdh/config.json as "apiKey".');
-      console.log('    Create more keys, or delete this one, in the GUI under Settings → Agent Keys.');
       console.log('\n  Next steps:');
       if (result.credentialsFetched) {
         console.log('    Default OAuth credentials configured. Just click Connect in the GUI.');
@@ -530,14 +495,6 @@ if (isDirectRun) {
     } else {
       console.log('\n  PersonalDataHub server is not running.\n');
     }
-  } else if (command === 'mcp') {
-    try {
-      const { startMcpServer } = await import('./ai/mcp/server.js');
-      await startMcpServer();
-    } catch (err) {
-      console.error(`Error: ${(err as Error).message}`);
-      process.exit(1);
-    }
   } else if (command === 'install-service') {
     try {
       const result = installService();
@@ -574,16 +531,6 @@ if (isDirectRun) {
       console.error(`Error: ${(err as Error).message}`);
       process.exit(1);
     }
-  } else if (command === 'key') {
-    try {
-      const { name, apiKey } = createKey(process.argv[3] ?? 'default');
-      console.log(`\n  Agent key ("${name}")    ${apiKey}`);
-      console.log(`  Saved as "apiKey" in    ${CONFIG_PATH}`);
-      console.log('  It is not shown again. Manage keys in the GUI under Settings → Agent Keys.\n');
-    } catch (err) {
-      console.error(`Error: ${(err as Error).message}`);
-      process.exit(1);
-    }
   } else if (command === 'reset') {
     try {
       const removed = reset();
@@ -607,8 +554,6 @@ if (isDirectRun) {
     console.log('  npx pdh start             Start the server in the background');
     console.log('  npx pdh stop              Stop the background server');
     console.log('  npx pdh status            Check if the server is running');
-    console.log('  npx pdh key [name]        Create an agent key and save it for local agents');
-    console.log('  npx pdh mcp               Start a stdio MCP server for agent access');
     console.log('  npx pdh install-service   Install a systemd/launchd service for auto-start');
     console.log('  npx pdh uninstall-service Remove the auto-start service');
     console.log('  npx pdh reset             Remove all generated files and start fresh');

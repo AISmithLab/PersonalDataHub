@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
-import { init, reset, createKey, writeConfig, readConfig, CONFIG_PATH, CONFIG_DIR } from './cli.js';
+import { init, reset, writeConfig, readConfig, CONFIG_PATH, CONFIG_DIR } from './cli.js';
 import { makeTmpDir } from './test-utils.js';
 
 describe('test isolation', () => {
@@ -77,14 +77,12 @@ describe('CLI init', () => {
     const config = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
     expect(config.hubUrl).toBe('http://localhost:3000');
     expect(config.hubDir).toBe(tmpDir);
-    // init creates the first agent key; the file holds the key, the database only its hash
-    expect(config.apiKey).toMatch(/^pk_/);
+    // Agents register through join links; nothing agent-related is written here.
+    expect(Object.keys(config).sort()).toEqual(['hubDir', 'hubUrl']);
     const db = new Database(result.dbPath);
-    const rows = db.prepare('SELECT name, key_hash FROM agent_keys').all() as { name: string; key_hash: string }[];
+    const agents = db.prepare('SELECT COUNT(*) AS n FROM agents').get() as { n: number };
     db.close();
-    expect(rows).toHaveLength(1);
-    expect(rows[0].name).toBe('default');
-    expect(rows[0].key_hash).not.toContain(config.apiKey);
+    expect(agents.n).toBe(0);
   });
 
   it('writes config with custom port', async () => {
@@ -99,31 +97,6 @@ describe('CLI init', () => {
     const config = readFileSync(join(tmpDir, 'hub-config.yaml'), 'utf-8');
     expect(config).toContain('sources:');
     expect(result.credentialsFetched === true || config.includes('sources: {}')).toBe(true);
-  });
-});
-
-describe('CLI key', () => {
-  let tmpDir: string;
-  beforeEach(() => { tmpDir = makeTmpDir(); });
-  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
-
-  it('adds a key to an existing hub, saves it, and replaces one of the same name', async () => {
-    await init(tmpDir);
-    const first = createKey('laptop', tmpDir);
-    expect(first.apiKey).toMatch(/^pk_/);
-    expect(readConfig()!.apiKey).toBe(first.apiKey);
-    expect(readConfig()!.hubDir).toBe(tmpDir);
-
-    const second = createKey('laptop', tmpDir);
-    expect(second.apiKey).not.toBe(first.apiKey);
-    const db = new Database(join(tmpDir, 'pdh.db'));
-    const names = (db.prepare('SELECT name FROM agent_keys ORDER BY name').all() as { name: string }[]).map((r) => r.name);
-    db.close();
-    expect(names).toEqual(['default', 'laptop']);
-  });
-
-  it('fails clearly when there is no hub', () => {
-    expect(() => createKey('x', tmpDir)).toThrow('No database');
   });
 });
 

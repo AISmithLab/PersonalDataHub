@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
 import { getDb } from './db.js';
+import { SqliteDataStore } from './sqlite-store.js';
 import { encryptField, decryptField } from './encryption.js';
 import type Database from 'better-sqlite3';
 import { makeTmpDir } from '../test-utils.js';
@@ -104,6 +105,52 @@ describe('Database', () => {
     expect(rows[1].event).toBe('action_proposed');
   });
 
+});
+
+describe('Agents and join codes', () => {
+  let tmpDir: string;
+  let db: Database.Database;
+  let store: SqliteDataStore;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    db = getDb(join(tmpDir, 'test.db'));
+    store = new SqliteDataStore(db);
+  });
+  afterEach(() => {
+    db.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('stores, finds, updates and deletes an agent', () => {
+    store.insertAgent({ id: 'agent_1', name: 'a1', token_hash: 'h1', permissions: '["pull:gmail"]' });
+    expect(store.getAgentByTokenHash('h1')!.name).toBe('a1');
+    expect(store.getAgentByTokenHash('nope')).toBeNull();
+    expect(store.listAgents()[0].last_used_at).toBeNull();
+    store.touchAgent('agent_1');
+    store.updateAgentPermissions('agent_1', '[]');
+    const row = store.listAgents()[0];
+    expect(row.last_used_at).not.toBeNull();
+    expect(row.permissions).toBe('[]');
+    store.deleteAgent('agent_1');
+    expect(store.listAgents()).toEqual([]);
+  });
+
+  it('refuses a second agent with the same name', () => {
+    store.insertAgent({ id: 'agent_1', name: 'a1', token_hash: 'h1', permissions: '[]' });
+    expect(() => store.insertAgent({ id: 'agent_2', name: 'a1', token_hash: 'h2', permissions: '[]' })).toThrow();
+  });
+
+  it('a join code is consumed once, and can be released', () => {
+    store.insertJoinCode({ code: 'c1', permissions: '["pull:gmail"]', expires_at: '2099-01-01T00:00:00.000Z' });
+    expect(store.getJoinCode('c1')!.used_at).toBeNull();
+    expect(store.consumeJoinCode('c1')).toBe(true);
+    expect(store.consumeJoinCode('c1')).toBe(false);
+    expect(store.consumeJoinCode('unknown')).toBe(false);
+    expect(store.getJoinCode('c1')!.used_at).not.toBeNull();
+    store.releaseJoinCode('c1');
+    expect(store.consumeJoinCode('c1')).toBe(true);
+  });
 });
 
 describe('Encryption', () => {

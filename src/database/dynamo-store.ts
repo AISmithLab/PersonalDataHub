@@ -13,7 +13,8 @@
  *   FILTER#{id}     / FILTER         — data filters
  *   GHREPO#{name}   / GHREPO         — GitHub repos
  *   STATE#{state}   / STATE          — OAuth CSRF state (TTL)
- *   AGENTKEY#{hash} / AGENTKEY       — agent API keys (hash only)
+ *   AGENT#{token hash} / AGENT       — registered agents (token hash only)
+ *   JOINCODE#{code} / JOINCODE       — one-time agent join codes
  */
 
 import {
@@ -38,7 +39,8 @@ import type {
   FilterRow,
   AuditRow,
   MemoryRow,
-  AgentKeyRow,
+  AgentRow,
+  JoinCodeRow,
   SkillRow,
   GitHubRepoRow,
   GitHubRepoInput,
@@ -555,76 +557,154 @@ export class DynamoDataStore implements DataStore {
     };
   }
 
-  // --- Agent Keys ---
+  // --- Agents ---
 
-  private toAgentKeyRow(item: Record<string, unknown>): AgentKeyRow {
+  private toAgentRow(item: Record<string, unknown>): AgentRow {
     return {
       id: String(item.id),
       name: String(item.name),
-      key_hash: String(item.key_hash),
+      token_hash: String(item.token_hash),
+      permissions: String(item.permissions ?? '[]'),
       created_at: String(item.created_at),
       last_used_at: item.last_used_at ? String(item.last_used_at) : null,
     };
   }
 
-  async listAgentKeys(): Promise<AgentKeyRow[]> {
+  async listAgents(): Promise<AgentRow[]> {
     // A filtered Scan reads at most 1 MB per call, so page through the table;
-    // otherwise a key could be missing from the list and impossible to delete.
-    const rows: AgentKeyRow[] = [];
+    // otherwise an agent could be missing from the list and impossible to revoke.
+    const rows: AgentRow[] = [];
     let startKey: Record<string, unknown> | undefined;
     do {
       const result = await this.docClient.send(new ScanCommand({
         TableName: this.tableName,
         FilterExpression: 'SK = :sk',
-        ExpressionAttributeValues: { ':sk': 'AGENTKEY' },
+        ExpressionAttributeValues: { ':sk': 'AGENT' },
         ExclusiveStartKey: startKey,
       }));
-      for (const item of result.Items ?? []) rows.push(this.toAgentKeyRow(item));
+      for (const item of result.Items ?? []) rows.push(this.toAgentRow(item));
       startKey = result.LastEvaluatedKey;
     } while (startKey);
     rows.sort((a, b) => a.created_at.localeCompare(b.created_at));
     return rows;
   }
 
-  async insertAgentKey(key: { id: string; name: string; key_hash: string }): Promise<void> {
+  async insertAgent(agent: { id: string; name: string; token_hash: string; permissions: string }): Promise<void> {
+    // No unique index on name in a single-table design: check, then write.
+    if ((await this.listAgents()).some((a) => a.name === agent.name)) {
+      throw new Error(`UNIQUE constraint failed: agents.name (${agent.name})`);
+    }
     await this.docClient.send(new PutCommand({
       TableName: this.tableName,
       Item: {
-        PK: `AGENTKEY#${key.key_hash}`,
-        SK: 'AGENTKEY',
-        id: key.id,
-        name: key.name,
-        key_hash: key.key_hash,
+        PK: `AGENT#${agent.token_hash}`,
+        SK: 'AGENT',
+        id: agent.id,
+        name: agent.name,
+        token_hash: agent.token_hash,
+        permissions: agent.permissions,
         created_at: new Date().toISOString(),
       },
     }));
   }
 
-  async getAgentKeyByHash(keyHash: string): Promise<AgentKeyRow | null> {
+  async getAgentByTokenHash(tokenHash: string): Promise<AgentRow | null> {
     const result = await this.docClient.send(new GetCommand({
       TableName: this.tableName,
-      Key: { PK: `AGENTKEY#${keyHash}`, SK: 'AGENTKEY' },
+      Key: { PK: `AGENT#${tokenHash}`, SK: 'AGENT' },
     }));
-    return result.Item ? this.toAgentKeyRow(result.Item) : null;
+    return result.Item ? this.toAgentRow(result.Item) : null;
   }
 
-  async touchAgentKey(id: string): Promise<void> {
-    const row = (await this.listAgentKeys()).find((k) => k.id === id);
-    if (!row) return;
+  private async agentKeyById(id: string): Promise<{ PK: string; SK: string } | null> {
+    const row = (await this.listAgents()).find((a) => a.id === id);
+    return row ? { PK: `AGENT#${row.token_hash}`, SK: 'AGENT' } : null;
+  }
+
+  async touchAgent(id: string): Promise<void> {
+    const key = await this.agentKeyById(id);
+    if (!key) return;
     await this.docClient.send(new UpdateCommand({
       TableName: this.tableName,
-      Key: { PK: `AGENTKEY#${row.key_hash}`, SK: 'AGENTKEY' },
+      Key: key,
       UpdateExpression: 'SET last_used_at = :t',
       ExpressionAttributeValues: { ':t': new Date().toISOString() },
     }));
   }
 
-  async deleteAgentKey(id: string): Promise<void> {
-    const row = (await this.listAgentKeys()).find((k) => k.id === id);
-    if (!row) return;
-    await this.docClient.send(new DeleteCommand({
+  async updateAgentPermissions(id: string, permissions: string): Promise<void> {
+    const key = await this.agentKeyById(id);
+    if (!key) return;
+    await this.docClient.send(new UpdateCommand({
       TableName: this.tableName,
-      Key: { PK: `AGENTKEY#${row.key_hash}`, SK: 'AGENTKEY' },
+      Key: key,
+      UpdateExpression: 'SET #p = :p',
+      ExpressionAttributeNames: { '#p': 'permissions' },
+      ExpressionAttributeValues: { ':p': permissions },
+    }));
+  }
+
+  async deleteAgent(id: string): Promise<void> {
+    const key = await this.agentKeyById(id);
+    if (!key) return;
+    await this.docClient.send(new DeleteCommand({ TableName: this.tableName, Key: key }));
+  }
+
+  // --- Join codes ---
+
+  async insertJoinCode(code: { code: string; permissions: string; expires_at: string }): Promise<void> {
+    await this.docClient.send(new PutCommand({
+      TableName: this.tableName,
+      Item: {
+        PK: `JOINCODE#${code.code}`,
+        SK: 'JOINCODE',
+        code: code.code,
+        permissions: code.permissions,
+        created_at: new Date().toISOString(),
+        expires_at: code.expires_at,
+        // DynamoDB TTL (epoch seconds) clears old codes a day after they expire.
+        ttl: Math.floor(new Date(code.expires_at).getTime() / 1000) + 86400,
+      },
+    }));
+  }
+
+  async getJoinCode(code: string): Promise<JoinCodeRow | null> {
+    const result = await this.docClient.send(new GetCommand({
+      TableName: this.tableName,
+      Key: { PK: `JOINCODE#${code}`, SK: 'JOINCODE' },
+    }));
+    const item = result.Item;
+    if (!item) return null;
+    return {
+      code: String(item.code),
+      permissions: String(item.permissions ?? '[]'),
+      created_at: String(item.created_at),
+      expires_at: String(item.expires_at),
+      used_at: item.used_at ? String(item.used_at) : null,
+    };
+  }
+
+  async consumeJoinCode(code: string): Promise<boolean> {
+    try {
+      await this.docClient.send(new UpdateCommand({
+        TableName: this.tableName,
+        Key: { PK: `JOINCODE#${code}`, SK: 'JOINCODE' },
+        UpdateExpression: 'SET used_at = :t',
+        ConditionExpression: 'attribute_exists(PK) AND attribute_not_exists(used_at)',
+        ExpressionAttributeValues: { ':t': new Date().toISOString() },
+      }));
+      return true;
+    } catch (err) {
+      if ((err as { name?: string }).name === 'ConditionalCheckFailedException') return false;
+      throw err;
+    }
+  }
+
+  async releaseJoinCode(code: string): Promise<void> {
+    await this.docClient.send(new UpdateCommand({
+      TableName: this.tableName,
+      Key: { PK: `JOINCODE#${code}`, SK: 'JOINCODE' },
+      UpdateExpression: 'REMOVE used_at',
     }));
   }
 

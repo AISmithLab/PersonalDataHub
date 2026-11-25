@@ -10,6 +10,7 @@ import { createGuiRoutes, createPageRoutes } from './gui/routes.js';
 import { createOAuthRoutes } from './auth/oauth-routes.js';
 import { createLoginRoutes } from './auth/login-routes.js';
 import { requireAgent, requireOwner, type AccessEnv } from './auth/access.js';
+import { createAgentOwnerRoutes, createJoinRoutes } from './agents.js';
 
 export interface ServerDeps {
   store: DataStore;
@@ -24,7 +25,9 @@ export interface ServerDeps {
  *   /web/*    the website and the mobile app — owner only (session cookie, or the
  *             device secret on the phone). /web/auth/{signup,login,logout,status}
  *             are the only ones that work before signing in.
- *   /agent/*  the data flow to agents — an agent key, or the owner.
+ *   /agent/*  the data flow to agents — a registered agent's token, or the owner.
+ *             /agent/join and /agent/join/:code are how an agent registers; they
+ *             need no token and are protected by the one-time code in the link.
  *
  * Outside the two prefixes, and unauthenticated by necessity:
  *   GET  /health                        liveness ping, no data
@@ -54,12 +57,15 @@ export function createServer(deps: ServerDeps): Hono {
     return ownerOnly(c, next);
   });
   web.route('/oauth', oauth.owner);
+  web.route('/agents', createAgentOwnerRoutes(deps));
   web.route('/', createChatRoutes(deps));
   web.route('/', createGuiRoutes(deps));
   app.route('/web', web);
 
   // --- /agent ---
   const agent = new Hono<AccessEnv>();
+  // Registration comes first: an agent redeeming a join link has no token yet.
+  agent.route('/', createJoinRoutes(deps));
   agent.use('*', requireAgent(deps.store));
   agent.route('/', createAppApi(deps));
   app.route('/agent', agent);

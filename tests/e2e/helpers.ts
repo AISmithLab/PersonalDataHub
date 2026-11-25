@@ -10,7 +10,7 @@ import type { DataRow, SourceConnector, ConnectorRegistry } from '../../src/gate
 import type { HubConfigParsed } from '../../src/config/schema.js';
 import type Database from 'better-sqlite3';
 import type { Hono } from 'hono';
-import { addTestAgentKey, TEST_AGENT_AUTH } from '../../src/test-utils.js';
+import { addTestAgent, TEST_AGENT_AUTH } from '../../src/test-utils.js';
 
 export function makeTmpDir(): string {
   const dir = join(tmpdir(), `pdh-e2e-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -125,7 +125,7 @@ export async function setupE2eApp(gmailRows?: DataRow[], configOverride?: HubCon
 
   // Set up user and a session for GUI admin endpoints
   await store.createUser('e2e@test.com', '$2a$10$dummy_hash_for_e2e_test');
-  await addTestAgentKey(store);
+  await addTestAgent(store);
   const sessionToken = 'e2e-session-token';
   await store.createSession(sessionToken, new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
 

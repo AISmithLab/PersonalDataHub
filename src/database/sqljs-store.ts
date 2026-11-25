@@ -38,7 +38,8 @@ import type {
   FilterRow,
   AuditRow,
   MemoryRow,
-  AgentKeyRow,
+  AgentRow,
+  JoinCodeRow,
   SkillRow,
   GitHubRepoRow,
   GitHubRepoInput,
@@ -368,27 +369,54 @@ export class SqlJsDataStore implements DataStore {
     return data;
   }
 
-  // --- Agent Keys ---
+  // --- Agents ---
 
-  listAgentKeys(): AgentKeyRow[] {
-    return this.getAll<AgentKeyRow>('SELECT * FROM agent_keys ORDER BY created_at ASC');
+  listAgents(): AgentRow[] {
+    return this.getAll<AgentRow>('SELECT * FROM agents ORDER BY created_at ASC, id ASC');
   }
 
-  insertAgentKey(key: { id: string; name: string; key_hash: string }): void {
-    this.run('INSERT INTO agent_keys (id, name, key_hash, created_at) VALUES (?, ?, ?, ?)',
-      [key.id, key.name, key.key_hash, this.now()]);
+  insertAgent(agent: { id: string; name: string; token_hash: string; permissions: string }): void {
+    this.run('INSERT INTO agents (id, name, token_hash, permissions, created_at) VALUES (?, ?, ?, ?, ?)',
+      [agent.id, agent.name, agent.token_hash, agent.permissions, this.now()]);
   }
 
-  getAgentKeyByHash(keyHash: string): AgentKeyRow | null {
-    return this.getOne<AgentKeyRow>('SELECT * FROM agent_keys WHERE key_hash = ?', [keyHash]);
+  getAgentByTokenHash(tokenHash: string): AgentRow | null {
+    return this.getOne<AgentRow>('SELECT * FROM agents WHERE token_hash = ?', [tokenHash]);
   }
 
-  touchAgentKey(id: string): void {
-    this.run('UPDATE agent_keys SET last_used_at = ? WHERE id = ?', [this.now(), id]);
+  touchAgent(id: string): void {
+    this.run('UPDATE agents SET last_used_at = ? WHERE id = ?', [this.now(), id]);
   }
 
-  deleteAgentKey(id: string): void {
-    this.run('DELETE FROM agent_keys WHERE id = ?', [id]);
+  updateAgentPermissions(id: string, permissions: string): void {
+    this.run('UPDATE agents SET permissions = ? WHERE id = ?', [permissions, id]);
+  }
+
+  deleteAgent(id: string): void {
+    this.run('DELETE FROM agents WHERE id = ?', [id]);
+  }
+
+  // --- Join codes ---
+
+  insertJoinCode(code: { code: string; permissions: string; expires_at: string }): void {
+    this.run('INSERT INTO join_codes (code, permissions, created_at, expires_at) VALUES (?, ?, ?, ?)',
+      [code.code, code.permissions, this.now(), code.expires_at]);
+  }
+
+  getJoinCode(code: string): JoinCodeRow | null {
+    return this.getOne<JoinCodeRow>('SELECT * FROM join_codes WHERE code = ?', [code]);
+  }
+
+  consumeJoinCode(code: string): boolean {
+    // sql.js runs in this process with no awaits in between, so read-then-write is atomic here.
+    const row = this.getOne<JoinCodeRow>('SELECT * FROM join_codes WHERE code = ? AND used_at IS NULL', [code]);
+    if (!row) return false;
+    this.run('UPDATE join_codes SET used_at = ? WHERE code = ?', [this.now(), code]);
+    return true;
+  }
+
+  releaseJoinCode(code: string): void {
+    this.run('UPDATE join_codes SET used_at = NULL WHERE code = ?', [code]);
   }
 
   // --- AI Memories ---

@@ -11,7 +11,7 @@ import type { DataRow, SourceConnector, ConnectorRegistry } from './connectors/t
 import type { HubConfigParsed } from '../config/schema.js';
 import type Database from 'better-sqlite3';
 import type { Hono } from 'hono';
-import { makeTmpDir, addTestAgentKey, TEST_AGENT_AUTH } from '../test-utils.js';
+import { makeTmpDir, addTestAgent, TEST_AGENT_AUTH } from '../test-utils.js';
 
 function makeTestRows(): DataRow[] {
   return [
@@ -84,7 +84,7 @@ describe('HTTP Server', () => {
     tmpDir = makeTmpDir();
     db = getDb(join(tmpDir, 'test.db'));
     store = new SqliteDataStore(db);
-    await addTestAgentKey(store);
+    await addTestAgent(store);
 
     const registry: ConnectorRegistry = new Map([['gmail', makeMockConnector()]]);
     const tokenManager = new TokenManager(store, 'test-secret');

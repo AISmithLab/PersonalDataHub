@@ -2,7 +2,8 @@
  * Who is calling: the owner or an agent.
  *
  *   /web/*   — owner only: a session cookie, or the device secret on the phone.
- *   /agent/* — an agent key (Authorization: Bearer pk_...), or the owner.
+ *   /agent/* — a registered agent's token (Authorization: Bearer pdh_...), or the owner.
+ *              Agents register through a one-time join link; see ../agents.ts.
  */
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -11,23 +12,38 @@ import type { DataStore } from '../../database/datastore.js';
 
 export const SESSION_COOKIE = 'pdh_session';
 export const DEVICE_SECRET_HEADER = 'X-PDH-Device-Secret';
-export const AGENT_KEY_PREFIX = 'pk_';
+export const AGENT_TOKEN_PREFIX = 'pdh_';
 
-export type AccessEnv = { Variables: { caller: string } };
+export type AccessEnv = {
+  Variables: {
+    /** 'owner', or the agent's name. Recorded in the audit log. */
+    caller: string;
+    /** What the caller may do on /agent/*. null means the owner: everything. */
+    permissions: string[] | null;
+    /** Set when the caller is an agent. */
+    agentId: string | null;
+  };
+};
 
 export function parseCookie(header: string, name: string): string | null {
   const match = header.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
   return match ? match[1] : null;
 }
 
-export function hashAgentKey(key: string): string {
-  return createHash('sha256').update(key).digest('hex');
+export function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }
 
-/** A new agent key and the hash to store. The key is shown to the owner once. */
-export function newAgentKey(): { key: string; hash: string } {
-  const key = AGENT_KEY_PREFIX + randomBytes(32).toString('base64url');
-  return { key, hash: hashAgentKey(key) };
+/** A new agent token and the hash to store. The token is handed to the agent once. */
+export function newAgentToken(): { token: string; hash: string } {
+  const token = AGENT_TOKEN_PREFIX + randomBytes(32).toString('base64url');
+  return { token, hash: hashToken(token) };
+}
+
+/** True if the caller may do this on /agent/*. The owner may do everything. */
+export function allows(c: Context<AccessEnv>, permission: string): boolean {
+  const permissions = c.get('permissions');
+  return permissions === null || permissions.includes(permission);
 }
 
 function matchesDeviceSecret(given: string | undefined): boolean {
@@ -76,10 +92,16 @@ export async function isOwner(c: Context, store: DataStore): Promise<boolean> {
   return (await store.getValidSession(cookie)) !== null;
 }
 
+function asOwner(c: Context<AccessEnv>): void {
+  c.set('caller', 'owner');
+  c.set('permissions', null);
+  c.set('agentId', null);
+}
+
 export function requireOwner(store: DataStore): MiddlewareHandler<AccessEnv> {
   return async (c, next) => {
     if (!(await isOwner(c, store))) return c.json({ ok: false, error: 'Unauthorized' }, 401);
-    c.set('caller', 'owner');
+    asOwner(c);
     await next();
   };
 }
@@ -87,21 +109,28 @@ export function requireOwner(store: DataStore): MiddlewareHandler<AccessEnv> {
 export function requireAgent(store: DataStore): MiddlewareHandler<AccessEnv> {
   return async (c, next) => {
     if (await isOwner(c, store)) {
-      c.set('caller', 'owner');
+      asOwner(c);
       return next();
     }
     const auth = c.req.header('Authorization') ?? '';
-    const key = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-    if (key.startsWith(AGENT_KEY_PREFIX)) {
-      const row = await store.getAgentKeyByHash(hashAgentKey(key));
-      if (row) {
-        await store.touchAgentKey(row.id);
-        c.set('caller', row.name);
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    if (token.startsWith(AGENT_TOKEN_PREFIX)) {
+      const agent = await store.getAgentByTokenHash(hashToken(token));
+      if (agent) {
+        await store.touchAgent(agent.id);
+        let permissions: string[] = [];
+        try {
+          const parsed = JSON.parse(agent.permissions);
+          if (Array.isArray(parsed)) permissions = parsed.filter((p): p is string => typeof p === 'string');
+        } catch { /* no permissions */ }
+        c.set('caller', agent.name);
+        c.set('permissions', permissions);
+        c.set('agentId', agent.id);
         return next();
       }
     }
     return c.json(
-      { ok: false, error: { code: 'UNAUTHORIZED', message: 'Missing or invalid agent key. Create one in Settings and send it as "Authorization: Bearer pk_..."' } },
+      { ok: false, error: { code: 'UNAUTHORIZED', message: 'This agent is not registered with the hub, or it was revoked. Ask the owner for a join link (Settings → Agents).' } },
       401,
     );
   };

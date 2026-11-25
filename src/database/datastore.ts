@@ -50,13 +50,26 @@ export interface AuditRow {
   details: string;
 }
 
-export interface AgentKeyRow {
+/** A registered agent. Created when an agent redeems a join link. */
+export interface AgentRow {
   id: string;
   name: string;
-  /** SHA-256 hex of the key; the key itself is never stored. */
-  key_hash: string;
+  /** SHA-256 hex of the agent's token; the token itself is never stored. */
+  token_hash: string;
+  /** JSON array of permission strings, e.g. ["pull:gmail","propose:gmail"]. */
+  permissions: string;
   created_at: string;
   last_used_at: string | null;
+}
+
+/** A one-time join link's code, made by the owner and redeemed by an agent. */
+export interface JoinCodeRow {
+  code: string;
+  permissions: string;
+  created_at: string;
+  /** ISO timestamp. */
+  expires_at: string;
+  used_at: string | null;
 }
 
 export interface MemoryRow {
@@ -204,12 +217,21 @@ export interface DataStore {
   setOAuthState(state: string, data: OAuthStateData): MaybePromise<void>;
   getAndDeleteOAuthState(state: string): MaybePromise<OAuthStateData | null>;
 
-  // --- Agent Keys ---
-  listAgentKeys(): MaybePromise<AgentKeyRow[]>;
-  insertAgentKey(key: { id: string; name: string; key_hash: string }): MaybePromise<void>;
-  getAgentKeyByHash(keyHash: string): MaybePromise<AgentKeyRow | null>;
-  touchAgentKey(id: string): MaybePromise<void>;
-  deleteAgentKey(id: string): MaybePromise<void>;
+  // --- Agents ---
+  listAgents(): MaybePromise<AgentRow[]>;
+  insertAgent(agent: { id: string; name: string; token_hash: string; permissions: string }): MaybePromise<void>;
+  getAgentByTokenHash(tokenHash: string): MaybePromise<AgentRow | null>;
+  touchAgent(id: string): MaybePromise<void>;
+  updateAgentPermissions(id: string, permissions: string): MaybePromise<void>;
+  deleteAgent(id: string): MaybePromise<void>;
+
+  // --- Join codes ---
+  insertJoinCode(code: { code: string; permissions: string; expires_at: string }): MaybePromise<void>;
+  getJoinCode(code: string): MaybePromise<JoinCodeRow | null>;
+  /** Marks the code used. True only for the first caller; false if it was already used or is unknown. */
+  consumeJoinCode(code: string): MaybePromise<boolean>;
+  /** Undoes consumeJoinCode, for a join that failed after consuming. */
+  releaseJoinCode(code: string): MaybePromise<void>;
 
   // --- AI Memories ---
   listMemories(): MaybePromise<MemoryRow[]>;
