@@ -501,6 +501,8 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
     'By default, proactively access and edit data sources (calendar, email, sms, etc.) in response to a trigger or implicit request. For example, if someone asks to meet, absolutely propose adding that to the calendar. Do not be passive; use your tools to take concrete action.',
     '',
     `Connected sources: ${Object.keys(deps.config.sources).join(', ') || 'none'}`,
+    // A model does not know its own name unless told; without this it guesses or declines.
+    `You are running as the model "${getModel(deps)}" from the provider "${deps.config.ai?.provider ?? 'anthropic'}", as chosen in Settings → AI Settings. If asked which model you are, say that.`,
   ];
 
   if (memories.length > 0) {
