@@ -39,6 +39,25 @@ describe('MCP Server', () => {
     mockReadConfig.mockReset();
   });
 
+  describe('agent key', () => {
+    it('sends the key from the config file when discovering sources', async () => {
+      mockReadConfig.mockReturnValue({ hubUrl: 'http://localhost:3000', hubDir: '/tmp', apiKey: 'pk_from_config' });
+      mockHealthOk();
+      mockSourcesResponse({});
+      await startMcpServer();
+      const [url, init] = mockFetch.mock.calls[1];
+      expect(url).toBe('http://localhost:3000/agent/sources');
+      expect(init.headers.Authorization).toBe('Bearer pk_from_config');
+    });
+
+    it('explains a rejected key instead of a bare status', async () => {
+      mockReadConfig.mockReturnValue({ hubUrl: 'http://localhost:3000', hubDir: '/tmp' });
+      mockHealthOk();
+      mockFetch.mockImplementationOnce(() => Promise.resolve({ ok: false, status: 401, statusText: 'Unauthorized' }));
+      await expect(startMcpServer()).rejects.toThrow('rejected the agent key');
+    });
+  });
+
   describe('startup errors', () => {
     it('throws when no config file exists', async () => {
       mockReadConfig.mockReturnValue(null);

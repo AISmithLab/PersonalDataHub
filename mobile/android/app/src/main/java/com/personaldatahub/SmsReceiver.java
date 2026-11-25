@@ -25,10 +25,13 @@ import org.json.JSONObject;
 
 public class SmsReceiver extends BroadcastReceiver {
     private static final String TAG = "SmsReceiver";
-    private static final String SERVER_URL = "http://127.0.0.1:3000/sms/auto-reply";
+    private static final String SERVER_URL = "http://127.0.0.1:3000/web/device/sms/auto-reply";
     private static final int CONNECT_TIMEOUT_MS = 2000;
     private static final int READ_TIMEOUT_MS = 30000;
     private static final String QUEUE_SUBDIR = "pdh-data/sms_queue";
+    // Written by the bundled server (src/mobile/device-secret.ts). App-private, so only
+    // this app can read it; the server accepts it as proof that the caller is the owner.
+    private static final String DEVICE_SECRET_FILE = "pdh-data/device-secret";
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -94,6 +97,8 @@ public class SmsReceiver extends BroadcastReceiver {
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
+            String secret = readDeviceSecret(context);
+            if (secret != null) conn.setRequestProperty("X-PDH-Device-Secret", secret);
             conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
             conn.setReadTimeout(READ_TIMEOUT_MS);
             conn.setDoOutput(true);
@@ -141,6 +146,21 @@ public class SmsReceiver extends BroadcastReceiver {
             Log.d(TAG, "Auto-reply sent to: " + to);
         } catch (Exception e) {
             Log.e(TAG, "Failed to send auto-reply SMS: " + e.getMessage(), e);
+        }
+    }
+
+    // Null until the server has started once. The request is then rejected (401) and
+    // the message stays queued, to be replayed by the server on its next start.
+    private String readDeviceSecret(Context context) {
+        File file = new File(context.getFilesDir(), DEVICE_SECRET_FILE);
+        if (!file.exists()) return null;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                new java.io.FileInputStream(file), StandardCharsets.UTF_8))) {
+            String line = reader.readLine();
+            return line == null ? null : line.trim();
+        } catch (Exception e) {
+            Log.w(TAG, "Could not read device secret: " + e.getMessage());
+            return null;
         }
     }
 

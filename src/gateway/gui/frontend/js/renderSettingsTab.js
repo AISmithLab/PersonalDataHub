@@ -193,7 +193,7 @@ function renderSettingsTab() {
           if (item.connected || item.isNative) {
             html += '    <button onclick="switchTab(\x27' + item.tab + '\x27)" class="border border-outline hover:bg-surface-container-high text-on-surface-variant font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 flex items-center gap-xs"><span>Manage</span><span class="material-symbols-outlined text-sm">arrow_forward</span></button>';
           } else {
-            html += '    <a href="/oauth/' + item.name + '/start" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 text-center shadow-sm">Connect</a>';
+            html += '    <button onclick="startOAuth(\x27' + item.name + '\x27)" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 text-center shadow-sm">Connect</button>';
           }
           html += '    </div>';
           html += '  </div>';

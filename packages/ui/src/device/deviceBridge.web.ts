@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '../api/baseUrl';
+import { hubFetch } from '../api/client';
 import type { DeviceBridge } from './deviceBridge.types';
 
 export const deviceBridge: DeviceBridge = {
@@ -15,7 +15,7 @@ export const deviceBridge: DeviceBridge = {
   },
 
   async getPhotos(limit) {
-    const res = await fetch(`${API_BASE_URL}/api/photos/preview?limit=${limit}&t=${Date.now()}`);
+    const res = await hubFetch(`/web/photos/preview?limit=${limit}&t=${Date.now()}`);
     const data = await res.json();
     return data?.photos ?? [];
   },

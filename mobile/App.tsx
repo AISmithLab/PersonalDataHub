@@ -2,10 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, NativeModules, PermissionsAndroid, Platform, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import nodejs from 'nodejs-mobile-react-native';
-import { App as SharedApp } from '@pdh/ui';
+import { App as SharedApp, setDeviceSecret } from '@pdh/ui';
 
 const SERVER_URL = 'http://127.0.0.1:3000';
 const NODE_ENTRY = Platform.OS === 'ios' ? 'ios.js' : 'android.js';
+
+// Set once the bundled server hands it over; sent on every request to it.
+let deviceSecret: string | null = null;
 
 interface IContactsModule { getContacts(): Promise<{ name: string; number: string }[]>; }
 const ContactsNative: IContactsModule | null = (NativeModules.ContactsModule as IContactsModule) ?? null;
@@ -14,13 +17,35 @@ export default function App() {
   const [serverReady, setServerReady] = useState(false);
 
   useEffect(() => {
+    // The bundled server only answers its owner. It proves we are the owner by a
+    // secret it keeps in app-private storage; ask for it over the bridge until it
+    // replies (the server may still be starting), then wait for the server itself.
+    let secret: string | null = null;
+    const onMessage = (msg: unknown) => {
+      try {
+        const m = JSON.parse(String(msg));
+        if (m?.type === 'pdh:device-secret' && typeof m.secret === 'string') {
+          secret = m.secret;
+          deviceSecret = m.secret;
+          setDeviceSecret(m.secret);
+        }
+      } catch { /* not ours */ }
+    };
+    nodejs.channel.addListener('message', onMessage);
     nodejs.start(NODE_ENTRY);
     const t = setInterval(() => {
-      fetch(`${SERVER_URL}/api/auth/status`)
-        .then(r => { if (r.status < 500) { clearInterval(t); setServerReady(true); } })
+      if (!secret) {
+        try { nodejs.channel.send('pdh:get-device-secret'); } catch { /* server not up yet */ }
+        return;
+      }
+      fetch(`${SERVER_URL}/health`)
+        .then(r => { if (r.ok) { clearInterval(t); setServerReady(true); } })
         .catch(() => {});
     }, 700);
-    return () => clearInterval(t);
+    return () => {
+      clearInterval(t);
+      nodejs.channel.removeListener('message', onMessage);
+    };
   }, []);
 
   // Warm the backend's contact cache as soon as the server is up, so name resolution
@@ -57,9 +82,9 @@ export default function App() {
 // tool call at reply time. Fire-and-forget: a stale/missing cache just falls back to
 // showing raw phone numbers.
 function syncContactsToServer(contacts: { name: string; number: string }[]) {
-  fetch(`${SERVER_URL}/device/contacts-sync`, {
+  fetch(`${SERVER_URL}/web/device/contacts`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(deviceSecret ? { 'X-PDH-Device-Secret': deviceSecret } : {}) },
     body: JSON.stringify({ contacts }),
   }).catch(() => {});
 }

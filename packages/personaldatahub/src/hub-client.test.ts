@@ -182,4 +182,17 @@ describe('HubClient', () => {
       ).rejects.toThrow(HubApiError);
     });
   });
+
+  describe('agent key', () => {
+    it('sends the key as a Bearer token on pull and propose', async () => {
+      mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ ok: true, data: [] }) });
+      const keyed = new HubClient({ hubUrl: 'http://localhost:7007', apiKey: 'pk_abc' });
+      await keyed.pull({ source: 'gmail', purpose: 'p' });
+      await keyed.propose({ source: 'gmail', action_type: 'draft_email', action_data: {}, purpose: 'p' });
+      expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:7007/agent/pull');
+      expect(mockFetch.mock.calls[0][1].headers.Authorization).toBe('Bearer pk_abc');
+      expect(mockFetch.mock.calls[1][0]).toBe('http://localhost:7007/agent/propose');
+      expect(mockFetch.mock.calls[1][1].headers.Authorization).toBe('Bearer pk_abc');
+    });
+  });
 });

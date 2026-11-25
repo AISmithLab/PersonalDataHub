@@ -64,10 +64,10 @@ var currentTab = 'ai';
     async function fetchData() {
       try {
         var resList = await Promise.all([
-          fetch('/api/sources').then(function(r) { return r.json(); }),
-          fetch('/api/filters').then(function(r) { return r.json(); }),
-          fetch('/api/staging').then(function(r) { return r.json(); }),
-          fetch('/api/audit?limit=20').then(function(r) { return r.json(); })
+          fetch('/web/sources').then(function(r) { return r.json(); }),
+          fetch('/web/filters').then(function(r) { return r.json(); }),
+          fetch('/web/staging').then(function(r) { return r.json(); }),
+          fetch('/web/audit?limit=20').then(function(r) { return r.json(); })
         ]);
         var sources = resList[0];
         var filtersData = resList[1];
@@ -88,7 +88,7 @@ var currentTab = 'ai';
       if (gm && gm.connected && !state.realEmails && !state.emailsLoading) {
         state.emailsLoading = true;
         state.emailsError = null;
-        fetch('/api/gmail/preview?limit=20&t=' + Date.now())
+        fetch('/web/gmail/preview?limit=20&t=' + Date.now())
           .then(function(r) { return r.json(); })
           .then(function(data) {
             state.emailsLoading = false;
@@ -112,7 +112,7 @@ var currentTab = 'ai';
       if (cal && cal.connected && !state.realEvents && !state.eventsLoading) {
         state.eventsLoading = true;
         state.eventsError = null;
-        fetch('/api/calendar/preview?limit=20&t=' + Date.now())
+        fetch('/web/calendar/preview?limit=20&t=' + Date.now())
           .then(function(r) { return r.json(); })
           .then(function(data) {
             state.eventsLoading = false;
@@ -129,7 +129,7 @@ var currentTab = 'ai';
       loadPhotos(true);
 
       // Check AI configuration status
-      fetch('/api/chat/status').then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/chat/status').then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
           state.chat.aiAvailable = d.configured;
           if (d.provider) state.settingsProvider = d.provider;
@@ -139,7 +139,7 @@ var currentTab = 'ai';
       }).catch(function() { /* non-fatal */ });
 
       // Check auto-reply status
-      fetch('/api/settings/auto-reply').then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/settings/auto-reply').then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
           state.autoReply.enabled = d.enabled;
           if (typeof d.maxToolRounds === 'number') state.autoReply.maxToolRounds = d.maxToolRounds;
@@ -148,7 +148,7 @@ var currentTab = 'ai';
       }).catch(function() { /* non-fatal */ });
 
       // Load skills
-      fetch('/api/skills').then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/skills').then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
           state.skills.items = d.skills;
           state.skills.loaded = true;
@@ -163,7 +163,7 @@ var currentTab = 'ai';
       if (!force && state.skills.loaded) return;
       if (state.skills.loading) return;
       state.skills.loading = true;
-      fetch('/api/skills').then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/skills').then(function(r) { return r.json(); }).then(function(d) {
         state.skills.loading = false;
         if (d.ok) { state.skills.items = d.skills; state.skills.loaded = true; if (currentTab === 'skill') render(); }
       }).catch(function() { state.skills.loading = false; });
@@ -174,7 +174,7 @@ var currentTab = 'ai';
       if (!force && state.memories.loaded) return;
       if (state.memories.loading) return;
       state.memories.loading = true;
-      fetch('/api/memories').then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/memories').then(function(r) { return r.json(); }).then(function(d) {
         state.memories.loading = false;
         if (d.ok) {
           state.memories.items = d.memories;
@@ -190,7 +190,7 @@ var currentTab = 'ai';
     window.loadMemories = loadMemories;
 
     function deleteMemory(id) {
-      fetch('/api/memories/' + encodeURIComponent(id), { method: 'DELETE' }).then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/memories/' + encodeURIComponent(id), { method: 'DELETE' }).then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) { state.memories.items = state.memories.items.filter(function(m) { return m.id !== id; }); render(); }
       }).catch(function() {});
     }
@@ -215,7 +215,7 @@ var currentTab = 'ai';
     function saveEditMemory(id) {
       var content = state.memories.editContent.trim();
       if (!content) return;
-      fetch('/api/memories/' + encodeURIComponent(id), {
+      fetch('/web/memories/' + encodeURIComponent(id), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: content }),
@@ -253,7 +253,7 @@ var currentTab = 'ai';
     function submitNewMemory() {
       var content = state.memories.newContent.trim();
       if (!content) return;
-      fetch('/api/memories', {
+      fetch('/web/memories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: content }),
@@ -440,7 +440,7 @@ var currentTab = 'ai';
       var hasRealPhotos = state.photo && state.photo.photos && state.photo.photos.length > 0 && state.photo.photos[0].id !== 'img-1';
       if (!force && hasRealPhotos) return;
       if (!window.AndroidSms || !window.AndroidSms.getPhotos) {
-        fetch('/api/photos/preview?limit=20&t=' + Date.now())
+        fetch('/web/photos/preview?limit=20&t=' + Date.now())
           .then(function(r) { return r.json(); })
           .then(function(data) {
             if (data && data.photos) {
@@ -466,7 +466,7 @@ var currentTab = 'ai';
           state.photo = state.photo || {};
           state.photo.error = null;
           state.photo.photos = photosList;
-          fetch('/api/photos/sync', {
+          fetch('/web/device/photos', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ photos: photosList })
@@ -537,7 +537,7 @@ var currentTab = 'ai';
           alert('Failed to send SMS: ' + error);
           return;
         }
-        await fetch('/api/staging/' + actionId + '/resolve', {
+        await fetch('/web/staging/' + actionId + '/resolve', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ decision: 'approve' }),
@@ -578,7 +578,7 @@ var currentTab = 'ai';
       state.sms.contextMenu = Object.assign({}, cm, { status: 'thinking' });
       render();
       try {
-        var res = await fetch('/api/sms/manual-reply', {
+        var res = await fetch('/web/device/sms/manual-reply', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ from: cm.address, body: cm.body }),
@@ -615,7 +615,7 @@ var currentTab = 'ai';
     window.manualAutoReply = manualAutoReply;
 
     async function rejectSmsAction(actionId) {
-      await fetch('/api/staging/' + actionId + '/resolve', {
+      await fetch('/web/staging/' + actionId + '/resolve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision: 'reject' }),
@@ -647,7 +647,7 @@ var currentTab = 'ai';
       slot.innerHTML = '<div style="padding:6px 10px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px"><span class="spinner" style="display:inline-block;width:10px;height:10px;border-width:1.5px;vertical-align:middle"></span>Running...</div>';
 
       try {
-        var res = await fetch('/api/code/run', {
+        var res = await fetch('/web/code/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code: code }),
@@ -723,7 +723,7 @@ var currentTab = 'ai';
       }
 
       try {
-        var res = await fetch('/api/chat', {
+        var res = await fetch('/web/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ messages: msgs, sms: sms }),
@@ -783,7 +783,7 @@ var currentTab = 'ai';
       var provider = state.settingsProvider;
       var baseUrl = document.getElementById('ai-base-url').value.trim();
       if (!key) { alert('API key is required'); return; }
-      fetch('/api/settings/ai-key', {
+      fetch('/web/settings/ai-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ api_key: key, model: model || undefined, provider: provider || 'anthropic', base_url: baseUrl || undefined }),
@@ -804,7 +804,7 @@ var currentTab = 'ai';
       state.autoReply.loading = true;
       render();
       try {
-        var res = await fetch('/api/settings/auto-reply', {
+        var res = await fetch('/web/settings/auto-reply', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ enabled: enabled })
         });
@@ -828,7 +828,7 @@ var currentTab = 'ai';
       if (isNaN(n) || n < 1 || n > 10) return;
       state.autoReply.maxToolRounds = n;
       try {
-        await fetch('/api/settings/auto-reply', {
+        await fetch('/web/settings/auto-reply', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ enabled: state.autoReply.enabled, maxToolRounds: n })
         });
@@ -843,7 +843,7 @@ var currentTab = 'ai';
       render();
       try {
         var fakeFrom = '+1555' + Math.floor(1000000 + Math.random() * 9000000);
-        var res = await fetch('/sms/auto-reply', {
+        var res = await fetch('/web/device/sms/auto-reply', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ from: fakeFrom, body: 'Hey, are you free later?' })
         });
@@ -871,7 +871,7 @@ var currentTab = 'ai';
       var key = document.getElementById('ob-ai-api-key').value.trim();
       var provider = state.settingsProvider;
       if (!key) { alert('API key is required'); return; }
-      fetch('/api/settings/ai-key', {
+      fetch('/web/settings/ai-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ api_key: key, provider: provider || 'anthropic' }),
@@ -894,7 +894,7 @@ var currentTab = 'ai';
     }
 
     function checkOnboarding() {
-      fetch('/api/settings/onboarding').then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/settings/onboarding').then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok && !d.completed) {
           state.onboarding.active = true;
           state.onboarding.step = 'intro';
@@ -915,7 +915,7 @@ var currentTab = 'ai';
       state.onboarding.active = false;
       var el = document.getElementById('onboarding-screen');
       if (el) { el.style.display = 'none'; el.innerHTML = ''; }
-      fetch('/api/settings/onboarding', {
+      fetch('/web/settings/onboarding', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ completed: true }),
@@ -1031,7 +1031,7 @@ var currentTab = 'ai';
       try {
         if (currentView === 'LOGICAL') {
           // Flow A: Logical -> Summarized
-          var r = await fetch('/api/skills/translate/logical-to-summarized', {
+          var r = await fetch('/web/skills/translate/logical-to-summarized', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ logicTree: editContent.logic_tree })
@@ -1049,7 +1049,7 @@ var currentTab = 'ai';
           }
         } else {
           // Flow B: Summarized -> Logical
-          var r = await fetch('/api/skills/translate/summarized-to-logical', {
+          var r = await fetch('/web/skills/translate/summarized-to-logical', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nlSummary: editContent.instructions })
@@ -1187,7 +1187,7 @@ var currentTab = 'ai';
       if (sk.editingId !== id) return;
       var c = sk.editContent;
       try {
-        await fetch('/api/skills/' + id, {
+        await fetch('/web/skills/' + id, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1243,7 +1243,7 @@ var currentTab = 'ai';
         if (current_view === 'LOGICAL') {
           var currentTreeJson = JSON.stringify(logic_tree_arr);
           if (cache.logicTreeJson !== currentTreeJson) {
-            var tr = await fetch('/api/skills/translate/logical-to-summarized', {
+            var tr = await fetch('/web/skills/translate/logical-to-summarized', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ logicTree: logic_tree_arr })
@@ -1261,7 +1261,7 @@ var currentTab = 'ai';
           }
         } else {
           if (cache.instructions !== instructions) {
-            var tr = await fetch('/api/skills/translate/summarized-to-logical', {
+            var tr = await fetch('/web/skills/translate/summarized-to-logical', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ nlSummary: instructions })
@@ -1279,7 +1279,7 @@ var currentTab = 'ai';
           }
         }
 
-        var r = await fetch('/api/skills', {
+        var r = await fetch('/web/skills', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1315,7 +1315,7 @@ var currentTab = 'ai';
     window.submitNewSkill = submitNewSkill;
 
     async function loadSkillsAsync() {
-      var d = await fetch('/api/skills').then(function(r) { return r.json(); });
+      var d = await fetch('/web/skills').then(function(r) { return r.json(); });
       if (d.ok) { state.skills.items = d.skills; state.skills.loaded = true; render(); }
     }
 
@@ -1371,7 +1371,7 @@ var currentTab = 'ai';
           var currentTreeJson = JSON.stringify(logic_tree_arr);
           if (cache.logicTreeJson !== currentTreeJson) {
             // Logic tree has changed! Generate new instructions (nlSummary) via translation
-            var tr = await fetch('/api/skills/translate/logical-to-summarized', {
+            var tr = await fetch('/web/skills/translate/logical-to-summarized', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ logicTree: logic_tree_arr })
@@ -1397,7 +1397,7 @@ var currentTab = 'ai';
           // current_view === 'SUMMARIZED'
           if (cache.instructions !== instructions) {
             // Instructions have changed! Generate new logic tree via translation
-            var tr = await fetch('/api/skills/translate/summarized-to-logical', {
+            var tr = await fetch('/web/skills/translate/summarized-to-logical', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ nlSummary: instructions })
@@ -1422,7 +1422,7 @@ var currentTab = 'ai';
         }
 
         // Now save both to storage
-        var r = await fetch('/api/skills/' + id, {
+        var r = await fetch('/web/skills/' + id, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1453,14 +1453,14 @@ var currentTab = 'ai';
     window.saveEditSkill = saveEditSkill;
 
     async function toggleSkillActive(id, enabled) {
-      await fetch('/api/skills/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enabled }) });
+      await fetch('/web/skills/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enabled }) });
       await loadSkillsAsync();
     }
     window.toggleSkillActive = toggleSkillActive;
 
 async function deleteSkill(id) {
       if (!confirm('Delete this skill?')) return;
-      await fetch('/api/skills/' + id, { method: 'DELETE' });
+      await fetch('/web/skills/' + id, { method: 'DELETE' });
       await loadSkillsAsync();
     }
     window.deleteSkill = deleteSkill;
@@ -1490,7 +1490,7 @@ async function deleteSkill(id) {
     async function toggleCalendarFilter(type, enabled, existingId) {
       var valEl = document.getElementById('cal-filter-val-' + type);
       var value = valEl ? valEl.value : '';
-      await fetch('/api/filters', {
+      await fetch('/web/filters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: existingId || undefined, source: 'google_calendar', type: type, value: value, enabled: enabled ? 1 : 0 })
@@ -1501,7 +1501,7 @@ async function deleteSkill(id) {
 
     async function updateCalendarFilterValue(type, value, existingId) {
       var filter = (state.filters || []).find(function(f) { return f.type === type && f.source === 'google_calendar'; });
-      await fetch('/api/filters', {
+      await fetch('/web/filters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: existingId || undefined, source: 'google_calendar', type: type, value: value, enabled: filter ? filter.enabled : 0 })
@@ -1510,7 +1510,7 @@ async function deleteSkill(id) {
         state.realEvents = null;
         await fetchData();
       } else {
-        var filtersData = await fetch('/api/filters').then(function(r) { return r.json(); });
+        var filtersData = await fetch('/web/filters').then(function(r) { return r.json(); });
         state.filters = filtersData.filters || [];
       }
     }
@@ -1518,7 +1518,7 @@ async function deleteSkill(id) {
     async function toggleFilter(type, enabled, existingId) {
       var valEl = document.getElementById('filter-val-' + type);
       var value = valEl ? valEl.value : '';
-      await fetch('/api/filters', {
+      await fetch('/web/filters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: existingId || undefined, source: 'gmail', type: type, value: value, enabled: enabled ? 1 : 0 })
@@ -1531,7 +1531,7 @@ async function deleteSkill(id) {
     async function updateFilterValue(type, value, existingId) {
       // Only save if filter is currently enabled
       var filter = (state.filters || []).find(function(f) { return f.type === type && f.source === 'gmail'; });
-      await fetch('/api/filters', {
+      await fetch('/web/filters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: existingId || undefined, source: 'gmail', type: type, value: value, enabled: filter ? filter.enabled : 0 })
@@ -1541,7 +1541,7 @@ async function deleteSkill(id) {
         await fetchData();
       } else {
         // Still update local state so the value is saved
-        var filtersData = await fetch('/api/filters').then(function(r) { return r.json(); });
+        var filtersData = await fetch('/web/filters').then(function(r) { return r.json(); });
         state.filters = filtersData.filters || [];
       }
     }
@@ -1549,7 +1549,7 @@ async function deleteSkill(id) {
     async function sendAction(actionId) {
       var editTo = document.getElementById('edit-to-' + actionId);
       if (editTo) {
-        await fetch('/api/staging/' + actionId + '/edit', {
+        await fetch('/web/staging/' + actionId + '/edit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action_data: {
@@ -1579,7 +1579,7 @@ async function deleteSkill(id) {
             permissions: typeof r.permissions === 'string' ? JSON.parse(r.permissions) : r.permissions
           };
         });
-        fetch('/api/github/repos', {
+        fetch('/web/github/repos', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ repos: payload })
@@ -1591,7 +1591,7 @@ async function deleteSkill(id) {
       state.github.reposLoading = true;
       render();
       try {
-        var res = await fetch('/api/github/repos');
+        var res = await fetch('/web/github/repos');
         var data = await res.json();
         if (data.ok && data.repos) {
           state.github.repoList = data.repos.map(function(r) {
@@ -1672,13 +1672,21 @@ async function deleteSkill(id) {
     }
 
     // --- OAuth actions ---
-    function startOAuth(source) {
-      window.location.href = '/oauth/' + source + '/start';
+    // The hub builds the provider URL (owner-only); the browser then goes there.
+    async function startOAuth(source) {
+      try {
+        var res = await fetch('/web/oauth/' + source + '/start', { method: 'POST' });
+        var data = await res.json();
+        if (data.ok && data.url) { window.location.href = data.url; return; }
+        alert('Could not start sign-in: ' + (data.error || res.status));
+      } catch (e) {
+        alert('Could not start sign-in: ' + e.message);
+      }
     }
 
     async function disconnectSource(source) {
       if (!confirm('Disconnect ' + source + '? You will need to re-authorize.')) return;
-      await fetch('/oauth/' + source + '/disconnect', { method: 'POST' });
+      await fetch('/web/oauth/' + source + '/disconnect', { method: 'POST' });
       if (source === 'gmail') {
         state.realEmails = null;
         state.emailsLoading = false;
@@ -1808,7 +1816,7 @@ async function deleteSkill(id) {
 
     async function clearAuditLog() {
       if (!confirm('Delete all audit log history? This cannot be undone.')) return;
-      await fetch('/api/audit', { method: 'DELETE' });
+      await fetch('/web/audit', { method: 'DELETE' });
       state.audit = [];
       render();
     }
@@ -1817,7 +1825,7 @@ async function deleteSkill(id) {
     async function approveAction(actionId) {
       var editTo = document.getElementById('edit-to-' + actionId);
       if (editTo && editTo.style.display !== 'none') {
-        await fetch('/api/staging/' + actionId + '/edit', {
+        await fetch('/web/staging/' + actionId + '/edit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action_data: {
@@ -1831,7 +1839,7 @@ async function deleteSkill(id) {
     }
 
     async function resolveAction(actionId, decision) {
-      await fetch('/api/staging/' + actionId + '/resolve', {
+      await fetch('/web/staging/' + actionId + '/resolve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision })
@@ -1840,7 +1848,7 @@ async function deleteSkill(id) {
     }
 
     async function logout() {
-      await fetch('/api/logout', { method: 'POST' });
+      await fetch('/web/auth/logout', { method: 'POST' });
       window.location.reload();
     }
 
@@ -2130,7 +2138,7 @@ async function deleteSkill(id) {
       btn.disabled = true;
       btn.textContent = isSignup ? 'Creating account...' : 'Signing in...';
 
-      var endpoint = isSignup ? '/auth/signup' : '/auth/login';
+      var endpoint = isSignup ? '/web/auth/signup' : '/web/auth/login';
       fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2166,14 +2174,14 @@ async function deleteSkill(id) {
     setInterval(async function() {
       if (!state.autoReply.enabled || !window.AndroidSms) return;
       try {
-        var res = await fetch('/api/sms/pending-replies');
+        var res = await fetch('/web/device/sms/pending-replies');
         var d = await res.json();
         if (!d.ok || !d.replies || !d.replies.length) return;
         d.replies.forEach(function(r) {
           var cbId = 'autoreply_' + r.id;
           window._smsSendCbs[cbId] = function(error) {
             if (error) console.warn('[auto-reply] send error:', error);
-            fetch('/api/sms/pending-replies/' + r.id, { method: 'DELETE' }).catch(function() {});
+            fetch('/web/device/sms/pending-replies/' + r.id, { method: 'DELETE' }).catch(function() {});
           };
           window.AndroidSms.sendMessage(cbId, r.to, r.body);
         });
@@ -2181,7 +2189,7 @@ async function deleteSkill(id) {
     }, 3000);
 
     // Primary auto-reply loop: poll inbox every 5s, detect new incoming messages,
-    // call /sms/auto-reply, and send the reply via AndroidSms directly.
+    // call /web/device/sms/auto-reply, and send the reply via AndroidSms directly.
     // This uses the same proven path as manual reply and doesn't depend on SmsReceiver.
     var _autoReplyLastMs = Date.now(); // only process messages that arrive after startup
     setInterval(function() {
@@ -2202,7 +2210,7 @@ async function deleteSkill(id) {
               .filter(function(m) { return m.address === msg.address; })
               .sort(function(a, b) { return a.date - b.date; })
               .slice(-10);
-            var res = await fetch('/sms/auto-reply', {
+            var res = await fetch('/web/device/sms/auto-reply', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ from: msg.address, body: msg.body, history: history }),
@@ -2222,33 +2230,17 @@ async function deleteSkill(id) {
     }, 5000);
 
     // Check auth on load — auto-login for single-device use
-    fetch('/api/auth/status').then(function(r) { return r.json(); }).then(function(data) {
+    fetch('/web/auth/status').then(function(r) { return r.json(); }).then(function(data) {
       if (data.authenticated) {
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('app').style.display = 'flex';
         fetchData();
         checkOnboarding();
       } else {
-        // Auto-create user + session (device is localhost — no credentials needed)
-        fetch('/auth/device-login', { method: 'POST' })
-          .then(function(r) { return r.json(); })
-          .then(function(d) {
-            if (d.ok) {
-              document.getElementById('login-screen').style.display = 'none';
-              document.getElementById('app').style.display = 'flex';
-              fetchData();
-              checkOnboarding();
-            } else {
-              document.getElementById('login-screen').style.display = 'flex';
-              document.getElementById('app').style.display = 'none';
-              setAuthMode(!data.hasUsers);
-            }
-          })
-          .catch(function() {
-            document.getElementById('login-screen').style.display = 'flex';
-            document.getElementById('app').style.display = 'none';
-            setAuthMode(false);
-          });
+        // No automatic login: the owner signs in (or creates the account on first run).
+        document.getElementById('login-screen').style.display = 'flex';
+        document.getElementById('app').style.display = 'none';
+        setAuthMode(!data.hasUsers);
       }
     }).catch(function() {
       document.getElementById('login-screen').style.display = 'flex';

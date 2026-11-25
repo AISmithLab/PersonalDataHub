@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, Pressable, TextInput, Switch, Linking } from 'react-native';
+import { View, Text, Pressable, TextInput, Switch } from 'react-native';
 import type { AppState } from '../hooks/useAppState';
-import { oauthStartUrl, type GithubRepo } from '../api/client';
+import type { GithubRepo } from '../api/client';
+import { startOAuth } from '../api/startOAuth';
 
 const PERM_GROUPS: { label: string; read: string; write: string }[] = [
   { label: 'Contents', read: 'contents:read', write: 'contents:write' },
@@ -68,7 +69,7 @@ export function GitHubTab({ state }: { state: AppState }) {
           {github?.enabled ? 'Not connected' : 'Not configured'}
         </Text>
         <Pressable
-          onPress={() => Linking.openURL(oauthStartUrl('github'))}
+          onPress={() => void startOAuth('github')}
           className="bg-primary rounded-lg px-4 py-2.5"
         >
           <Text className="text-on-primary font-label-caps text-label-caps">Connect GitHub</Text>

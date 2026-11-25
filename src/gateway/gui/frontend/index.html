@@ -3,7 +3,7 @@
 <head>
   <script>
     window.onerror = function(message, source, lineno, colno, error) {
-      fetch('/api/error-log', {
+      fetch('/web/error-log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -17,7 +17,7 @@
       return false;
     };
     window.addEventListener('unhandledrejection', function(event) {
-      fetch('/api/error-log', {
+      fetch('/web/error-log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

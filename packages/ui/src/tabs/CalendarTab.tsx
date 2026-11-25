@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, Text, Pressable, Linking } from 'react-native';
+import { View, Text, Pressable } from 'react-native';
 import type { AppState } from '../hooks/useAppState';
-import { oauthStartUrl } from '../api/client';
+import { startOAuth } from '../api/startOAuth';
 import { FilterCards } from '../components/FilterCards';
 
 export function CalendarTab({ state }: { state: AppState }) {
@@ -25,7 +25,7 @@ export function CalendarTab({ state }: { state: AppState }) {
           Powered by OAuth — we never store your password.
         </Text>
         <Pressable
-          onPress={() => Linking.openURL(oauthStartUrl('google_calendar'))}
+          onPress={() => void startOAuth('google_calendar')}
           className="bg-primary rounded-lg px-4 py-2.5"
         >
           <Text className="text-on-primary font-label-caps text-label-caps">Connect Calendar</Text>

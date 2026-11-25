@@ -1,11 +1,28 @@
 import { API_BASE_URL } from './baseUrl';
 import type { ContactInfo, PhotoMsg, SmsMsg } from '../device/deviceBridge.types';
 
+// On the phone the app has no sign-in screen. The native shell gets a secret from
+// its own bundled server and passes it here; every request then carries it and the
+// server treats the caller as the owner. On the web this stays unset and the
+// session cookie from signing in is used instead.
+let deviceSecret: string | null = null;
+
+export function setDeviceSecret(secret: string | null) {
+  deviceSecret = secret;
+}
+
+/** fetch against the hub, with the owner credential attached. Use this for every hub call. */
+export function hubFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers: Record<string, string> = {
+    ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+    ...(init?.headers as Record<string, string> | undefined),
+    ...(deviceSecret ? { 'X-PDH-Device-Secret': deviceSecret } : {}),
+  };
+  return fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+}
+
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
-    ...init,
-  });
+  const res = await hubFetch(path, init);
   return res.json() as Promise<T>;
 }
 
@@ -75,116 +92,144 @@ export interface GithubRepo {
 }
 
 export function getAuthStatus() {
-  return json<{ authenticated: boolean; hasUsers: boolean }>('/api/auth/status');
+  return json<{ authenticated: boolean; hasUsers: boolean }>('/web/auth/status');
 }
 
-// Single-device auto-login (no credentials — server only binds to 127.0.0.1).
-// The legacy WebView frontend called this on every load before fetching any
-// data; the native app must do the same or every /api/* call 401s silently.
-export function deviceLogin() {
-  return json<{ ok: boolean }>('/auth/device-login', { method: 'POST' });
+export function signIn(email: string, password: string, createAccount: boolean) {
+  return json<{ ok: boolean; error?: string }>(createAccount ? '/web/auth/signup' : '/web/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function signOut() {
+  return json<{ ok: boolean }>('/web/auth/logout', { method: 'POST' });
 }
 
 export function getSources() {
-  return json<{ sources: Source[] }>('/api/sources');
+  return json<{ sources: Source[] }>('/web/sources');
 }
 
 export function getFilters() {
-  return json<{ filters: Filter[]; filterTypes: Record<string, FilterType> }>('/api/filters');
+  return json<{ filters: Filter[]; filterTypes: Record<string, FilterType> }>('/web/filters');
 }
 
 export function getStaging() {
-  return json<{ actions: StagingAction[] }>('/api/staging');
+  return json<{ actions: StagingAction[] }>('/web/staging');
 }
 
 export function getGmailPreview(limit = 20) {
   return json<{ ok: boolean; emails?: GmailEmail[]; error?: string }>(
-    `/api/gmail/preview?limit=${limit}&t=${Date.now()}`
+    `/web/gmail/preview?limit=${limit}&t=${Date.now()}`
   );
 }
 
 export function getCalendarPreview(limit = 20) {
   return json<{ ok: boolean; events?: CalendarEvent[]; error?: string }>(
-    `/api/calendar/preview?limit=${limit}&t=${Date.now()}`
+    `/web/calendar/preview?limit=${limit}&t=${Date.now()}`
   );
 }
 
 export function getGithubRepos() {
-  return json<{ ok: boolean; repos?: GithubRepo[] }>('/api/github/repos');
+  return json<{ ok: boolean; repos?: GithubRepo[] }>('/web/github/repos');
 }
 
 export function saveGithubRepos(repos: Record<string, { enabled: boolean; permissions: string[] }>) {
-  return json('/api/github/repos', {
+  return json('/web/github/repos', {
     method: 'POST',
     body: JSON.stringify({ repos }),
   });
 }
 
 export function setFilter(input: { id?: string; source: string; type: string; value: string; enabled: boolean }) {
-  return json('/api/filters', {
+  return json('/web/filters', {
     method: 'POST',
     body: JSON.stringify({ ...input, enabled: input.enabled ? 1 : 0 }),
   });
 }
 
 export function editStagingAction(actionId: string, actionData: Record<string, unknown>) {
-  return json(`/api/staging/${actionId}/edit`, {
+  return json(`/web/staging/${actionId}/edit`, {
     method: 'POST',
     body: JSON.stringify({ action_data: actionData }),
   });
 }
 
 export function resolveStagingAction(actionId: string, decision: 'approve' | 'reject') {
-  return json(`/api/staging/${actionId}/resolve`, {
+  return json(`/web/staging/${actionId}/resolve`, {
     method: 'POST',
     body: JSON.stringify({ decision }),
   });
 }
 
 export function disconnectSource(source: string) {
-  return fetch(`${API_BASE_URL}/oauth/${source}/disconnect`, { method: 'POST' });
+  return hubFetch(`/web/oauth/${source}/disconnect`, { method: 'POST' });
 }
 
-export function oauthStartUrl(source: string) {
-  return `${API_BASE_URL}/oauth/${source}/start`;
+/** Asks the hub for the provider's sign-in URL. The caller opens it (see startOAuth). */
+export function getOAuthStartUrl(source: string) {
+  return json<{ ok: boolean; url?: string; error?: string }>(`/web/oauth/${source}/start`, { method: 'POST' });
 }
 
 export function manualSmsReply(from: string, body: string) {
-  return json<{ ok: boolean; reply?: string; error?: string }>('/api/sms/manual-reply', {
+  return json<{ ok: boolean; reply?: string; error?: string }>('/web/device/sms/manual-reply', {
     method: 'POST',
     body: JSON.stringify({ from, body }),
   });
 }
 
 export function getPendingSmsReplies() {
-  return json<{ ok: boolean; replies?: { id: string; to: string; body: string }[] }>('/api/sms/pending-replies');
+  return json<{ ok: boolean; replies?: { id: string; to: string; body: string }[] }>('/web/device/sms/pending-replies');
 }
 
 export function deletePendingSmsReply(id: string) {
-  return fetch(`${API_BASE_URL}/api/sms/pending-replies/${id}`, { method: 'DELETE' });
+  return hubFetch(`/web/device/sms/pending-replies/${id}`, { method: 'DELETE' });
 }
 
 export function autoReplySms(from: string, body: string, history: SmsMsg[]) {
-  return json<{ ok: boolean; enabled?: boolean; reply?: string }>('/sms/auto-reply', {
+  return json<{ ok: boolean; enabled?: boolean; reply?: string }>('/web/device/sms/auto-reply', {
     method: 'POST',
     body: JSON.stringify({ from, body, history }),
   });
 }
 
 export function syncPhotos(photos: PhotoMsg[]) {
-  return fetch(`${API_BASE_URL}/api/photos/sync`, {
+  return hubFetch('/web/device/photos', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ photos }),
   });
 }
 
 export function syncContacts(contacts: ContactInfo[]) {
-  return fetch(`${API_BASE_URL}/device/contacts-sync`, {
+  return hubFetch('/web/device/contacts', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ contacts }),
   });
+}
+
+// --- Agent keys ---
+
+export interface AgentKey {
+  id: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export function getAgentKeys() {
+  return json<{ ok: boolean; keys: AgentKey[] }>('/web/agent-keys');
+}
+
+/** The returned `key` is shown once; the hub keeps only its hash. */
+export function createAgentKey(name: string) {
+  return json<{ ok: boolean; id?: string; name?: string; key?: string; error?: string }>('/web/agent-keys', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function deleteAgentKey(id: string) {
+  return json<{ ok: boolean }>(`/web/agent-keys/${id}`, { method: 'DELETE' });
 }
 
 // --- Memories ---
@@ -196,46 +241,46 @@ export interface MemoryRow {
 }
 
 export function getMemories() {
-  return json<{ ok: boolean; memories: MemoryRow[] }>('/api/memories');
+  return json<{ ok: boolean; memories: MemoryRow[] }>('/web/memories');
 }
 
 export function createMemory(content: string) {
-  return json<{ ok: boolean; id?: string; error?: string }>('/api/memories', {
+  return json<{ ok: boolean; id?: string; error?: string }>('/web/memories', {
     method: 'POST',
     body: JSON.stringify({ content }),
   });
 }
 
 export function updateMemory(id: string, content: string) {
-  return json<{ ok: boolean; error?: string }>(`/api/memories/${id}`, {
+  return json<{ ok: boolean; error?: string }>(`/web/memories/${id}`, {
     method: 'PATCH',
     body: JSON.stringify({ content }),
   });
 }
 
 export function deleteMemory(id: string) {
-  return json<{ ok: boolean }>(`/api/memories/${id}`, { method: 'DELETE' });
+  return json<{ ok: boolean }>(`/web/memories/${id}`, { method: 'DELETE' });
 }
 
 // --- AI / chat settings ---
 
 export function getChatStatus() {
-  return json<{ ok: boolean; configured: boolean; provider: string | null; model: string | null }>('/api/chat/status');
+  return json<{ ok: boolean; configured: boolean; provider: string | null; model: string | null }>('/web/chat/status');
 }
 
 export function saveAiSettings(input: { api_key: string; provider?: string; model?: string; base_url?: string }) {
-  return json<{ ok: boolean; error?: string }>('/api/settings/ai-key', {
+  return json<{ ok: boolean; error?: string }>('/web/settings/ai-key', {
     method: 'POST',
     body: JSON.stringify(input),
   });
 }
 
 export function getAutoReplySettings() {
-  return json<{ ok: boolean; enabled: boolean; maxToolRounds: number }>('/api/settings/auto-reply');
+  return json<{ ok: boolean; enabled: boolean; maxToolRounds: number }>('/web/settings/auto-reply');
 }
 
 export function saveAutoReplySettings(input: { enabled?: boolean; maxToolRounds?: number }) {
-  return json<{ ok: boolean; enabled: boolean; maxToolRounds: number }>('/api/settings/auto-reply', {
+  return json<{ ok: boolean; enabled: boolean; maxToolRounds: number }>('/web/settings/auto-reply', {
     method: 'POST',
     body: JSON.stringify(input),
   });
@@ -243,7 +288,7 @@ export function saveAutoReplySettings(input: { enabled?: boolean; maxToolRounds?
 
 export function testAutoReply(from: string, body: string) {
   return json<{ ok: boolean; enabled?: boolean; reply?: string; skipped?: boolean; reason?: string; error?: string }>(
-    '/sms/auto-reply',
+    '/web/device/sms/auto-reply',
     { method: 'POST', body: JSON.stringify({ from, body }) }
   );
 }
@@ -251,11 +296,11 @@ export function testAutoReply(from: string, body: string) {
 // --- Onboarding ---
 
 export function getOnboardingStatus() {
-  return json<{ ok: boolean; completed: boolean }>('/api/settings/onboarding');
+  return json<{ ok: boolean; completed: boolean }>('/web/settings/onboarding');
 }
 
 export function setOnboardingCompleted(completed: boolean) {
-  return json<{ ok: boolean; completed: boolean }>('/api/settings/onboarding', {
+  return json<{ ok: boolean; completed: boolean }>('/web/settings/onboarding', {
     method: 'POST',
     body: JSON.stringify({ completed }),
   });
@@ -271,7 +316,7 @@ export interface AuditEntry {
 }
 
 export function getAuditLog(limit = 50) {
-  return json<{ ok: boolean; entries: AuditEntry[] }>(`/api/audit?limit=${limit}`);
+  return json<{ ok: boolean; entries: AuditEntry[] }>(`/web/audit?limit=${limit}`);
 }
 
 // --- Skills ---
@@ -309,25 +354,25 @@ export interface SkillInput {
 }
 
 export function getSkills() {
-  return json<{ ok: boolean; skills: SkillRow[] }>('/api/skills');
+  return json<{ ok: boolean; skills: SkillRow[] }>('/web/skills');
 }
 
 export function createSkill(input: SkillInput) {
-  return json<{ ok: boolean; id?: string; error?: string }>('/api/skills', {
+  return json<{ ok: boolean; id?: string; error?: string }>('/web/skills', {
     method: 'POST',
     body: JSON.stringify(input),
   });
 }
 
 export function updateSkill(id: string, input: SkillInput & { enabled?: boolean }) {
-  return json<{ ok: boolean }>(`/api/skills/${id}`, {
+  return json<{ ok: boolean }>(`/web/skills/${id}`, {
     method: 'PUT',
     body: JSON.stringify(input),
   });
 }
 
 export function deleteSkill(id: string) {
-  return json<{ ok: boolean }>(`/api/skills/${id}`, { method: 'DELETE' });
+  return json<{ ok: boolean }>(`/web/skills/${id}`, { method: 'DELETE' });
 }
 
 // --- Chat ---
@@ -346,7 +391,7 @@ export interface ChatMessage {
 
 export function sendChatMessage(messages: ChatMessage[], sms: SmsMsg[] | null) {
   return json<{ ok: boolean; reply?: string; toolOutputs?: ToolOutput[]; stagedActionIds?: string[]; error?: string }>(
-    '/api/chat',
+    '/web/chat',
     { method: 'POST', body: JSON.stringify({ messages, sms }) }
   );
 }

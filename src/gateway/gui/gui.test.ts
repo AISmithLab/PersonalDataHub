@@ -450,6 +450,19 @@ describe('Action Review — deny / save-to-draft / send', () => {
     expect(json.actions).toEqual([]);
   });
 
+  it('the pages call only /web and /agent routes', async () => {
+    for (const page of ['/', '/next']) {
+      const html = await (await app.request(page)).text();
+      // Old prefixes, as they would appear at the start of a quoted request path.
+      for (const old of ['/api/', '/auth/', '/app/v1/', '/sms/', '/device/']) {
+        for (const quote of ["'", '"', '`']) {
+          expect(html, `${page} still calls ${old}`).not.toContain(quote + old);
+        }
+      }
+      expect(html, page).not.toContain('device-login');
+    }
+  });
+
   it('GUI HTML contains no demo-sa references', async () => {
     const res = await app.request('/');
     const html = await res.text();
