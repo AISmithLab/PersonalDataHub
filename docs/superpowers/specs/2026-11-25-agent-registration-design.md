@@ -175,7 +175,7 @@ Known and not addressed:
 
 ## Part 2: smithagent
 
-Built 2026-11-25 on branch `joinhub` in `Lab-AI-Infra` (commit `c72cf97`, not merged). As built it follows this part, with these specifics: the vendored client is `smithagent/bin/query-hub.mjs`, installed as `~/.smithagent/bin/query-hub.mjs` plus a `query-hub` wrapper; `template/library.md` and `template/hub.md` are the appended sections; `node --test smithagent/test/` covers the commands end to end with a fake gateway and a fake hub. `joinlibrary` against the real library gateway was not run.
+Built 2026-11-25 on branch `joinhub` in `Lab-AI-Infra` (worktree `~/aismith/Lab-AI-Infra-joinhub`, not merged). As built it follows this part, with these specifics: the vendored client is `smithagent/bin/query-hub.mjs`, installed as `~/.smithagent/bin/query-hub.mjs` plus a `query-hub` wrapper; `template/library.md` and `template/hub.md` are the appended sections; `node --test smithagent/test/` covers the commands end to end with a fake gateway and a fake hub. `joinlibrary` against the real library gateway was not run.
 
 In `Lab-AI-Infra/smithagent`. Other sessions commit to that repository; pull first and work on a branch.
 
@@ -185,8 +185,6 @@ In `Lab-AI-Infra/smithagent`. Other sessions commit to that repository; pull fir
 smithagent create <name> [--work <dir>]        a local agent with no connections
 smithagent joinlibrary <agent> <library-url>   attach it to a SmithLibrary channel
 smithagent joinhub <agent> <hub-url>           give it access to a PersonalDataHub
-smithagent install <library-url> [--work <dir>]   kept: create + joinlibrary, named by the link
-smithagent add <channel> ...                      kept: mint a library link, then install
 ```
 
 - `create` makes `~/.smithagent/agents/<name>/` with `state/`, `logs/`, `.env` and the work directory with the template. No `.mcp.json`. Name rule as the hub's.
@@ -196,6 +194,7 @@ smithagent add <channel> ...                      kept: mint a library link, the
 - Both joins tell the user to restart a running agent (`down`, `up`).
 - `status` lists each agent's connections. `remove --revoke` also runs `query-hub leave`.
 - Existing agents are untouched: they are agents with a library connection.
+- `install`, `add` and `channels` are removed. Haojian: "we are fast iterating the design. better have a clean design." An agent is always created first, and a library link is the only way into a channel. The gh-login mode (`install <channel> --agent <name>`) goes with them.
 
 The template's `CLAUDE.md` becomes a generic base; the library instructions move into a marked section that `joinlibrary` appends, the same way `joinhub` appends its own. Existing work directories are not rewritten.
 
