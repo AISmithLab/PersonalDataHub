@@ -140,7 +140,7 @@ describe('PersonalDataHub Plugin', () => {
 
       expect(registerTool).not.toHaveBeenCalled();
       expect(api.logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('npx pdh init'),
+        expect.stringContaining('query-hub join'),
       );
     });
 
@@ -209,7 +209,7 @@ describe('PersonalDataHub Plugin', () => {
 
       expect(registerTool).not.toHaveBeenCalled();
       expect(api.logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Missing hubUrl'),
+        expect.stringContaining('not registered with a hub'),
       );
     });
   });
