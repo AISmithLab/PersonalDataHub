@@ -52,6 +52,7 @@ describe('AI provider handling', () => {
       req.on('data', (d) => (raw += d)).on('end', () => {
         seenModels.push(JSON.parse(raw).model);
         const r = replies.shift() ?? ok('default');
+        if (r.status === -1) return; // never answer: the hub's own timeout has to end this
         res.writeHead(r.status, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(r.body));
       });
@@ -100,17 +101,37 @@ describe('AI provider handling', () => {
     replies.push(googleError(503, 'This model is currently experiencing high demand.'), ok('from the second model'));
     const started = Date.now();
     expect(await (await chat()).json()).toMatchObject({ ok: true, reply: 'from the second model' });
-    expect(seenModels).toEqual(['gemini-flash-latest', 'gemini-3-flash-preview']);
+    expect(seenModels).toEqual(['gemini-flash-latest', 'gemini-3.8-flash']);
     expect(Date.now() - started).toBeLessThan(1500); // switching is immediate, not a timed retry
     // the next message goes straight to the model that worked
     await chat();
-    expect(seenModels[2]).toBe('gemini-3-flash-preview');
+    expect(seenModels[2]).toBe('gemini-3.8-flash');
+  });
+
+  it('prefers the newest Flash and steps down through older ones', async () => {
+    for (const _ of [1, 2, 3, 4, 5]) replies.push(googleError(503, 'This model is currently experiencing high demand.'));
+    replies.push(ok('from the old preview'));
+    expect(await (await chat()).json()).toMatchObject({ ok: true, reply: 'from the old preview' });
+    expect(seenModels).toEqual(['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview']);
+  });
+
+  it('a model that never answers is given up on, and the next one is used', async () => {
+    process.env.PDH_AI_TIMEOUT_MS = '300';
+    try {
+      replies.push({ status: -1, body: null }, ok('from the next model'));
+      const started = Date.now();
+      expect(await (await chat()).json()).toMatchObject({ ok: true, reply: 'from the next model' });
+      expect(seenModels).toEqual(['gemini-flash-latest', 'gemini-3.8-flash']);
+      expect(Date.now() - started).toBeLessThan(3000);
+    } finally {
+      delete process.env.PDH_AI_TIMEOUT_MS;
+    }
   });
 
   it('also moves on when a model has been retired (404), and says what it tried when all fail', async () => {
     replies.push(googleError(404, 'This model models/x is no longer available.'), ok('ok'));
     expect(await (await chat()).json()).toMatchObject({ ok: true });
-    for (let i = 0; i < 8; i++) replies.push(googleError(503, 'This model is currently experiencing high demand.'));
+    for (let i = 0; i < 12; i++) replies.push(googleError(503, 'This model is currently experiencing high demand.'));
     const j = await (await chat()).json() as { ok: boolean; error: string };
     expect(j.ok).toBe(false);
     expect(j.error).toContain('high demand');
@@ -155,7 +176,8 @@ describe('AI provider handling', () => {
       const { listProviderModels } = await import('./routes.js');
       const base = (config.ai as { base_url: string }).base_url;
       const list = await listProviderModels('google', 'the-key', base);
-      expect(list).toEqual(['gemini-flash-latest', 'gemini-3-flash-preview', 'gemini-3.6-flash', 'gemini-10-flash', 'gemini-2.5-flash']);
+      // recommended models in the hub's order (newest Flash first), then the rest
+      expect(list).toEqual(['gemini-flash-latest', 'gemini-3.6-flash', 'gemini-3-flash-preview', 'gemini-10-flash', 'gemini-2.5-flash']);
       expect(modelCalls[0]).toEqual({ auth: 'Bearer the-key', xkey: '' });
       await listProviderModels('anthropic', 'a-key', base);
       expect(modelCalls[1]).toEqual({ auth: '', xkey: 'a-key' });

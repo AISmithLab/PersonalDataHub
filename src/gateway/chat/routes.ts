@@ -46,7 +46,10 @@ export function getClient(deps: ServerDeps): OpenAI {
   const ai = deps.config.ai!;
   const provider = ai.provider ?? 'anthropic';
   const baseURL = ai.base_url ?? DEFAULT_BASE_URLS[provider];
-  return new OpenAI({ apiKey: ai.api_key, ...(baseURL ? { baseURL } : {}), fetch: readableErrors, maxRetries: 0 });
+  // A model that accepts the request and then never answers must not hold a chat for the
+  // SDK's default ten minutes; after this long the next model is tried.
+  const timeout = Number(process.env.PDH_AI_TIMEOUT_MS) || 60_000;
+  return new OpenAI({ apiKey: ai.api_key, ...(baseURL ? { baseURL } : {}), fetch: readableErrors, maxRetries: 0, timeout });
 }
 
 /**
@@ -77,7 +80,8 @@ const readableErrors: typeof fetch = async (input, init) => {
  */
 const MODEL_FALLBACKS: Record<string, string[]> = {
   anthropic: ['claude-sonnet-5-5', 'claude-sonnet-4-6'],
-  google: ['gemini-flash-latest', 'gemini-3-flash-preview', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-lite-latest'],
+  // Newest Flash first, stepping down to older ones, so the best available model is used.
+  google: ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-flash-lite-latest'],
 };
 
 /** Per provider, the model that last answered. Used when the owner has not chosen a model. */
@@ -861,11 +865,12 @@ async function callChatCompletionWithRetry(
       const status = err?.status || err?.statusCode;
       const msg = String(err?.message || '');
       // Overloaded (503) or retired (404) model: another model of the same provider will do.
-      const unavailable = status === 503 || (status === 404 && /model/i.test(msg));
+      const timedOut = !status && (err?.name === 'APIConnectionTimeoutError' || /timed out|timeout/i.test(msg));
+      const unavailable = status === 503 || timedOut || (status === 404 && /model/i.test(msg));
       const provider = unavailable ? fallbackProvider(params.model) : null;
       const next = provider ? MODEL_FALLBACKS[provider].find((m) => !tried.has(m)) : undefined;
       if (next) {
-        console.warn(`[chat] ${params.model} is unavailable (${status}); using ${next} instead.`);
+        console.warn(`[chat] ${params.model} is unavailable (${timedOut ? 'no answer in time' : status}); using ${next} instead.`);
         tried.add(next);
         params = { ...params, model: next };
         attempt--; // switching models is not a retry
