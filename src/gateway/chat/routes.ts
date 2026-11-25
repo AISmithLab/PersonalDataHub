@@ -10,7 +10,7 @@ import type { MemoryRow, SkillRow } from '../../database/datastore.js';
 import { parseTriggerEvents, serializeTriggerEvents } from '../../database/datastore.js';
 import { runCode } from '../code-runner/runner.js';
 import { setContacts, labelWithContact } from './contacts-cache.js';
-import { makeAsk, savePipe, describePipe, PIPE_SOURCES, type AskFn, type PipeDeps } from '../pipes.js';
+import { makeAsk, savePipe, deletePipe, describePipe, PIPE_SOURCES, type AskFn, type PipeDeps } from '../pipes.js';
 
 type SmsMessage = { address: string; body: string; date: number };
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
@@ -65,7 +65,7 @@ export function pipeAsk(deps: ServerDeps): AskFn {
       const response = await getClient(deps).chat.completions.create({
         model: getModel(deps),
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-        max_tokens: 5,
+        max_tokens: 16,
       });
       return response.choices[0]?.message.content ?? '';
     });
@@ -90,7 +90,7 @@ const PIPE_CONTRACT = [
   'Example program:',
   '  const keep = await Promise.all(rows.map((r) => ask("Does this email ask the recipient to write a recommendation letter?", r.data.title + "\\n" + (r.data.snippet || r.data.body || ""))));',
   '  return rows.filter((_, i) => keep[i]);',
-  'save_pipe saves the pipe and then test-runs it on up to 10 items; read the `test` field of its result. If test.error is set, fix the program and call save_pipe again with the same id. To change an existing pipe pass its id; only the fields you pass are changed. Tell the user what the pipe keeps and how many of the tested items matched. Agents need the owner to tick the pipe for them in Settings → Agents before they can call it.',
+  'save_pipe test-runs the program on up to 10 items first and saves it only if the run succeeds. If it answers ok:false, nothing was saved (an existing pipe is unchanged): fix the program and call save_pipe again. On success read the `test` field. To change an existing pipe pass its id; only the fields you pass are changed, and its source cannot be changed. Tell the user what the pipe keeps and how many of the tested items matched. Agents need the owner to tick the pipe for them in Settings → Agents before they can call it.',
 ].join('\n');
 
 /** Which page the chat is embedded in, and what the user has selected there. */
@@ -367,7 +367,7 @@ async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]
     type: 'function',
     function: {
       name: 'save_pipe',
-      description: 'Create a pipe, or change one when id is given. Saves it, then test-runs it on up to 10 items and returns the result in `test` (itemsFetched, itemsReturned, sample, or error).',
+      description: 'Create a pipe, or change one when id is given. Test-runs the program on up to 10 items and saves it only if the run succeeds; returns the result in `test` (itemsFetched, itemsReturned, sample).',
       parameters: {
         type: 'object',
         properties: {
@@ -733,8 +733,7 @@ async function executeToolInner(
       const id = String(input.id ?? '').trim();
       const pipe = id ? await deps.store.getPipe(id) : null;
       if (!pipe) return JSON.stringify({ ok: false, error: `No pipe with id "${id}"` });
-      await deps.store.deletePipe(id);
-      await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'pipe_deleted', source: pipe.source, details: JSON.stringify({ id, name: pipe.name, deletedBy: 'chat' }) });
+      await deletePipe(deps, pipe, 'chat');
       return JSON.stringify({ ok: true });
     }
 

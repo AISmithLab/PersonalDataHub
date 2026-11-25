@@ -36,7 +36,20 @@ export interface ServerDeps {
  *   POST /oauth/:source/store-tokens    called by the callback page; one-time ticket
  *   GET  /, /next                       the pages themselves
  */
+// A promise nobody awaited (for example inside an AI-written pipe program) must not end the
+// hub. Node's default is to exit; log it and keep serving.
+let rejectionGuardInstalled = false;
+function installRejectionGuard(): void {
+  if (rejectionGuardInstalled) return;
+  rejectionGuardInstalled = true;
+  process.on('unhandledRejection', (reason) => {
+    const message = reason && typeof (reason as { message?: unknown }).message === 'string' ? (reason as { message: string }).message : String(reason);
+    console.error('[hub] unhandled rejection (ignored):', message);
+  });
+}
+
 export function createServer(deps: ServerDeps): Hono {
+  installRejectionGuard();
   const app = new Hono();
 
   // Health check — CORS wildcard so the Capacitor WebView (origin: http://localhost)

@@ -51,6 +51,8 @@ var currentTab = 'ai';
       document.querySelectorAll('.nav-item[data-tab], #bottom-nav a[data-tab]').forEach(function(el) {
         el.classList.toggle('active', el.dataset.tab === tab);
       });
+      // Pipes can also be made or deleted from the plain Chat tab, so re-read them when a page that shows them opens.
+      if ((tab === 'pipe' || tab === 'settings') && state.pipes.items !== null && typeof loadPipes === 'function') loadPipes();
       render();
     }
     window.switchTab = switchTab;
@@ -193,9 +195,18 @@ var currentTab = 'ai';
     window.loadMemories = loadMemories;
 
     // --- Skills and Pipes pages: embedded chat ---
+    // Keep the newest message in view, but only when one arrived: a re-render for another
+    // reason (a pipe finished running) must not yank the chat away from where the user scrolled.
+    var _pageChatSeen = {};
     function scrollPageChat() {
       var el = document.getElementById('page-chat-messages');
-      if (el) el.scrollTop = el.scrollHeight;
+      if (!el) return;
+      var scope = currentTab === 'pipe' ? 'pipes' : 'skills';
+      var chat = state.pageChats[scope];
+      var mark = chat.messages.length + (chat.loading ? 0.5 : 0);
+      if (_pageChatSeen[scope] !== mark) { _pageChatSeen[scope] = mark; el.scrollTop = el.scrollHeight; }
+      else if (_pageChatSeen[scope + ':top'] != null) el.scrollTop = _pageChatSeen[scope + ':top'];
+      el.onscroll = function() { _pageChatSeen[scope + ':top'] = el.scrollTop; };
     }
 
     function pageTab(scope) { return scope === 'pipes' ? 'pipe' : 'skill'; }
@@ -211,6 +222,7 @@ var currentTab = 'ai';
       if (currentTab === pageTab(scope)) render();
 
       var focus = pageChatFocus(scope);
+      var selectionAtSend = scope === 'pipes' ? state.pipes.selectedId : null;
       try {
         var res = await fetch('/web/chat', {
           method: 'POST',
@@ -225,7 +237,7 @@ var currentTab = 'ai';
         chat.loading = false;
         if (data.ok) {
           chat.messages.push({ role: 'assistant', content: data.reply, toolOutputs: data.toolOutputs || [] });
-          await syncAfterChat(scope, data.toolOutputs || []);
+          await syncAfterChat(scope, data.toolOutputs || [], selectionAtSend);
         } else {
           chat.error = data.error || 'Unknown error';
         }
@@ -238,7 +250,7 @@ var currentTab = 'ai';
     window.sendPageChat = sendPageChat;
 
     // The right panel follows the chat: whatever the AI just saved is reloaded and selected.
-    async function syncAfterChat(scope, toolOutputs) {
+    async function syncAfterChat(scope, toolOutputs, selectionAtSend) {
       var touched = function(names) { return toolOutputs.some(function(t) { return names.indexOf(t.name) >= 0; }); };
       var savedId = function(name) {
         var id = null;
@@ -251,7 +263,9 @@ var currentTab = 'ai';
       if (touched(['save_pipe', 'delete_pipe'])) {
         await loadPipes();
         var pid = savedId('save_pipe');
-        if (pid) selectPipe(pid, true);
+        // Follow the chat to the pipe it saved, unless the user picked another pipe while waiting.
+        if (pid && state.pipes.selectedId === selectionAtSend) selectPipe(pid, true);
+        else if (pid && state.pipes.selectedId === pid) selectPipe(pid, true);
         else if (state.pipes.selectedId && !(state.pipes.items || []).some(function(p) { return p.id === state.pipes.selectedId; })) state.pipes.selectedId = null;
       }
       if (touched(['save_skill', 'delete_skill'])) {
@@ -268,6 +282,7 @@ var currentTab = 'ai';
     window.clearPageChat = clearPageChat;
 
     // --- Pipes page ---
+    var _pipeRunSeq = 0;
     function loadPipes() {
       state.pipes.loading = true;
       return fetch('/agent/pipes').then(function(r) { return r.json(); }).then(function(d) {
@@ -297,16 +312,19 @@ var currentTab = 'ai';
       var id = state.pipes.selectedId;
       var pipe = (state.pipes.items || []).filter(function(p) { return p.id === id; })[0];
       if (!pipe || !pipe.enabled) return;
+      // Each run gets a number; only the latest one may fill the panel, so an older run of the
+      // same pipe (before a switch or an edit) cannot overwrite a newer result.
+      var run = ++_pipeRunSeq;
       state.pipes.output = { id: id, loading: true };
       if (quiet !== true) render();
       fetch('/agent/pipes/' + id + '?purpose=' + encodeURIComponent('Pipes page preview')).then(function(r) { return r.json(); }).then(function(d) {
-        if (state.pipes.selectedId !== id) return;
+        if (run !== _pipeRunSeq || state.pipes.selectedId !== id) return;
         state.pipes.output = d.ok
           ? { id: id, loading: false, data: d.data, meta: d.meta, body: d }
           : { id: id, loading: false, error: (d.error && d.error.message) || 'The pipe failed.' };
         if (currentTab === 'pipe') render();
       }).catch(function() {
-        if (state.pipes.selectedId !== id) return;
+        if (run !== _pipeRunSeq || state.pipes.selectedId !== id) return;
         state.pipes.output = { id: id, loading: false, error: 'Could not reach the hub.' };
         if (currentTab === 'pipe') render();
       });
@@ -330,6 +348,7 @@ var currentTab = 'ai';
       fetch('/web/pipes/' + id, { method: 'DELETE' }).then(function(r) { return r.json(); }).then(function(d) {
         if (!d.ok) state.pipes.error = d.error || 'Could not delete the pipe.';
         if (state.pipes.selectedId === id) { state.pipes.selectedId = null; state.pipes.output = null; }
+        state.agents.items = null; // the pipe's permission was removed from every agent
         loadPipes();
       });
     }

@@ -775,6 +775,8 @@ export class DynamoDataStore implements DataStore {
     await this.docClient.send(new PutCommand({
       TableName: this.tableName,
       Item: { PK: `PIPE#${pipe.id}`, SK: 'PIPE', ...pipe, created_at: now, updated_at: now },
+      // Never overwrite: an existing id may already be granted to agents.
+      ConditionExpression: 'attribute_not_exists(PK)',
     }));
   }
 

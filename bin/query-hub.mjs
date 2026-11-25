@@ -223,7 +223,6 @@ const commands = {
 
   async pipes() {
     const { pipes } = await call('/agent/pipes');
-    // The program is the owner's business; an agent needs to know what a pipe returns.
     print({ ok: true, pipes: pipes.map(({ id, name, description, source, enabled }) => ({ id, name, description, source, enabled })) });
   },
 
