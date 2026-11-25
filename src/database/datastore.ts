@@ -250,6 +250,11 @@ export interface DataStore {
   /** Undoes consumeJoinCode, for a join that failed after consuming. */
   releaseJoinCode(code: string): MaybePromise<void>;
 
+  // --- Chat history (the owner's conversations, one per page) ---
+  getChatHistory(scope: string): MaybePromise<string | null>;
+  setChatHistory(scope: string, messagesJson: string): MaybePromise<void>;
+  deleteChatHistory(scope: string): MaybePromise<void>;
+
   // --- Pipes ---
   listPipes(): MaybePromise<PipeRow[]>;
   getPipe(id: string): MaybePromise<PipeRow | null>;

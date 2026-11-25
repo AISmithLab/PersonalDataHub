@@ -446,6 +446,20 @@ export class SqlJsDataStore implements DataStore {
     this.run('DELETE FROM pipes WHERE id = ?', [id]);
   }
 
+  // --- Chat history ---
+
+  getChatHistory(scope: string): string | null {
+    return this.getAll<{ messages: string }>('SELECT messages FROM chat_history WHERE scope = ?', [scope])[0]?.messages ?? null;
+  }
+
+  setChatHistory(scope: string, messagesJson: string): void {
+    this.run('INSERT OR REPLACE INTO chat_history (scope, messages, updated_at) VALUES (?, ?, ?)', [scope, messagesJson, this.now()]);
+  }
+
+  deleteChatHistory(scope: string): void {
+    this.run('DELETE FROM chat_history WHERE scope = ?', [scope]);
+  }
+
   // --- AI Memories ---
 
   listMemories(): MemoryRow[] {

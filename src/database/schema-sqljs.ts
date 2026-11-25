@@ -117,6 +117,12 @@ CREATE TABLE IF NOT EXISTS pipes (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS chat_history (
+  scope TEXT PRIMARY KEY,
+  messages TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS ai_memories (
   id TEXT PRIMARY KEY,
   content TEXT NOT NULL,

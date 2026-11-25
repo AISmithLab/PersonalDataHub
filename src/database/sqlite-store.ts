@@ -402,6 +402,21 @@ export class SqliteDataStore implements DataStore {
     this.db.prepare('DELETE FROM pipes WHERE id = ?').run(id);
   }
 
+  // --- Chat history ---
+
+  getChatHistory(scope: string): string | null {
+    const row = this.db.prepare('SELECT messages FROM chat_history WHERE scope = ?').get(scope) as { messages: string } | undefined;
+    return row?.messages ?? null;
+  }
+
+  setChatHistory(scope: string, messagesJson: string): void {
+    this.db.prepare("INSERT INTO chat_history (scope, messages) VALUES (?, ?) ON CONFLICT(scope) DO UPDATE SET messages = excluded.messages, updated_at = datetime('now')").run(scope, messagesJson);
+  }
+
+  deleteChatHistory(scope: string): void {
+    this.db.prepare('DELETE FROM chat_history WHERE scope = ?').run(scope);
+  }
+
   // --- AI Memories ---
 
   listMemories(): MemoryRow[] {

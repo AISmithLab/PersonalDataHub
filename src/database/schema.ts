@@ -113,6 +113,14 @@ CREATE TABLE IF NOT EXISTS join_codes (
   used_at TEXT
 )`;
 
+// One row per conversation in the owner's pages ('chat', 'skills', 'pipes'): the messages as JSON.
+const CREATE_CHAT_HISTORY = `
+CREATE TABLE IF NOT EXISTS chat_history (
+  scope TEXT PRIMARY KEY,
+  messages TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`;
+
 const CREATE_PIPES = `
 CREATE TABLE IF NOT EXISTS pipes (
   id TEXT PRIMARY KEY,
@@ -160,6 +168,7 @@ export function createTables(db: Database.Database): void {
   db.exec(CREATE_AGENTS);
   db.exec(CREATE_JOIN_CODES);
   db.exec(CREATE_PIPES);
+  db.exec(CREATE_CHAT_HISTORY);
   // Migrate existing agent_skills tables
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN instructions TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already exists */ }
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN trigger_event TEXT NOT NULL DEFAULT 'sms_received'"); } catch (_) { /* already exists */ }

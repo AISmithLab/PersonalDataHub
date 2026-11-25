@@ -798,6 +798,12 @@ export class DynamoDataStore implements DataStore {
     await this.docClient.send(new DeleteCommand({ TableName: this.tableName, Key: { PK: `PIPE#${id}`, SK: 'PIPE' } }));
   }
 
+  // --- Chat history (not kept on DynamoDB; the page then starts empty, as before) ---
+
+  async getChatHistory(_scope: string): Promise<string | null> { return null; }
+  async setChatHistory(_scope: string, _messagesJson: string): Promise<void> {}
+  async deleteChatHistory(_scope: string): Promise<void> {}
+
   // --- AI Memories (not implemented for DynamoDB — Android uses SQLite) ---
 
   async listMemories(): Promise<MemoryRow[]> { return []; }

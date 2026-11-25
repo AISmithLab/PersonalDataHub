@@ -1311,10 +1311,68 @@ async function runAutoReplyLoop(
   return '';
 }
 
+const CHAT_SCOPES = ['chat', 'skills', 'pipes'];
+const HISTORY_MAX_MESSAGES = 200;
+const HISTORY_MAX_BYTES = 1_000_000;
+
+type StoredMessage = { role: 'user' | 'assistant'; content: string; toolOutputs?: ToolOutput[] };
+
+/**
+ * A conversation as the page sends it, reduced to what is kept: the newest messages,
+ * within a size limit (tool outputs can hold whole emails). Null when it is not a conversation.
+ */
+export function cleanHistory(input: unknown): StoredMessage[] | null {
+  if (!Array.isArray(input)) return null;
+  const out: StoredMessage[] = [];
+  for (const m of input as Array<Record<string, unknown>>) {
+    if (!m || (m.role !== 'user' && m.role !== 'assistant') || typeof m.content !== 'string') return null;
+    const msg: StoredMessage = { role: m.role, content: m.content };
+    if (Array.isArray(m.toolOutputs)) {
+      msg.toolOutputs = (m.toolOutputs as Array<Record<string, unknown>>)
+        .filter((t) => t && typeof t.name === 'string' && typeof t.output === 'string')
+        .map((t) => ({ name: t.name as string, input: (t.input && typeof t.input === 'object' ? t.input : {}) as Record<string, unknown>, output: t.output as string }));
+    }
+    out.push(msg);
+  }
+  let kept = out.slice(-HISTORY_MAX_MESSAGES);
+  // Too large: first drop the tool outputs of older messages, then the oldest messages.
+  for (let i = 0; i < kept.length - 1 && Buffer.byteLength(JSON.stringify(kept)) > HISTORY_MAX_BYTES; i++) delete kept[i].toolOutputs;
+  while (kept.length > 1 && Buffer.byteLength(JSON.stringify(kept)) > HISTORY_MAX_BYTES) kept = kept.slice(1);
+  if (kept.length === 1 && Buffer.byteLength(JSON.stringify(kept)) > HISTORY_MAX_BYTES) { delete kept[0].toolOutputs; kept[0].content = kept[0].content.slice(0, 100_000); }
+  return kept;
+}
+
 export function createChatRoutes(deps: ServerDeps): Hono {
   const app = new Hono();
 
   // Mounted under /web behind requireOwner (see server.ts).
+  // The owner's conversations, kept so a page reload does not lose them. One per page.
+  // The page sends the whole conversation after each exchange; the hub only stores it.
+  app.get('/chat/history/:scope', async (c) => {
+    const scope = c.req.param('scope');
+    if (!CHAT_SCOPES.includes(scope)) return c.json({ ok: false, error: 'Unknown conversation.' }, 404);
+    let messages: unknown = [];
+    try { messages = JSON.parse((await deps.store.getChatHistory(scope)) ?? '[]'); } catch { /* unreadable: start empty */ }
+    return c.json({ ok: true, messages: Array.isArray(messages) ? messages : [] });
+  });
+
+  app.put('/chat/history/:scope', async (c) => {
+    const scope = c.req.param('scope');
+    if (!CHAT_SCOPES.includes(scope)) return c.json({ ok: false, error: 'Unknown conversation.' }, 404);
+    const body = await c.req.json().catch(() => null) as { messages?: unknown } | null;
+    const messages = cleanHistory(body?.messages);
+    if (!messages) return c.json({ ok: false, error: 'messages must be a list of { role, content }.' }, 400);
+    await deps.store.setChatHistory(scope, JSON.stringify(messages));
+    return c.json({ ok: true, kept: messages.length });
+  });
+
+  app.delete('/chat/history/:scope', async (c) => {
+    const scope = c.req.param('scope');
+    if (!CHAT_SCOPES.includes(scope)) return c.json({ ok: false, error: 'Unknown conversation.' }, 404);
+    await deps.store.deleteChatHistory(scope);
+    return c.json({ ok: true });
+  });
+
   app.get('/chat/status', (c) => {
     return c.json({
       ok: true,

@@ -134,6 +134,8 @@ var currentTab = 'ai';
       // Always sync device photos on startup if available
       loadPhotos(true);
 
+      loadChatHistories();
+
       // Check AI configuration status
       fetch('/web/chat/status').then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
@@ -213,6 +215,28 @@ var currentTab = 'ai';
 
     function pageTab(scope) { return scope === 'pipes' ? 'pipe' : 'skill'; }
 
+    // Conversations are kept by the hub, so a reload (or another browser) shows them again.
+    // scope: 'chat' (the Chat tab), 'skills', 'pipes'.
+    function chatOf(scope) { return scope === 'chat' ? state.chat : state.pageChats[scope]; }
+    function loadChatHistories() {
+      ['chat', 'skills', 'pipes'].forEach(function(scope) {
+        fetch('/web/chat/history/' + scope).then(function(r) { return r.json(); }).then(function(d) {
+          var chat = chatOf(scope);
+          // Do not overwrite a conversation the user already started while this was loading.
+          if (!d.ok || !d.messages || !d.messages.length || chat.messages.length) return;
+          chat.messages = d.messages;
+          if (currentTab === (scope === 'chat' ? 'ai' : pageTab(scope))) render();
+        }).catch(function() { /* non-fatal: the page starts with an empty conversation */ });
+      });
+    }
+    function saveChatHistory(scope) {
+      var messages = chatOf(scope).messages.map(function(m) { return { role: m.role, content: m.content, toolOutputs: m.toolOutputs }; });
+      fetch('/web/chat/history/' + scope, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: messages }) }).catch(function() { /* non-fatal */ });
+    }
+    function forgetChatHistory(scope) {
+      fetch('/web/chat/history/' + scope, { method: 'DELETE' }).catch(function() { /* non-fatal */ });
+    }
+
     async function sendPageChat(scope) {
       var chat = state.pageChats[scope];
       var text = (chat.draft || '').trim();
@@ -247,6 +271,7 @@ var currentTab = 'ai';
         chat.loading = false;
         chat.error = err.message || 'Network error';
       }
+      saveChatHistory(scope);
       if (currentTab === pageTab(scope)) render();
     }
     window.sendPageChat = sendPageChat;
@@ -279,6 +304,7 @@ var currentTab = 'ai';
     function clearPageChat(scope) {
       state.pageChats[scope].messages = [];
       state.pageChats[scope].error = null;
+      forgetChatHistory(scope);
       render();
     }
     window.clearPageChat = clearPageChat;
@@ -1041,6 +1067,7 @@ var currentTab = 'ai';
         state.chat.loading = false;
         state.chat.error = err.message || 'Network error';
       }
+      saveChatHistory('chat');
       if (currentTab === 'ai') {
         render();
         var msgs2 = document.getElementById('chat-messages');
@@ -1054,6 +1081,7 @@ var currentTab = 'ai';
       state.chat.error = null;
       state.chat.stagedSmsIds = [];
       state.chat.codeBlocks = {};
+      forgetChatHistory('chat');
       if (currentTab === 'ai') render();
     }
     window.clearChat = clearChat;
