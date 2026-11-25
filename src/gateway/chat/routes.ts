@@ -70,9 +70,32 @@ const readableErrors: typeof fetch = async (input, init) => {
   return new Response(body, { status: res.status, statusText: res.statusText, headers: { 'content-type': 'application/json', ...(res.headers.get('retry-after') ? { 'retry-after': res.headers.get('retry-after')! } : {}) } });
 };
 
+/**
+ * Models to move to, in order, when the one asked for is overloaded or has been
+ * retired. A provider can be out of capacity on one model for hours while its
+ * others answer normally, and a fixed default would leave the hub unusable.
+ */
+const MODEL_FALLBACKS: Record<string, string[]> = {
+  google: ['gemini-flash-latest', 'gemini-3-flash-preview', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-lite-latest'],
+};
+
+/** Per provider, the model that last answered. Used when the owner has not chosen a model. */
+const workingModel = new Map<string, string>();
+
+/** Forget which models answered. For tests. */
+export function forgetWorkingModels(): void {
+  workingModel.clear();
+}
+
 export function getModel(deps: ServerDeps): string {
   const ai = deps.config.ai!;
-  return ai.model ?? DEFAULT_MODELS[ai.provider ?? 'anthropic'] ?? 'claude-sonnet-4-6';
+  const provider = ai.provider ?? 'anthropic';
+  return ai.model ?? workingModel.get(provider) ?? DEFAULT_MODELS[provider] ?? 'claude-sonnet-4-6';
+}
+
+function fallbackProvider(model: string): string | null {
+  for (const [provider, models] of Object.entries(MODEL_FALLBACKS)) if (models.includes(model)) return provider;
+  return null;
 }
 
 // The `ask(question, text)` helper that pipe programs call: one yes/no question to the
@@ -795,12 +818,27 @@ async function callChatCompletionWithRetry(
   params: OpenAI.ChatCompletionCreateParamsNonStreaming,
   maxAttempts = 3,
 ): Promise<OpenAI.ChatCompletion> {
+  const tried = new Set<string>([params.model]);
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await client.chat.completions.create(params);
+      const response = await client.chat.completions.create(params);
+      const provider = fallbackProvider(params.model);
+      if (provider) workingModel.set(provider, params.model);
+      return response;
     } catch (err: any) {
       const status = err?.status || err?.statusCode;
       const msg = String(err?.message || '');
+      // Overloaded (503) or retired (404) model: another model of the same provider will do.
+      const unavailable = status === 503 || (status === 404 && /model/i.test(msg));
+      const provider = unavailable ? fallbackProvider(params.model) : null;
+      const next = provider ? MODEL_FALLBACKS[provider].find((m) => !tried.has(m)) : undefined;
+      if (next) {
+        console.warn(`[chat] ${params.model} is unavailable (${status}); using ${next} instead.`);
+        tried.add(next);
+        params = { ...params, model: next };
+        attempt--; // switching models is not a retry
+        continue;
+      }
       // 429: over the rate limit. 503: the provider is overloaded. Both pass if we wait.
       const busy = status === 429 || status === 503 || msg.includes('429');
       if (busy && attempt < maxAttempts) {
@@ -814,7 +852,8 @@ async function callChatCompletionWithRetry(
       if (status === 429 || msg.includes('429')) {
         throw new Error(`AI provider rate limit reached. ${providerSaid(msg)}`);
       }
-      throw new Error(providerSaid(msg) || 'The AI provider returned an error.');
+      const tail = tried.size > 1 ? ` (tried ${[...tried].join(', ')})` : status === 503 || status === 404 ? ' Set another model in Settings → AI Settings.' : '';
+      throw new Error((providerSaid(msg) || 'The AI provider returned an error.') + tail);
     }
   }
   throw new Error('Chat completion failed');

@@ -9,6 +9,7 @@ import { parse as parseYaml } from 'yaml';
 import { getDb } from '../../database/db.js';
 import { SqliteDataStore } from '../../database/sqlite-store.js';
 import { createServer } from '../server.js';
+import { forgetWorkingModels } from './routes.js';
 import { TokenManager } from '../auth/token-manager.js';
 import type { HubConfigParsed } from '../../config/schema.js';
 import { makeTmpDir } from '../../test-utils.js';
@@ -36,6 +37,7 @@ describe('AI provider handling', () => {
     store.createUser('owner@test.com', 'hash');
     store.createSession('sess', '2099-01-01T00:00:00.000Z');
     replies = []; seenModels = [];
+    forgetWorkingModels();
     provider = createHttpServer((req, res) => {
       let raw = '';
       req.on('data', (d) => (raw += d)).on('end', () => {
@@ -63,10 +65,10 @@ describe('AI provider handling', () => {
   });
 
   it('shows the provider\'s own words for an error it sends in Google\'s shape', async () => {
-    replies.push(googleError(404, 'This model models/gemini-2.0-flash is no longer available. Please update your code to use models/gemini-3.8-flash.'));
+    replies.push(googleError(400, 'API key not valid. Please pass a valid API key.'));
     const j = await (await chat()).json() as { ok: boolean; error: string };
     expect(j.ok).toBe(false);
-    expect(j.error).toContain('This model models/gemini-2.0-flash is no longer available');
+    expect(j.error).toContain('API key not valid. Please pass a valid API key.');
     expect(j.error).not.toContain('no body');
   });
 
@@ -85,12 +87,36 @@ describe('AI provider handling', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(600);
   });
 
-  it('retries when the provider is overloaded (503)', async () => {
-    replies.push(googleError(503, 'This model is currently experiencing high demand.'), ok('recovered'));
-    expect(await (await chat()).json()).toMatchObject({ ok: true, reply: 'recovered' });
+  it('moves to the next model when the default is overloaded, and stays on the one that answers', async () => {
+    replies.push(googleError(503, 'This model is currently experiencing high demand.'), ok('from the second model'));
+    const started = Date.now();
+    expect(await (await chat()).json()).toMatchObject({ ok: true, reply: 'from the second model' });
+    expect(seenModels).toEqual(['gemini-flash-latest', 'gemini-3-flash-preview']);
+    expect(Date.now() - started).toBeLessThan(1500); // switching is immediate, not a timed retry
+    // the next message goes straight to the model that worked
+    await chat();
+    expect(seenModels[2]).toBe('gemini-3-flash-preview');
+  });
+
+  it('also moves on when a model has been retired (404), and says what it tried when all fail', async () => {
+    replies.push(googleError(404, 'This model models/x is no longer available.'), ok('ok'));
+    expect(await (await chat()).json()).toMatchObject({ ok: true });
+    for (let i = 0; i < 8; i++) replies.push(googleError(503, 'This model is currently experiencing high demand.'));
+    const j = await (await chat()).json() as { ok: boolean; error: string };
+    expect(j.ok).toBe(false);
+    expect(j.error).toContain('high demand');
+    expect(j.error).toContain('tried ');
+    expect(j.error).toContain('gemini-flash-lite-latest');
+  }, 20_000);
+
+  it('a model the owner chose that is not on the list is retried, not replaced', async () => {
+    (config.ai as Record<string, unknown>).model = 'my-own-model';
+    replies.push(googleError(503, 'busy'), ok('same model again'));
+    expect(await (await chat()).json()).toMatchObject({ ok: true, reply: 'same model again' });
+    expect(seenModels).toEqual(['my-own-model', 'my-own-model']);
   }, 15_000);
 
-  it('uses a current default model for Google', async () => {
+  it('uses a current Google model by default, never the retired one', async () => {
     await chat();
     expect(seenModels[0]).toBe('gemini-flash-latest');
   });
