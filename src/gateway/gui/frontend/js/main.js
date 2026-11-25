@@ -37,6 +37,7 @@ var currentTab = 'ai';
       settingsProvider: 'anthropic',
       autoReply: { enabled: false, maxToolRounds: 3, loading: false, testResult: null, testLoading: false },
       settingsSection: 'ai',
+      aiModels: { byProvider: {}, loading: false, error: null, chosen: null },
       pageChats: { skills: { messages: [], loading: false, error: null, draft: '' }, pipes: { messages: [], loading: false, error: null, draft: '' } },
       pipes: { items: null, loading: false, selectedId: null, output: null, raw: false, copied: false, error: null },
       agents: { items: null, loading: false, sources: ['gmail', 'google_calendar', 'github', 'photo'], panel: null, ticked: [], error: null, joined: null },
@@ -138,6 +139,7 @@ var currentTab = 'ai';
         if (d.ok) {
           state.chat.aiAvailable = d.configured;
           if (d.provider) state.settingsProvider = d.provider;
+          state.chat.configuredProvider = d.provider || '';
           if (d.model) state.chat.configuredModel = d.model;
           if (currentTab === 'ai' || currentTab === 'settings') render();
         }
@@ -1056,17 +1058,66 @@ var currentTab = 'ai';
     }
     window.clearChat = clearChat;
 
+    // The model dropdown: "Automatic" first (the hub picks a current model and moves on if it
+    // is overloaded), then the models the provider itself lists for the key.
+    function renderAiModelOptions() {
+      var am = state.aiModels;
+      var provider = state.settingsProvider;
+      var list = am.byProvider[provider] || [];
+      var saved = (state.chat.configuredProvider === provider && state.chat.configuredModel) || '';
+      var chosen = am.chosen !== null ? am.chosen : saved;
+      var opts = '<option value=""' + (chosen === '' ? ' selected' : '') + '>Automatic (recommended)</option>';
+      var all = list.slice();
+      if (chosen && all.indexOf(chosen) < 0) all.unshift(chosen);
+      all.forEach(function(m) { opts += '<option value="' + escapeAttr(m) + '"' + (m === chosen ? ' selected' : '') + '>' + escapeHtml(m) + '</option>'; });
+      return opts;
+    }
+
+    function aiModelHint() {
+      var am = state.aiModels;
+      var provider = state.settingsProvider;
+      if (am.loading) return 'Loading models…';
+      if (am.error) return 'Could not load the model list: ' + am.error + ' Automatic still works.';
+      if ((am.byProvider[provider] || []).length) return 'Automatic picks a current model and switches if it is overloaded.';
+      return 'Enter the API key to see this provider\'s models. Automatic works without choosing.';
+    }
+
+    function refreshAiModelSelect() {
+      var sel = document.getElementById('ai-model');
+      if (sel) sel.innerHTML = renderAiModelOptions();
+      var hint = document.getElementById('ai-model-hint');
+      if (hint) hint.textContent = aiModelHint();
+    }
+
+    // Asks the hub for the provider's models: with the key just typed, or the saved key.
+    function loadAiModels(typedKey) {
+      var provider = state.settingsProvider;
+      var am = state.aiModels;
+      am.loading = true; am.error = null;
+      refreshAiModelSelect();
+      fetch('/web/settings/ai-models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: provider, api_key: (typedKey || '').trim() || undefined })
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        am.loading = false;
+        if (d.ok) am.byProvider[provider] = d.models || [];
+        else am.error = d.error || 'unknown error';
+        if (state.settingsProvider === provider) refreshAiModelSelect();
+      }).catch(function() { am.loading = false; am.error = 'network error'; refreshAiModelSelect(); });
+    }
+    window.loadAiModels = loadAiModels;
+
     function selectProvider(val) {
       state.settingsProvider = val;
-      var customUrls = { anthropic: 'https://api.anthropic.com/v1', openai: '', groq: 'https://api.groq.com/openai/v1', google: 'https://generativelanguage.googleapis.com/v1beta/openai/', ollama: 'http://localhost:11434/v1' };
-      var defaultModels = { anthropic: 'claude-sonnet-4-6', openai: 'gpt-4o', groq: 'llama-3.3-70b-versatile', google: 'gemini-flash-latest', ollama: 'llama3' };
-      var urlEl = document.getElementById('ai-base-url');
-      var modelEl = document.getElementById('ai-model');
-      if (urlEl) urlEl.placeholder = customUrls[val] || 'https://...';
-      if (modelEl && !modelEl.value) modelEl.placeholder = defaultModels[val] || 'model name';
-      // Re-render just the provider pills without clobbering focused inputs
+      state.aiModels.chosen = null;
+      state.aiModels.error = null;
+      // Re-render just the provider pills and the model list without clobbering the key being typed
       var pillsEl = document.getElementById('provider-pills');
       if (pillsEl) pillsEl.innerHTML = renderProviderPills();
+      refreshAiModelSelect();
+      var keyEl = document.getElementById('ai-api-key');
+      if (!state.aiModels.byProvider[val]) loadAiModels(keyEl ? keyEl.value : '');
     }
     window.selectProvider = selectProvider;
 
@@ -1077,15 +1128,20 @@ var currentTab = 'ai';
       var key = document.getElementById('ai-api-key').value.trim();
       var model = document.getElementById('ai-model').value.trim();
       var provider = state.settingsProvider;
-      var baseUrl = document.getElementById('ai-base-url').value.trim();
-      if (!key) { alert('API key is required'); return; }
+      // The saved key is kept when only the model changes for the saved provider.
+      var keepsSavedKey = !key && state.chat.aiAvailable && state.chat.configuredProvider === provider;
+      if (!key && !keepsSavedKey) { alert('API key is required'); return; }
       fetch('/web/settings/ai-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: key, model: model || undefined, provider: provider || 'anthropic', base_url: baseUrl || undefined }),
+        body: JSON.stringify({ api_key: key || undefined, model: model || undefined, provider: provider || 'anthropic' }),
       }).then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
           state.chat.aiAvailable = true;
+          state.chat.configuredModel = model;
+          state.chat.configuredProvider = provider;
+          state.aiModels.chosen = null;
+          if (!(state.aiModels.byProvider[provider] || []).length) loadAiModels(key);
           var flash = document.getElementById('ai-flash');
           if (flash) { flash.style.opacity = '1'; setTimeout(function() { flash.style.opacity = '0'; }, 2000); }
         } else {
@@ -1166,7 +1222,9 @@ var currentTab = 'ai';
     function onboardingSaveAiKey() {
       var key = document.getElementById('ob-ai-api-key').value.trim();
       var provider = state.settingsProvider;
-      if (!key) { alert('API key is required'); return; }
+      // The saved key is kept when only the model changes for the saved provider.
+      var keepsSavedKey = !key && state.chat.aiAvailable && state.chat.configuredProvider === provider;
+      if (!key && !keepsSavedKey) { alert('API key is required'); return; }
       fetch('/web/settings/ai-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

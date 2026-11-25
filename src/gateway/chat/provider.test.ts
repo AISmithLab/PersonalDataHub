@@ -24,6 +24,8 @@ describe('AI provider handling', () => {
   let provider: Server;
   let replies: Array<{ status: number; body: unknown }>;
   let seenModels: string[];
+  let modelCalls: Array<{ auth: string; xkey: string }>;
+  let modelList: { status: number; body: unknown };
   const owner = { Cookie: 'pdh_session=sess', 'Content-Type': 'application/json' };
   const ok = (content: string) => ({ status: 200, body: { id: 'x', object: 'chat.completion', created: 0, model: 'm', choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }] } });
   // Google's OpenAI-compatible endpoint wraps its error in an array.
@@ -36,9 +38,16 @@ describe('AI provider handling', () => {
     const store = new SqliteDataStore(db);
     store.createUser('owner@test.com', 'hash');
     store.createSession('sess', '2099-01-01T00:00:00.000Z');
-    replies = []; seenModels = [];
+    replies = []; seenModels = []; modelCalls = [];
+    modelList = { status: 200, body: { object: 'list', data: ['models/gemini-2.5-flash', 'models/gemini-3.6-flash', 'models/gemini-flash-latest', 'models/gemini-embedding-2', 'models/gemini-2.5-flash-preview-tts', 'models/gemma-4-31b-it', 'models/gemini-3.5-flash-image', 'models/gemini-10-flash', 'models/gemini-3-flash-preview'].map((id) => ({ id })) } };
     forgetWorkingModels();
     provider = createHttpServer((req, res) => {
+      if (req.method === 'GET' && String(req.url).includes('/models')) {
+        modelCalls.push({ auth: String(req.headers.authorization ?? ''), xkey: String(req.headers['x-api-key'] ?? '') });
+        res.writeHead(modelList.status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(modelList.body));
+        return;
+      }
       let raw = '';
       req.on('data', (d) => (raw += d)).on('end', () => {
         seenModels.push(JSON.parse(raw).model);
@@ -124,8 +133,8 @@ describe('AI provider handling', () => {
   it('saving a new provider drops the previous provider\'s model and base URL', async () => {
     const save = (body: Record<string, unknown>) => app.request('/web/settings/ai-key', { method: 'POST', headers: owner, body: JSON.stringify(body) });
     await save({ provider: 'anthropic', api_key: 'a-key', model: 'claude-sonnet-4-6', base_url: 'https://example.test/v1' });
-    await save({ provider: 'google', api_key: 'g-key' });
-    expect(config.ai).toEqual({ provider: 'google', api_key: 'g-key' });
+    await save({ provider: 'groq', api_key: 'g-key' });
+    expect(config.ai).toEqual({ provider: 'groq', api_key: 'g-key' });
   });
 
   it('writes the setting to the config file the hub was started with, so it survives a restart', async () => {
@@ -134,5 +143,64 @@ describe('AI provider handling', () => {
     process.env.PDH_CONFIG_PATH = path;
     await app.request('/web/settings/ai-key', { method: 'POST', headers: owner, body: JSON.stringify({ provider: 'google', api_key: 'g-key', model: 'gemini-flash-latest' }) });
     expect((parseYaml(readFileSync(path, 'utf-8')) as { ai: unknown; port: number })).toMatchObject({ port: 3000, ai: { provider: 'google', api_key: 'g-key', model: 'gemini-flash-latest' } });
+  });
+
+  describe('the model dropdown', () => {
+    // listProviderModels asks the provider's real address, so point Google's at the stand-in.
+    const models = async (body: Record<string, unknown>) => {
+      return app.request('/web/settings/ai-models', { method: 'POST', headers: owner, body: JSON.stringify(body) });
+    };
+
+    it('lists the provider\'s chat models: recommended first, newest next, nothing that is not for chat', async () => {
+      const { listProviderModels } = await import('./routes.js');
+      const base = (config.ai as { base_url: string }).base_url;
+      const list = await listProviderModels('google', 'the-key', base);
+      expect(list).toEqual(['gemini-flash-latest', 'gemini-3-flash-preview', 'gemini-3.6-flash', 'gemini-10-flash', 'gemini-2.5-flash']);
+      expect(modelCalls[0]).toEqual({ auth: 'Bearer the-key', xkey: '' });
+      await listProviderModels('anthropic', 'a-key', base);
+      expect(modelCalls[1]).toEqual({ auth: '', xkey: 'a-key' });
+    });
+
+    it('passes on the provider\'s reason when the key is refused', async () => {
+      const { listProviderModels } = await import('./routes.js');
+      modelList = { status: 400, body: [{ error: { code: 400, message: 'API key not valid. Please pass a valid API key.' } }] };
+      await expect(listProviderModels('google', 'bad', (config.ai as { base_url: string }).base_url)).rejects.toThrow('API key not valid');
+    });
+
+    it('needs the owner', async () => {
+      const res = await app.request('/web/settings/ai-models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      expect(res.status).toBe(401);
+    });
+
+    it('asks for a key when none is typed and the saved key belongs to another provider', async () => {
+      const j = await (await models({ provider: 'openai' })).json();
+      expect(j).toEqual({ ok: true, models: [], needsKey: true });
+    });
+
+    it('rejects an unknown provider', async () => {
+      expect((await models({ provider: 'nonsense' })).status).toBe(400);
+    });
+  });
+
+  it('changing only the model keeps the saved key; a new provider still needs its own key', async () => {
+    const save = (body: Record<string, unknown>) => app.request('/web/settings/ai-key', { method: 'POST', headers: owner, body: JSON.stringify(body) });
+    expect((await save({ provider: 'google', model: 'gemini-3.6-flash' })).status).toBe(200);
+    expect(config.ai).toMatchObject({ provider: 'google', api_key: 'k', model: 'gemini-3.6-flash' });
+    // back to Automatic
+    await save({ provider: 'google' });
+    expect((config.ai as Record<string, unknown>).model).toBeUndefined();
+    expect(config.ai!.api_key).toBe('k');
+    const other = await save({ provider: 'openai' });
+    expect(other.status).toBe(400);
+    expect(config.ai!.provider).toBe('google');
+  });
+
+  it('the settings form no longer sets a base URL, and one in the config file is kept for the same provider', async () => {
+    const save = (body: Record<string, unknown>) => app.request('/web/settings/ai-key', { method: 'POST', headers: owner, body: JSON.stringify(body) });
+    const before = (config.ai as { base_url: string }).base_url;
+    await save({ provider: 'google', api_key: 'new-key', model: 'gemini-3.6-flash' });
+    expect(config.ai).toEqual({ provider: 'google', api_key: 'new-key', model: 'gemini-3.6-flash', base_url: before });
+    await save({ provider: 'openai', api_key: 'o-key' });
+    expect(config.ai).toEqual({ provider: 'openai', api_key: 'o-key' });
   });
 });

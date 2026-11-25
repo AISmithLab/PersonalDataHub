@@ -552,7 +552,7 @@ export function useAppState() {
   }, []);
 
   const saveAiSettings = useCallback(
-    async (input: { api_key: string; provider?: string; model?: string; base_url?: string }) => {
+    async (input: { api_key: string; provider?: string; model?: string }) => {
       const d = await api.saveAiSettings(input);
       if (d.ok) {
         if (input.provider) setAiProvider(input.provider);

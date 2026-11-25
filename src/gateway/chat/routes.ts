@@ -20,7 +20,7 @@ type ToolOutput = { name: string; input: Record<string, unknown>; output: string
 const MEMORY_LIMIT = 50;
 
 const DEFAULT_MODELS: Record<string, string> = {
-  anthropic: 'claude-sonnet-4-6',
+  anthropic: 'claude-sonnet-5-5',
   openai: 'gpt-4o',
   groq: 'llama-3.3-70b-versatile',
   // An alias Google keeps pointed at its current Flash model; fixed model names get retired.
@@ -76,6 +76,7 @@ const readableErrors: typeof fetch = async (input, init) => {
  * others answer normally, and a fixed default would leave the hub unusable.
  */
 const MODEL_FALLBACKS: Record<string, string[]> = {
+  anthropic: ['claude-sonnet-5-5', 'claude-sonnet-4-6'],
   google: ['gemini-flash-latest', 'gemini-3-flash-preview', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-lite-latest'],
 };
 
@@ -95,7 +96,38 @@ export function getModel(deps: ServerDeps): string {
 
 function fallbackProvider(model: string): string | null {
   for (const [provider, models] of Object.entries(MODEL_FALLBACKS)) if (models.includes(model)) return provider;
+  // A model picked from the provider's own list can still be closed to this account
+  // ("no longer available to new users"); it gets the same fallbacks.
+  if (/^gemini-/.test(model)) return 'google';
+  if (/^claude-/.test(model)) return 'anthropic';
   return null;
+}
+
+/** Models that are not for chat: speech, images, embeddings and the like. */
+const NOT_CHAT = /(embed|tts|audio|image|imagen|veo|whisper|transcribe|realtime|live|robotics|computer-use|moderation|guard|dall-e|sora|nano-banana|omni|aqa|learnlm)/i;
+
+/**
+ * The chat models a provider offers to this key, for the model dropdown in
+ * Settings. Asked from the provider itself, because a list kept in the hub goes
+ * stale: providers retire models every few months. The hub's recommended models
+ * come first.
+ */
+export async function listProviderModels(provider: string, apiKey: string, baseUrl?: string): Promise<string[]> {
+  const base = (baseUrl ?? DEFAULT_BASE_URLS[provider] ?? 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const headers: Record<string, string> = provider === 'anthropic'
+    ? { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
+    : { Authorization: `Bearer ${apiKey}` };
+  const res = await readableErrors(`${base}/models${provider === 'anthropic' ? '?limit=100' : ''}`, { headers, signal: AbortSignal.timeout(15_000) });
+  const body = await res.json().catch(() => null) as { data?: Array<{ id?: unknown }>; error?: { message?: string } } | null;
+  if (!res.ok) throw new Error(body?.error?.message || `The provider answered ${res.status}.`);
+  const ids = (body?.data ?? [])
+    .map((m) => String(m.id ?? '').replace(/^models\//, ''))
+    .filter((id) => id && !NOT_CHAT.test(id))
+    .filter((id) => provider !== 'google' || id.startsWith('gemini-'))
+    .filter((id) => provider !== 'openai' || /^(gpt-|o\d|chatgpt-)/.test(id));
+  const recommended = (MODEL_FALLBACKS[provider] ?? [DEFAULT_MODELS[provider]].filter(Boolean)).filter((m) => ids.includes(m));
+  const rest = [...new Set(ids)].filter((id) => !recommended.includes(id)).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  return [...recommended, ...rest].slice(0, 60);
 }
 
 // The `ask(question, text)` helper that pipe programs call: one yes/no question to the
@@ -1311,14 +1343,37 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     });
   });
 
+  // The models to offer in the Settings dropdown. Uses the key being typed, or the
+  // saved key when the provider is the saved one.
+  app.post('/settings/ai-models', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { provider?: unknown; api_key?: unknown };
+    const saved = deps.config.ai;
+    const provider = typeof body.provider === 'string' && body.provider ? body.provider : saved?.provider ?? '';
+    if (!(provider in DEFAULT_MODELS)) return c.json({ ok: false, error: 'Unknown provider' }, 400);
+    const typed = typeof body.api_key === 'string' ? body.api_key.trim() : '';
+    const key = typed || (saved?.provider === provider ? saved.api_key : '');
+    if (!key && provider !== 'ollama') return c.json({ ok: true, models: [], needsKey: true });
+    try {
+      return c.json({ ok: true, models: await listProviderModels(provider, key || 'ollama') });
+    } catch (err) {
+      return c.json({ ok: false, error: providerSaid(err instanceof Error ? err.message : String(err)) || 'Could not list models.' });
+    }
+  });
+
   app.post('/settings/ai-key', async (c) => {
     const body = await c.req.json();
-    const { api_key, model, provider, base_url } = body;
-    if (!api_key || typeof api_key !== 'string' || !api_key.trim()) {
+    const { api_key, model, provider } = body;
+    // No base URL in the form any more: each provider's address is known. An address set by
+    // hand in the config file is kept as long as the provider stays the same.
+    const base_url = body.base_url ?? (deps.config.ai?.provider === provider ? (deps.config.ai as Record<string, unknown> | undefined)?.base_url : undefined);
+    const prov = (provider && typeof provider === 'string' && provider.trim()) ? provider.trim() : 'anthropic';
+    // Changing only the model does not need the key typed again: the saved key is kept
+    // when the provider is the saved one.
+    const typedKey = typeof api_key === 'string' ? api_key.trim() : '';
+    const key = typedKey || (deps.config.ai?.provider === prov ? deps.config.ai.api_key : '');
+    if (!key) {
       return c.json({ ok: false, error: 'api_key is required' }, 400);
     }
-    const prov = (provider && typeof provider === 'string' && provider.trim()) ? provider.trim() : 'anthropic';
-    const key = api_key.trim();
 
     // Replace the whole setting. Keeping an earlier provider's model or base URL when
     // only the provider and key change would send, say, a Claude model name to Google.

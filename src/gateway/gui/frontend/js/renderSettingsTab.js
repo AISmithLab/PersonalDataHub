@@ -43,10 +43,13 @@ function renderSettingsTab() {
       html += '<div class="flex-grow p-margin overflow-y-auto max-w-4xl w-full mx-auto">';
 
       if (activeSection === 'ai') {
+        // With a saved key, fetch that provider's models once so the dropdown is ready.
+        var _am = state.aiModels;
+        if (aiConfigured && state.settingsProvider === state.chat.configuredProvider && !_am.byProvider[state.settingsProvider] && !_am.loading && !_am.error) loadAiModels('');
         html += '<div class="space-y-lg">';
         html += '  <div class="border-b border-outline-variant pb-xs">';
         html += '    <h2 class="font-headline-lg text-headline-lg text-on-surface">AI Assistant</h2>';
-        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Connect any OpenAI-compatible AI provider.</p>';
+        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Choose a provider, paste its API key, and pick a model.</p>';
         html += '  </div>';
 
         html += '  <div class="space-y-md max-w-md">';
@@ -58,18 +61,13 @@ function renderSettingsTab() {
         var aiPlaceholder = aiConfigured ? '•••••••••••• (Configured)' : 'sk-ant-...';
         html += '    <div class="space-y-xs">';
         html += '      <label class="font-label-caps text-label-caps text-on-surface-variant">API Key</label>';
-        html += '      <input type="password" id="ai-api-key" placeholder="' + aiPlaceholder + '" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
-        html += '    </div>';
-
-        var currentModel = state.chat.configuredModel || '';
-        html += '    <div class="space-y-xs">';
-        html += '      <label class="font-label-caps text-label-caps text-on-surface-variant">Model <span class="font-normal font-body-sm text-on-surface-variant/75">(optional — uses provider default if blank)</span></label>';
-        html += '      <input type="text" id="ai-model" value="' + escapeAttr(currentModel) + '" placeholder="claude-sonnet-4-6" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
+        html += '      <input type="password" id="ai-api-key" onchange="loadAiModels(this.value)" placeholder="' + aiPlaceholder + '" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
         html += '    </div>';
 
         html += '    <div class="space-y-xs">';
-        html += '      <label class="font-label-caps text-label-caps text-on-surface-variant">Base URL <span class="font-normal font-body-sm text-on-surface-variant/75">(optional — uses provider default if blank)</span></label>';
-        html += '      <input type="text" id="ai-base-url" placeholder="https://api.anthropic.com/v1" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
+        html += '      <label for="ai-model" class="font-label-caps text-label-caps text-on-surface-variant">Model</label>';
+        html += '      <select id="ai-model" onchange="state.aiModels.chosen=this.value" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">' + renderAiModelOptions() + '</select>';
+        html += '      <p id="ai-model-hint" class="font-body-sm text-body-sm text-on-surface-variant/80">' + escapeHtml(aiModelHint()) + '</p>';
         html += '    </div>';
 
         html += '    <div class="flex items-center gap-md pt-sm">';

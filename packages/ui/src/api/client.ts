@@ -288,10 +288,18 @@ export function getChatStatus() {
   return json<{ ok: boolean; configured: boolean; provider: string | null; model: string | null }>('/web/chat/status');
 }
 
-export function saveAiSettings(input: { api_key: string; provider?: string; model?: string; base_url?: string }) {
+export function saveAiSettings(input: { api_key: string; provider?: string; model?: string }) {
   return json<{ ok: boolean; error?: string }>('/web/settings/ai-key', {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+/** The provider's chat models for the dropdown: with the key being typed, or the saved key. */
+export function getAiModels(provider: string, apiKey?: string) {
+  return json<{ ok: boolean; models?: string[]; error?: string }>('/web/settings/ai-models', {
+    method: 'POST',
+    body: JSON.stringify({ provider, api_key: apiKey || undefined }),
   });
 }
 
