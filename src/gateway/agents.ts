@@ -183,6 +183,6 @@ function joinPage(body: string): string {
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;margin:0;padding:24px;background:#f7f7ff;color:#161d1b}
 .card{max-width:640px;margin:8vh auto;background:#fff;border:1px solid #bccac4;border-radius:10px;padding:24px}
 h1{font-size:20px;margin:0 0 12px}p{font-size:14px;line-height:1.5}
-pre{background:#eef3f1;padding:12px;border-radius:8px;overflow-x:auto;font-size:13px}code{font-size:13px}
+pre{background:#eef3f1;padding:12px;border-radius:8px;font-size:13px;white-space:pre-wrap;word-break:break-all}code{font-size:13px}
 .err{color:#ba1a1a}</style></head><body><div class="card">${body}</div></body></html>`;
 }

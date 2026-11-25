@@ -217,29 +217,39 @@ export function syncContacts(contacts: ContactInfo[]) {
   });
 }
 
-// --- Agent keys ---
+// --- Agents ---
+// Agents register with a one-time join link the owner makes here. The owner never
+// sees a token: the hub hands it to the agent when the agent redeems the link.
 
-export interface AgentKey {
+export interface Agent {
   id: string;
   name: string;
+  /** e.g. ["pull:gmail", "propose:gmail"] */
+  permissions: string[];
   created_at: string;
   last_used_at: string | null;
 }
 
-export function getAgentKeys() {
-  return json<{ ok: boolean; keys: AgentKey[] }>('/web/agent-keys');
+export function getAgents() {
+  return json<{ ok: boolean; agents: Agent[]; sources: string[] }>('/web/agents');
 }
 
-/** The returned `key` is shown once; the hub keeps only its hash. */
-export function createAgentKey(name: string) {
-  return json<{ ok: boolean; id?: string; name?: string; key?: string; error?: string }>('/web/agent-keys', {
+export function createAgentJoinLink(permissions: string[]) {
+  return json<{ ok: boolean; url?: string; expires_at?: string; error?: string }>('/web/agents/join-links', {
     method: 'POST',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ permissions }),
   });
 }
 
-export function deleteAgentKey(id: string) {
-  return json<{ ok: boolean }>(`/web/agent-keys/${id}`, { method: 'DELETE' });
+export function setAgentPermissions(id: string, permissions: string[]) {
+  return json<{ ok: boolean; error?: string }>(`/web/agents/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ permissions }),
+  });
+}
+
+export function revokeAgent(id: string) {
+  return json<{ ok: boolean; error?: string }>(`/web/agents/${id}`, { method: 'DELETE' });
 }
 
 // --- Memories ---

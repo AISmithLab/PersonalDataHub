@@ -18,12 +18,12 @@ import { AutoReplyForm } from './components/AutoReplyForm';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { TabIcon } from './components/TabIcon';
 import { LoginScreen } from './components/LoginScreen';
-import { AgentKeysForm } from './components/AgentKeysForm';
+import { AgentsForm } from './components/AgentsForm';
 import type { TabIconName } from './components/TabIcon';
 
 type BottomTab = 'ai' | 'skill' | 'memory' | 'settings';
 type ManageSource = 'gmail' | 'google_calendar' | 'github' | 'sms' | 'photo';
-type SettingsSection = 'ai' | 'autoreply' | 'agentkeys' | 'activity' | 'support';
+type SettingsSection = 'ai' | 'autoreply' | 'agents' | 'activity' | 'support';
 type SettingsView = 'root' | 'integrations' | { manage: ManageSource } | { section: SettingsSection };
 
 const PRIMARY_COLOR = '#006b5a';
@@ -47,7 +47,7 @@ const INTEGRATIONS: { name: ManageSource; label: string; subtitle: string; isNat
 const SETTINGS_SECTIONS: { key: SettingsSection; label: string }[] = [
   { key: 'ai', label: 'AI Settings' },
   { key: 'autoreply', label: 'SMS Auto-Reply' },
-  { key: 'agentkeys', label: 'Agent Keys' },
+  { key: 'agents', label: 'Agents' },
   { key: 'activity', label: 'Activity Log' },
   { key: 'support', label: 'Support' },
 ];
@@ -196,7 +196,8 @@ function SettingsTab({
     <View>
       <Text className="text-headline-md text-on-surface font-bold mb-4">Settings</Text>
       <View className="gap-2.5">
-        {SETTINGS_SECTIONS.map((s) => (
+        {/* No agent runtime can reach the hub inside the phone app, and registration is switched off there. */}
+        {SETTINGS_SECTIONS.filter((s) => s.key !== 'agents' || Platform.OS === 'web').map((s) => (
           <Pressable
             key={s.key}
             onPress={() => setView({ section: s.key })}
@@ -241,7 +242,7 @@ function SettingsSectionScreen({
       <BackHeader title={label} onBack={onBack} />
       {section === 'ai' && <AiSettingsForm state={state} />}
       {section === 'autoreply' && <AutoReplyForm state={state} />}
-      {section === 'agentkeys' && <AgentKeysForm />}
+      {section === 'agents' && <AgentsForm state={state} />}
       {section === 'activity' && <ActivityLog state={state} />}
       {section === 'support' && <SupportSection state={state} />}
     </View>
