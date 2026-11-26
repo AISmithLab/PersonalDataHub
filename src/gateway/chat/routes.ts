@@ -10,6 +10,7 @@ import { parseTriggerEvents, serializeTriggerEvents } from '../../database/datas
 import { runCode } from '../code-runner/runner.js';
 import { setContacts, labelWithContact } from './contacts-cache.js';
 import { complete, createLlmClient, describeError, readableErrors, type LlmClient, type LlmMessage, type LlmParams, type LlmResponse, type LlmTool } from './llm.js';
+import { OUTGOING_SOURCES, ACTION_TYPES } from '../pipes-outgoing.js';
 import { makeAsk, savePipe, deletePipe, describePipe, PIPE_SOURCES, type AskFn, type PipeDeps } from '../pipes.js';
 
 type SmsMessage = { address: string; body: string; date: number };
@@ -148,11 +149,28 @@ const PIPE_CONTRACT = [
   'Example program:',
   '  const keep = await Promise.all(rows.map((r) => ask("Does this email ask the recipient to write a recommendation letter?", r.data.title + "\\n" + (r.data.snippet || r.data.body || ""))));',
   '  return rows.filter((_, i) => keep[i]);',
+  '',
+  'OUTGOING pipes are the other direction: an agent sends an action, the program decides, and what passes is carried out at once with the owner\'s account (no approval step). Create one with save_pipe and direction "outgoing".',
+  `- Sources: ${OUTGOING_SOURCES.join(', ')}. Action types: ${OUTGOING_SOURCES.map((src) => `${src}: ${ACTION_TYPES[src].join(', ')}`).join('; ')}.`,
+  '- The program is the BODY of an async function with `action` in scope: { type, data } exactly as the agent sent it. Gmail data has to (a string, possibly several addresses separated by commas), subject, body, and for reply_email in_reply_to. Calendar data has title, body, location, start, end, timeZone, attendees ([{ email }], which sends invitations), and eventId for update/delete.',
+  '- It must `return pass()` or `return block(reason)`. The reason is shown to the agent. Anything else, a throw, or a timeout blocks the action. There is no ask(): the decision must be a fixed rule. Nothing else exists: no require, fetch, process or timers.',
+  '- Compare addresses case-insensitively and split `to` on commas and semicolons.',
+  '- Pass `examples`: actions that should pass and actions that should block, taken from the owner\'s words, as [{ type, data, expect: "pass" | "block" }]. save_pipe runs the program on them (and on the last real agent actions) without carrying anything out, and saves unless the program fails on one.',
+  '- Saving always switches an outgoing pipe off. Only the owner switches it on, in the Pipes panel, after checking the test results. Say so after saving.',
+  '- Write "description" as exactly what agents may do through it (which actions, to whom).',
+  'Example outgoing program:',
+  '  const students = ["alice@ucsd.edu", "bob@ucsd.edu"];',
+  '  if (action.type !== "send_email" && action.type !== "draft_email") return block("Only emails and drafts.");',
+  '  const to = String(action.data.to).toLowerCase().split(/[,;]/).map((r) => r.trim());',
+  '  const outside = to.filter((r) => !students.includes(r));',
+  '  if (outside.length) return block("Not a lab student: " + outside.join(", "));',
+  '  return pass();',
+  '',
   'save_pipe test-runs the program on up to 10 items first and saves it only if the run succeeds. If it answers ok:false, nothing was saved (an existing pipe is unchanged): fix the program and call save_pipe again. On success read the `test` field. To change an existing pipe pass its id; only the fields you pass are changed, and its source cannot be changed. Tell the user what the pipe keeps and how many of the tested items matched. Agents need the owner to tick the pipe for them in Settings → Agents before they can call it.',
 ].join('\n');
 
 /** Which page the chat is embedded in, and what the user has selected there. */
-export type ChatPage = { page?: 'skills' | 'pipes'; focusId?: string };
+export type ChatPage = { page?: 'skills' | 'pipes'; focusId?: string; newKind?: 'incoming' | 'outgoing' };
 
 async function pageContext(deps: ServerDeps, where: ChatPage): Promise<string[]> {
   if (where.page === 'pipes') {
@@ -161,7 +179,11 @@ async function pageContext(deps: ServerDeps, where: ChatPage): Promise<string[]>
     if (pipe) {
       lines.push('The pipe the user has selected is below. A request like "also drop newsletters" or "make it stricter" means: change THIS pipe (save_pipe with this id), not create a new one.', JSON.stringify(describePipe(pipe, '')));
     } else {
-      lines.push('No pipe is selected. A request that describes a new filter means: create a pipe.');
+      lines.push(where.newKind === 'outgoing'
+        ? 'No pipe is selected and the user chose "New pipe: outgoing". Create an OUTGOING pipe (save_pipe with direction "outgoing"): a gate on what agents may do with the owner\'s account.'
+        : where.newKind === 'incoming'
+          ? 'No pipe is selected and the user chose "New pipe: incoming". Create an INCOMING pipe: a filter on what agents may read.'
+          : 'No pipe is selected. A request that describes a new filter means: create an incoming pipe; a request about what agents may send or do means: create an outgoing pipe.');
     }
     return lines;
   }
@@ -434,8 +456,22 @@ async function buildTools(deps: ServerDeps): Promise<LlmTool[]> {
           description: { type: 'string', description: 'One sentence saying what the pipe returns. Agents read this to decide whether to call it.' },
           source: { type: 'string', enum: [...PIPE_SOURCES], description: 'The one source the pipe reads' },
           query: { type: 'string', description: 'Optional search string for the source that sets which items are looked at. Empty for the newest items.' },
-          program: { type: 'string', description: 'Body of an async JavaScript function with `rows` and `ask` in scope; must return an array.' },
-          enabled: { type: 'boolean', description: 'Whether agents can call it (default true)' },
+          program: { type: 'string', description: 'Incoming: body of an async function with `rows` and `ask` in scope; returns an array. Outgoing: body of an async function with `action` in scope; returns pass() or block(reason).' },
+          enabled: { type: 'boolean', description: 'Incoming only: whether agents can call it (default true). Outgoing pipes are always saved off; only the owner switches them on.' },
+          direction: { type: 'string', enum: ['incoming', 'outgoing'], description: 'incoming (default): what agents may read. outgoing: what agents may do. Cannot change after creation.' },
+          examples: {
+            type: 'array',
+            description: 'Outgoing only: example actions to test the program on, some that should pass and some that should block.',
+            items: {
+              type: 'object',
+              properties: {
+                type: { type: 'string' },
+                data: { type: 'object' },
+                expect: { type: 'string', enum: ['pass', 'block'] },
+              },
+              required: ['type', 'data'],
+            },
+          },
         },
       },
     },
@@ -1494,6 +1530,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     const where: ChatPage = {
       page: body.page === 'skills' || body.page === 'pipes' ? body.page : undefined,
       focusId: typeof body.focusId === 'string' ? body.focusId : undefined,
+      newKind: body.newKind === 'incoming' || body.newKind === 'outgoing' ? body.newKind : undefined,
     };
     try {
       const result = await runAgentLoop(deps, messages as ChatMessage[], sms ?? null, where);

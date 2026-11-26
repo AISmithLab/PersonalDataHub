@@ -25,7 +25,7 @@ import { AuditLog } from './audit/log.js';
 import { applyFilters, type QuickFilter } from './filters.js';
 import { allows, type AccessEnv } from './auth/access.js';
 import { logIncomingRun, logOutgoingCall } from './pipe-log.js';
-import { checkAction, runGateProgram } from './pipes-outgoing.js';
+import { checkAction, runGateProgram, isOutgoingSource, OUTGOING_SOURCES } from './pipes-outgoing.js';
 
 /** Sources a pipe can read. Photos, SMS and contacts are not pullable sources on the server. */
 export const PIPE_SOURCES = ['gmail', 'google_calendar', 'github'] as const;
@@ -310,6 +310,61 @@ export interface SavePipeInput {
   query?: unknown;
   program?: unknown;
   enabled?: unknown;
+  /** 'incoming' (default) or 'outgoing'. Fixed at creation. */
+  direction?: unknown;
+  /** Outgoing only: example actions, [{ type, data, expect: 'pass' | 'block' }]. */
+  examples?: unknown;
+}
+
+const MAX_TEST_ACTIONS = 20;
+const RECENT_AGENT_ACTIONS = 10;
+
+type TestAction = { type: string; data: Record<string, unknown>; expect?: 'pass' | 'block' };
+export type TestResult = { source: 'example' | 'agent'; type: string; target: string; expect?: 'pass' | 'block'; outcome: 'pass' | 'block' | 'error'; reason?: string };
+
+/** What an action is aimed at, in a few words, for the panel and the chat. */
+function targetOf(action: { type: string; data: Record<string, unknown> }): string {
+  const d = action.data;
+  const v = d.to ?? d.title ?? d.subject ?? d.eventId ?? '';
+  return String(Array.isArray(v) ? v.join(', ') : v).slice(0, 120);
+}
+
+/** The pipe's stored example actions plus the last few real agent actions, from the log. */
+async function testCases(store: DataStore, pipe: { id: string; source: string; test_actions: string }): Promise<Array<TestAction & { from: 'example' | 'agent' }>> {
+  const examples = parseTestActions(pipe.test_actions)
+    .map((t) => ({ t: t as TestAction, c: checkAction(pipe.source, t) }))
+    .filter((x) => x.c.ok)
+    .map((x) => ({ ...(x.c as { ok: true; action: { type: string; data: Record<string, unknown> } }).action, expect: x.t.expect, from: 'example' as const }));
+  const recent: Array<TestAction & { from: 'agent' }> = [];
+  if (pipe.id !== 'candidate') {
+    for (const e of await store.listPipeLog(pipe.id, { limit: 100 })) {
+      if (recent.length >= RECENT_AGENT_ACTIONS) break;
+      if (e.caller === 'owner') continue;
+      try {
+        const action = (JSON.parse(e.summary) as { action?: unknown }).action;
+        const c = checkAction(pipe.source, action);
+        if (c.ok) recent.push({ ...c.action, from: 'agent' });
+      } catch { /* unreadable entry */ }
+    }
+  }
+  return [...examples, ...recent];
+}
+
+/** Runs an outgoing program over test actions. Never carries anything out and never logs. */
+export async function testOutgoing(store: DataStore, pipe: { id: string; source: string; program: string; test_actions: string }): Promise<TestResult[]> {
+  const results: TestResult[] = [];
+  for (const t of await testCases(store, pipe)) {
+    const v = await runGateProgram(pipe.program, { type: t.type, data: t.data });
+    results.push({
+      source: t.from,
+      type: t.type,
+      target: targetOf(t),
+      ...(t.expect ? { expect: t.expect } : {}),
+      outcome: v.outcome,
+      ...(v.outcome === 'block' ? { reason: v.reason } : v.outcome === 'error' ? { reason: v.message } : {}),
+    });
+  }
+  return results;
 }
 
 /**
@@ -327,6 +382,11 @@ export async function savePipe(deps: PipeDeps, input: SavePipeInput): Promise<Re
   const source = String(input.source ?? existing?.source ?? '').trim();
   const query = String(input.query ?? existing?.query ?? '').trim();
   const program = String(input.program ?? existing?.program ?? '');
+  const direction = input.direction === undefined ? (existing?.direction ?? 'incoming') : String(input.direction);
+  if (direction !== 'incoming' && direction !== 'outgoing') return { ok: false, error: 'direction must be incoming or outgoing' };
+  // Agents are granted a pipe by id; a read grant must never turn into a write grant.
+  if (existing && direction !== existing.direction) return { ok: false, error: `A pipe's direction cannot be changed (this one is ${existing.direction}). Create a new ${direction} pipe.` };
+  if (direction === 'outgoing') return saveOutgoing(deps, input, existing, { name, description, source, program });
   // The model sometimes sends booleans as strings.
   const asBool = (v: unknown) => v === true || v === 'true' || v === 1;
   const enabled = input.enabled === undefined ? (existing ? existing.enabled : 1) : (asBool(input.enabled) ? 1 : 0);
@@ -371,6 +431,71 @@ export async function savePipe(deps: PipeDeps, input: SavePipeInput): Promise<Re
     // The source is not connected, so the program could not be tried. Saved all the same: it will run once the owner connects it.
     : { error: run.message };
   return { ok: true, id, path: `/agent/pipes/${id}`, saved: true, test };
+}
+
+/**
+ * Outgoing pipes. A save test-runs the program over the example actions and the last agent
+ * actions, never carrying any out; it is saved unless a run errors (a block is fine). Saving
+ * always switches the pipe off: what passes is sent with the owner's account at once, so only
+ * the owner switches it on, from the Pipes panel, after looking at the results.
+ */
+async function saveOutgoing(
+  deps: PipeDeps,
+  input: SavePipeInput,
+  existing: PipeRow | null,
+  f: { name: string; description: string; source: string; program: string },
+): Promise<Record<string, unknown>> {
+  if (!deps.store.supportsPipeLog) return { ok: false, error: 'Outgoing pipes need the pipe log, which this hub\'s storage does not keep.' };
+  if (!f.name) return { ok: false, error: 'name is required' };
+  if (f.name.length > 80) return { ok: false, error: 'name must be at most 80 characters' };
+  if (!isOutgoingSource(f.source)) return { ok: false, error: `An outgoing pipe's source must be one of: ${OUTGOING_SOURCES.join(', ')}` };
+  if (existing && f.source !== existing.source) return { ok: false, error: `A pipe's source cannot be changed (this one is ${existing.source}).` };
+  if (!f.program.trim()) return { ok: false, error: 'program is required' };
+  if (f.program.length > 20_000) return { ok: false, error: 'program is too long (20,000 characters at most)' };
+  try {
+    new vm.Script(`(async () => {\n${f.program}\n})`);
+  } catch (err) {
+    const thrown = err as { message?: unknown } | null;
+    return { ok: false, error: `The program has a syntax error: ${thrown && typeof thrown.message === 'string' ? thrown.message : String(err)}` };
+  }
+
+  const invalidExamples: string[] = [];
+  const fresh: TestAction[] = [];
+  for (const raw of Array.isArray(input.examples) ? input.examples : []) {
+    const c = checkAction(f.source, raw);
+    if (!c.ok) { invalidExamples.push(c.message); continue; }
+    const want = (raw as { expect?: unknown }).expect;
+    fresh.push({ ...c.action, ...(want === 'pass' || want === 'block' ? { expect: want } : {}) });
+  }
+  const kept = [...fresh, ...parseTestActions(existing?.test_actions ?? '[]') as TestAction[]].slice(0, MAX_TEST_ACTIONS);
+  const test_actions = JSON.stringify(kept);
+
+  const results = await testOutgoing(deps.store, { id: existing?.id ?? 'candidate', source: f.source, program: f.program, test_actions });
+  const errored = results.filter((r) => r.outcome === 'error');
+  if (errored.length) {
+    return { ok: false, saved: false, error: `Not saved: the program failed on a test action (${errored[0].type} ${errored[0].target}): ${errored[0].reason}`, test: results, ...(existing ? { note: 'The pipe is unchanged.' } : {}) };
+  }
+
+  const audit = new AuditLog(deps.store);
+  let id = existing?.id ?? null;
+  if (id) {
+    await deps.store.updatePipe(id, { name: f.name, description: f.description, program: f.program, test_actions, enabled: 0 });
+    await audit.insert('pipe_updated', f.source, { id, name: f.name, direction: 'outgoing' });
+  } else {
+    do { id = newPipeId(); } while (await deps.store.getPipe(id));
+    await deps.store.insertPipe({ id, name: f.name, description: f.description, source: f.source, query: '', program: f.program, enabled: 0, direction: 'outgoing', test_actions });
+    await audit.insert('pipe_created', f.source, { id, name: f.name, direction: 'outgoing' });
+  }
+  return {
+    ok: true,
+    id,
+    path: `/agent/pipes/${id}`,
+    saved: true,
+    enabled: false,
+    note: 'Saved and switched off. The owner switches it on in the Pipes panel after checking the test results.',
+    test: results,
+    ...(invalidExamples.length ? { invalidExamples } : {}),
+  };
 }
 
 /** Deletes a pipe and removes its permission from every agent, so no grant outlives it. */
@@ -582,6 +707,14 @@ export function createPipeOwnerRoutes(deps: PipeDeps): Hono<AccessEnv> {
       limit,
       maxLimit: MAX_LIMIT,
     });
+  });
+
+  // Re-runs an outgoing pipe over its test actions. Never carries anything out, never logs.
+  app.post('/:id/test', async (c) => {
+    const pipe = await deps.store.getPipe(c.req.param('id'));
+    if (!pipe) return c.json({ ok: false, error: 'No such pipe' }, 404);
+    if (pipe.direction !== 'outgoing') return c.json({ ok: false, error: 'Only outgoing pipes have test actions; incoming pipes use the preview.' }, 400);
+    return c.json({ ok: true, results: await testOutgoing(deps.store, pipe) });
   });
 
   app.get('/:id/log', async (c) => {

@@ -10,6 +10,7 @@ import { TokenManager } from './auth/token-manager.js';
 import type { ActionResult, ConnectorRegistry, SourceConnector } from './connectors/types.js';
 import type { HubConfigParsed } from '../config/schema.js';
 import { makeTmpDir } from '../test-utils.js';
+import { savePipe, type PipeDeps } from './pipes.js';
 
 const STUDENTS = `
 const students = ["alice@ucsd.edu", "bob@ucsd.edu"];
@@ -26,6 +27,7 @@ describe('outgoing pipes', () => {
   let app: Hono;
   let sent: Array<{ type: string; data: Record<string, unknown> }>;
   let connectorReply: () => Promise<ActionResult>;
+  let deps: PipeDeps;
   const owner = { Cookie: 'pdh_session=sess', 'Content-Type': 'application/json' };
 
   beforeEach(async () => {
@@ -46,6 +48,7 @@ describe('outgoing pipes', () => {
     await tokenManager.storeToken('gmail', { access_token: 'a', refresh_token: 'r' });
     const config = { deployment: { gateway: 'local', database: 'sqlite' }, sources: { gmail: { enabled: true, boundary: {} } }, port: 3000 } as unknown as HubConfigParsed;
     app = createServer({ store, connectorRegistry: registry, config, tokenManager });
+    deps = { store, connectorRegistry: registry, config, tokenManager, ask: async () => { throw new Error('no ask'); } };
     delete process.env.PDH_DEVICE_SECRET;
   });
 
@@ -167,5 +170,80 @@ describe('outgoing pipes', () => {
     const who = await agent('mailer', [`pipe:${id}`]);
     const j = await (await app.request('/agent/pipes', { headers: who })).json() as { pipes: Array<{ id: string; direction: string }> };
     expect(j.pipes).toEqual([expect.objectContaining({ id, direction: 'outgoing' })]);
+  });
+
+  describe('building', () => {
+    const examples = [
+      { type: 'send_email', data: { to: 'alice@ucsd.edu', subject: 'Hi', body: '.' }, expect: 'pass' },
+      { type: 'send_email', data: { to: 'dean@ucsd.edu', subject: 'Hi', body: '.' }, expect: 'block' },
+    ];
+    const save = (fields: Record<string, unknown>) => savePipe(deps, { name: 'Students only', description: 'Emails to my lab students.', source: 'gmail', program: STUDENTS, direction: 'outgoing', examples, ...fields });
+
+    it('a new outgoing pipe is saved off, with its examples, and the test results come back', async () => {
+      const r = await save({}) as { ok: boolean; id: string; test: Array<{ outcome: string; expect?: string; reason?: string }>; note: string };
+      expect(r.ok).toBe(true);
+      const pipe = store.getPipe(r.id)!;
+      expect(pipe).toMatchObject({ direction: 'outgoing', enabled: 0 });
+      expect(JSON.parse(pipe.test_actions)).toHaveLength(2);
+      expect(r.test.map((t) => [t.expect, t.outcome])).toEqual([['pass', 'pass'], ['block', 'block']]);
+      expect(r.note).toContain('switched off');
+      expect(sent).toEqual([]);
+    });
+
+    it('editing a live outgoing pipe saves it and switches it off; the owner switches it on', async () => {
+      const { id } = await save({}) as { id: string };
+      expect((await app.request(`/web/pipes/${id}`, { method: 'PUT', headers: owner, body: JSON.stringify({ enabled: true }) })).status).toBe(200);
+      expect(store.getPipe(id)!.enabled).toBe(1);
+      const r = await savePipe(deps, { id, description: 'Emails and drafts to my lab students.' });
+      expect(r.ok).toBe(true);
+      expect(store.getPipe(id)).toMatchObject({ enabled: 0, description: 'Emails and drafts to my lab students.' });
+    });
+
+    it('the chat cannot switch an outgoing pipe on', async () => {
+      const { id } = await save({ enabled: true }) as { id: string };
+      expect(store.getPipe(id)!.enabled).toBe(0);
+    });
+
+    it('a program that errors on a test action is not saved; a block is fine', async () => {
+      const bad = await save({ program: 'if (action.data.to === "dean@ucsd.edu") throw new Error("oops"); return pass();' });
+      expect(bad.ok).toBe(false);
+      expect(String(bad.error)).toContain('oops');
+      expect(store.listPipes()).toEqual([]);
+      expect((await save({ program: 'return block("never");' })).ok).toBe(true);
+    });
+
+    it('an invalid example is reported and not stored', async () => {
+      const r = await save({ examples: [...examples, { type: 'create_event', data: {}, expect: 'pass' }] }) as { id: string; invalidExamples: string[] };
+      expect(r.invalidExamples).toHaveLength(1);
+      expect(JSON.parse(store.getPipe(r.id)!.test_actions)).toHaveLength(2);
+    });
+
+    it('direction cannot change; outgoing needs gmail or google_calendar', async () => {
+      const { id } = await save({}) as { id: string };
+      expect((await savePipe(deps, { id, direction: 'incoming' })).ok).toBe(false);
+      expect((await save({ source: 'github' })).ok).toBe(false);
+    });
+
+    it('test runs include the last agent actions, and never send or log', async () => {
+      const { id } = await save({}) as { id: string };
+      store.updatePipe(id, { enabled: 1 });
+      const who = await agent('mailer', [`pipe:${id}`]);
+      await act(id, who, { action: email('bob@ucsd.edu'), purpose: 'x' });
+      const before = store.listPipeLog(id, { limit: 50 }).length;
+      sent = [];
+      const res = await app.request(`/web/pipes/${id}/test`, { method: 'POST', headers: owner });
+      const j = await res.json() as { ok: boolean; results: Array<{ source: string; outcome: string }> };
+      expect(j.ok).toBe(true);
+      expect(j.results.map((r) => [r.source, r.outcome])).toEqual([['example', 'pass'], ['example', 'block'], ['agent', 'pass']]);
+      expect(sent).toEqual([]);
+      expect(store.listPipeLog(id, { limit: 50 })).toHaveLength(before);
+    });
+
+    it('refused on a store without a log', async () => {
+      Object.defineProperty(store, 'supportsPipeLog', { value: false });
+      const r = await save({});
+      expect(r.ok).toBe(false);
+      expect(String(r.error)).toContain('log');
+    });
   });
 });

@@ -748,6 +748,26 @@ describe('pipe routes', () => {
       expect(systemOf(aiRequests[0])).toContain('The program is the BODY of an async JavaScript function');
     });
 
+    it('tells the AI about outgoing pipes: the contract, which kind to create, and the selected pipe\'s test actions', async () => {
+      const systemOf = (r: (typeof aiRequests)[number]) => String(r.messages[0].content);
+      const toolsOf = (r: (typeof aiRequests)[number]) => JSON.stringify(r.tools ?? []);
+      aiScript.push(() => ({ role: 'assistant', content: 'ok' }), () => ({ role: 'assistant', content: 'ok' }));
+
+      aiRequests.length = 0;
+      await chat({ messages: [{ role: 'user', content: 'agents may only email my students' }], page: 'pipes', newKind: 'outgoing' });
+      expect(systemOf(aiRequests[0])).toContain('pass()');
+      expect(systemOf(aiRequests[0])).toContain('block(reason)');
+      expect(systemOf(aiRequests[0])).toContain('Create an OUTGOING pipe');
+      expect(toolsOf(aiRequests[0])).toContain('"direction"');
+      expect(toolsOf(aiRequests[0])).toContain('"examples"');
+
+      store.insertPipe({ id: 'out23456', name: 'Students only', description: 'd', source: 'gmail', query: '', program: 'return pass();', enabled: 0, direction: 'outgoing', test_actions: JSON.stringify([{ type: 'send_email', data: { to: 'alice@ucsd.edu' }, expect: 'pass' }]) });
+      aiRequests.length = 0;
+      await chat({ messages: [{ role: 'user', content: 'also allow bob' }], page: 'pipes', focusId: 'out23456' });
+      expect(systemOf(aiRequests[0])).toContain('alice@ucsd.edu');
+      expect(systemOf(aiRequests[0])).toContain('outgoing');
+    });
+
     it('the AI edits the selected pipe in place, and can list and delete', async () => {
       const id = await makePipe();
       aiScript.push(() => call('save_pipe', { id, program: KEYWORD }), () => ({ role: 'assistant', content: 'Updated.' }));
