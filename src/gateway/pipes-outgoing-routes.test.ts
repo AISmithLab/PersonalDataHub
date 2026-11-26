@@ -118,6 +118,38 @@ describe('outgoing pipes', () => {
     expect(logOf(id).map((e) => e.outcome)).toEqual(['failed', 'failed']);
   });
 
+  it('a log failure after the send still reports sent, so the agent does not send it again', async () => {
+    const id = outgoingPipe();
+    const who = await agent('mailer', [`pipe:${id}`]);
+    const original = store.insertPipeLog.bind(store);
+    store.insertPipeLog = () => { throw new Error('disk full'); };
+    try {
+      const res = await act(id, who, { action: email('alice@ucsd.edu'), purpose: 'x' });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { outcome: string }).outcome).toBe('sent');
+      expect(sent).toHaveLength(1);
+    } finally {
+      store.insertPipeLog = original;
+    }
+  });
+
+  it('a caller holding its body open is judged by the pipe as it is when the body arrives', async () => {
+    const id = outgoingPipe();
+    const who = await agent('mailer', [`pipe:${id}`]);
+    let push!: (chunk: Uint8Array) => void;
+    let close!: () => void;
+    const body = new ReadableStream<Uint8Array>({ start(ctrl) { push = (c) => ctrl.enqueue(c); close = () => ctrl.close(); } });
+    const pending = app.fetch(new Request(`http://localhost/agent/pipes/${id}`, { method: 'POST', headers: who, body, duplex: 'half' } as RequestInit));
+    await new Promise((r) => setTimeout(r, 50));
+    // The owner switches the pipe off while the body is still on its way.
+    store.updatePipe(id, { enabled: 0 });
+    push(new TextEncoder().encode(JSON.stringify({ action: email('alice@ucsd.edu'), purpose: 'x' })));
+    close();
+    const res = await pending;
+    expect(res.status).toBe(409);
+    expect(sent).toEqual([]);
+  });
+
   it('a switched-off pipe sends nothing and is 409', async () => {
     const id = outgoingPipe('out23456', STUDENTS, 0);
     const who = await agent('mailer', [`pipe:${id}`]);

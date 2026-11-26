@@ -62,6 +62,19 @@ describe('runGateProgram', () => {
     }
   });
 
+  it('cannot reach the hub process through anything in its scope', async () => {
+    const probes = [
+      'console.log.constructor("return typeof process")()',
+      'pass.constructor("return typeof process")()',
+      'block.constructor("return typeof process")()',
+      'action.constructor.constructor("return typeof process")()',
+    ];
+    for (const probe of probes) {
+      const r = await runGateProgram(`let t; try { t = ${probe}; } catch (e) { t = "undefined"; } return t === "undefined" ? pass() : block(t);`, email('a@b.c'));
+      expect(r, probe).toEqual({ outcome: 'pass' });
+    }
+  });
+
   it('the program gets a copy', async () => {
     const action = email('alice@ucsd.edu');
     await runGateProgram('action.data.to = "x@y.z"; return pass();', action);

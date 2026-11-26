@@ -44,11 +44,10 @@ export function checkAction(source: string, input: unknown): { ok: true; action:
 }
 
 export async function runGateProgram(program: string, action: OutgoingAction, timeoutMs = GATE_TIMEOUT_MS): Promise<GateResult> {
-  const silent = () => undefined;
-  const context = vm.createContext({
-    __action: JSON.stringify(action),
-    console: { log: silent, info: silent, warn: silent, error: silent, debug: silent },
-  });
+  // Only a string crosses into the context. A host function (even a no-op console) would
+  // hand the program the host's Function constructor, and with it the hub's process.
+  const context = vm.createContext({ __action: JSON.stringify(action) });
+  vm.runInContext('globalThis.console = { log() {}, info() {}, warn() {}, error() {}, debug() {} };', context);
   const wrapped = `(async () => {
     const action = JSON.parse(__action);
     const pass = () => ({ outcome: 'pass' });

@@ -600,12 +600,14 @@ export function createPipeAgentRoutes(deps: PipeDeps): Hono<AccessEnv> {
     if (!allows(c, `pipe:${id}`)) {
       return c.json(error('FORBIDDEN', `This agent does not have the "pipe:${id}" permission. The owner can grant it in Settings → Agents.`, { permission: `pipe:${id}` }), 403);
     }
+    // The body first, then the pipe: a caller that holds its body open must not be judged by
+    // a version of the pipe the owner has since switched off or changed.
+    const body = await c.req.json().catch(() => null) as { action?: unknown; purpose?: unknown } | null;
     const pipe = await deps.store.getPipe(id);
     if (!pipe) return c.json(error('NOT_FOUND', 'No such pipe.'), 404);
     if (pipe.direction !== 'outgoing') return c.json(error('WRONG_DIRECTION', `"${pipe.name}" is an incoming pipe: read it with GET.`), 405);
     if (!pipe.enabled) return c.json(error('PIPE_OFF', `The pipe "${pipe.name}" is switched off. The owner can switch it on in the Pipes page.`), 409);
 
-    const body = await c.req.json().catch(() => null) as { action?: unknown; purpose?: unknown } | null;
     if (!body || typeof body !== 'object') return c.json(error('BAD_REQUEST', 'Send JSON: { action: { type, data }, purpose }.'), 400);
     if (typeof body.purpose !== 'string' || !body.purpose.trim()) return c.json(error('BAD_REQUEST', 'purpose is required: say why you are taking this action.'), 400);
     const checked = checkAction(pipe.source, body.action);
@@ -651,7 +653,13 @@ export function createPipeAgentRoutes(deps: PipeDeps): Hono<AccessEnv> {
       return c.json({ ok: false, outcome: 'failed', reason: result.message }, 502);
     }
     const shown = { message: result.message, ...(result.resultData ?? {}) };
-    await finish('sent', { result: shown });
+    // It has been sent. A failure to record that must not tell the agent otherwise, or it
+    // would send again.
+    try {
+      await finish('sent', { result: shown });
+    } catch (err) {
+      console.error(`[pipes] ${pipe.id}: sent, but the log entry could not be written:`, err instanceof Error ? err.message : err);
+    }
     return c.json({ ok: true, outcome: 'sent', result: shown });
   });
 
