@@ -490,6 +490,63 @@ describe('pipe routes', () => {
     });
   });
 
+  describe('log', () => {
+    type LogResponse = { ok: boolean; entries: Array<{ id: number; caller: string; purpose: string; outcome: string; summary: any }> };
+    const log = async (id: string, headers: Record<string, string> = owner, qs = '') => app.request(`/web/pipes/${id}/log${qs}`, { headers });
+
+    it('an agent run of an incoming pipe is logged with caller, purpose and the released titles, not bodies', async () => {
+      const id = await makePipe({ program: KEYWORD });
+      const who = await agent('reader', [`pipe:${id}`]);
+      await app.request(`/agent/pipes/${id}?purpose=weekly%20triage`, { headers: who });
+      const j = await (await log(id)).json() as LogResponse;
+      expect(j.entries).toHaveLength(1);
+      expect(j.entries[0]).toMatchObject({ caller: 'reader', purpose: 'weekly triage', outcome: 'ok' });
+      expect(j.entries[0].summary).toEqual({
+        itemsFetched: 4, itemsReturned: 2,
+        released: [{ source_item_id: 'm1', title: 'Letter for PhD applications' }, { source_item_id: 'm3', title: 'Reference request' }],
+      });
+      expect(JSON.stringify(j.entries[0].summary)).not.toContain('Could you write me');
+    });
+
+    it('a failing incoming run is logged as error', async () => {
+      const id = await makePipe({ program: KEYWORD });
+      store.updatePipe(id, { program: 'throw new Error("boom")' });
+      await app.request(`/agent/pipes/${id}`, { headers: owner });
+      const j = await (await log(id)).json() as LogResponse;
+      expect(j.entries[0]).toMatchObject({ caller: 'owner', outcome: 'error' });
+      expect(j.entries[0].summary.error).toContain('boom');
+    });
+
+    it('the panel preview is not logged', async () => {
+      const id = await makePipe({ program: KEYWORD });
+      await app.request(`/web/pipes/${id}/preview`, { headers: owner });
+      expect(((await (await log(id)).json()) as LogResponse).entries).toEqual([]);
+    });
+
+    it('pages with limit and before', async () => {
+      const id = await makePipe({ program: KEYWORD });
+      for (let i = 0; i < 3; i++) await app.request(`/agent/pipes/${id}?purpose=run${i}`, { headers: owner });
+      const first = await (await log(id, owner, '?limit=2')).json() as LogResponse;
+      expect(first.entries.map((e) => e.purpose)).toEqual(['run2', 'run1']);
+      const next = await (await log(id, owner, `?limit=2&before=${first.entries[1].id}`)).json() as LogResponse;
+      expect(next.entries.map((e) => e.purpose)).toEqual(['run0']);
+    });
+
+    it('the log is owner only', async () => {
+      const id = await makePipe({ program: KEYWORD });
+      const who = await agent('reader', [`pipe:${id}`]);
+      expect((await log(id, who)).status).toBe(401);
+      expect((await log(id, {})).status).toBe(401);
+    });
+
+    it('deleting a pipe deletes its log', async () => {
+      const id = await makePipe({ program: KEYWORD });
+      await app.request(`/agent/pipes/${id}`, { headers: owner });
+      await app.request(`/web/pipes/${id}`, { method: 'DELETE', headers: owner });
+      expect(store.listPipeLog(id, { limit: 10 })).toEqual([]);
+    });
+  });
+
   describe('the owner\'s preview', () => {
     type Preview = { ok: boolean; error?: string; input: Array<{ source_item_id: string; released: boolean | null; data: { title: string; body: string } }>; agentResponse: { data: DataRow[]; meta: { itemsFetched: number; itemsReturned: number } }; limit: number; maxLimit: number };
     const preview = async (id: string, headers: Record<string, string> = owner) => app.request(`/web/pipes/${id}/preview`, { headers });

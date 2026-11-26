@@ -24,6 +24,7 @@ import type { TokenManager } from './auth/token-manager.js';
 import { AuditLog } from './audit/log.js';
 import { applyFilters, type QuickFilter } from './filters.js';
 import { allows, type AccessEnv } from './auth/access.js';
+import { logIncomingRun } from './pipe-log.js';
 
 /** Sources a pipe can read. Photos, SMS and contacts are not pullable sources on the server. */
 export const PIPE_SOURCES = ['gmail', 'google_calendar', 'github'] as const;
@@ -341,7 +342,7 @@ export async function savePipe(deps: PipeDeps, input: SavePipeInput): Promise<Re
 
   // Test the candidate before it replaces anything: agents may be calling the current
   // version, and a broken or wider program must not go live just because it was proposed.
-  const candidate: PipeRow = { id: existingId ?? 'candidate', name, description, source, query, program, enabled, created_at: '', updated_at: '' };
+  const candidate: PipeRow = { id: existingId ?? 'candidate', name, description, source, query, program, enabled, direction: 'incoming', test_actions: '[]', created_at: '', updated_at: '' };
   const run = await runPipe(deps, candidate, { limit: 10 });
   if (!run.ok && run.code === 'PIPE_ERROR') {
     return { ok: false, saved: false, error: `Not saved: the test run failed. ${run.message}`, ...(existing ? { note: 'The pipe is unchanged.' } : {}) };
@@ -368,6 +369,7 @@ export async function savePipe(deps: PipeDeps, input: SavePipeInput): Promise<Re
 /** Deletes a pipe and removes its permission from every agent, so no grant outlives it. */
 export async function deletePipe(deps: { store: DataStore }, pipe: PipeRow, deletedBy: string): Promise<void> {
   await deps.store.deletePipe(pipe.id);
+  await deps.store.deletePipeLog(pipe.id);
   const permission = `pipe:${pipe.id}`;
   for (const agent of await deps.store.listAgents()) {
     let permissions: unknown;
@@ -440,6 +442,7 @@ export function createPipeAgentRoutes(deps: PipeDeps): Hono<AccessEnv> {
       duration_ms: run.duration_ms,
       ...(run.ok ? {} : { error: run.message }),
     });
+    await logIncomingRun(deps.store, pipe, c.get('caller') ?? 'agent', purpose, run);
     if (!run.ok) {
       // The reason can carry row content or a provider's error text. The owner sees it here and
       // in the Activity Log; an agent is told only that the pipe failed.
@@ -507,6 +510,22 @@ export function createPipeOwnerRoutes(deps: PipeDeps): Hono<AccessEnv> {
       limit,
       maxLimit: MAX_LIMIT,
     });
+  });
+
+  app.get('/:id/log', async (c) => {
+    const pipe = await deps.store.getPipe(c.req.param('id'));
+    if (!pipe) return c.json({ ok: false, error: 'No such pipe' }, 404);
+    const limitRaw = Math.floor(Number(c.req.query('limit') ?? 50));
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 50;
+    const beforeRaw = Number(c.req.query('before'));
+    const before = Number.isInteger(beforeRaw) && beforeRaw > 0 ? beforeRaw : undefined;
+    const rows = await deps.store.listPipeLog(pipe.id, { limit, before });
+    const entries = rows.map((r) => {
+      let summary: unknown = {};
+      try { summary = JSON.parse(r.summary); } catch { /* unreadable: show empty */ }
+      return { ...r, summary };
+    });
+    return c.json({ ok: true, entries });
   });
 
   app.put('/:id', async (c) => {
