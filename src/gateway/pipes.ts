@@ -24,7 +24,8 @@ import type { TokenManager } from './auth/token-manager.js';
 import { AuditLog } from './audit/log.js';
 import { applyFilters, type QuickFilter } from './filters.js';
 import { allows, type AccessEnv } from './auth/access.js';
-import { logIncomingRun } from './pipe-log.js';
+import { logIncomingRun, logOutgoingCall } from './pipe-log.js';
+import { checkAction, runGateProgram } from './pipes-outgoing.js';
 
 /** Sources a pipe can read. Photos, SMS and contacts are not pullable sources on the server. */
 export const PIPE_SOURCES = ['gmail', 'google_calendar', 'github'] as const;
@@ -277,7 +278,11 @@ export async function runPipe(deps: PipeDeps, pipe: PipeRow, opts: { limit?: num
 
 /** What an agent sees of a pipe: enough to decide whether to call it. The program and query are the owner's. */
 export function describePipeForAgent(pipe: PipeRow, origin: string) {
-  return { id: pipe.id, name: pipe.name, description: pipe.description, source: pipe.source, enabled: !!pipe.enabled, url: `${origin}/agent/pipes/${pipe.id}` };
+  return { id: pipe.id, name: pipe.name, description: pipe.description, source: pipe.source, direction: pipe.direction, enabled: !!pipe.enabled, url: `${origin}/agent/pipes/${pipe.id}` };
+}
+
+export function parseTestActions(json: string): unknown[] {
+  try { const v = JSON.parse(json); return Array.isArray(v) ? v : []; } catch { return []; }
 }
 
 export function describePipe(pipe: PipeRow, origin: string) {
@@ -286,8 +291,10 @@ export function describePipe(pipe: PipeRow, origin: string) {
     name: pipe.name,
     description: pipe.description,
     source: pipe.source,
+    direction: pipe.direction,
     query: pipe.query,
     program: pipe.program,
+    test_actions: parseTestActions(pipe.test_actions),
     enabled: !!pipe.enabled,
     url: `${origin}/agent/pipes/${pipe.id}`,
     created_at: pipe.created_at,
@@ -428,6 +435,7 @@ export function createPipeAgentRoutes(deps: PipeDeps): Hono<AccessEnv> {
     }
     const pipe = await deps.store.getPipe(id);
     if (!pipe) return c.json(error('NOT_FOUND', 'No such pipe.'), 404);
+    if (pipe.direction === 'outgoing') return c.json(error('WRONG_DIRECTION', `"${pipe.name}" is an outgoing pipe: send an action to it with POST.`), 405);
     if (!pipe.enabled) return c.json(error('PIPE_OFF', `The pipe "${pipe.name}" is switched off. The owner can switch it on in the Pipes page.`), 409);
 
     const purpose = String(c.req.query('purpose') ?? '').slice(0, 500);
@@ -456,6 +464,70 @@ export function createPipeAgentRoutes(deps: PipeDeps): Hono<AccessEnv> {
       data: run.rows,
       meta: { itemsFetched: run.itemsFetched, itemsReturned: run.rows.length, duration_ms: run.duration_ms },
     });
+  });
+
+  // An outgoing pipe: the agent sends an action; the program passes or blocks it; what
+  // passes is carried out at once with the owner's account. The pipe row is read once, so
+  // the version that judged the action is the version that acts on it.
+  app.post('/pipes/:id', async (c) => {
+    const id = c.req.param('id');
+    if (!PIPE_ID_PATTERN.test(id)) return c.json(error('NOT_FOUND', 'No such pipe.'), 404);
+    if (!allows(c, `pipe:${id}`)) {
+      return c.json(error('FORBIDDEN', `This agent does not have the "pipe:${id}" permission. The owner can grant it in Settings → Agents.`, { permission: `pipe:${id}` }), 403);
+    }
+    const pipe = await deps.store.getPipe(id);
+    if (!pipe) return c.json(error('NOT_FOUND', 'No such pipe.'), 404);
+    if (pipe.direction !== 'outgoing') return c.json(error('WRONG_DIRECTION', `"${pipe.name}" is an incoming pipe: read it with GET.`), 405);
+    if (!pipe.enabled) return c.json(error('PIPE_OFF', `The pipe "${pipe.name}" is switched off. The owner can switch it on in the Pipes page.`), 409);
+
+    const body = await c.req.json().catch(() => null) as { action?: unknown; purpose?: unknown } | null;
+    if (!body || typeof body !== 'object') return c.json(error('BAD_REQUEST', 'Send JSON: { action: { type, data }, purpose }.'), 400);
+    if (typeof body.purpose !== 'string' || !body.purpose.trim()) return c.json(error('BAD_REQUEST', 'purpose is required: say why you are taking this action.'), 400);
+    const checked = checkAction(pipe.source, body.action);
+    if (!checked.ok) return c.json(error('BAD_REQUEST', checked.message), 400);
+    const purpose = body.purpose.slice(0, 500);
+
+    const connector = deps.connectorRegistry.get(pipe.source);
+    if (!connector || !deps.config.sources[pipe.source] || !(await deps.tokenManager.hasToken(pipe.source))) {
+      return c.json(error('SOURCE_NOT_CONNECTED', `Source "${pipe.source}" is not connected.`), 400);
+    }
+
+    const caller = c.get('caller') ?? 'agent';
+    const isOwner = c.get('permissions') === null;
+    const started = Date.now();
+    const action = checked.action;
+    const finish = async (outcome: 'sent' | 'blocked' | 'failed' | 'error', extra: { reason?: string; result?: unknown }) => {
+      const duration_ms = Date.now() - started;
+      await logOutgoingCall(deps.store, pipe, caller, purpose, { outcome, action, ...extra, duration_ms });
+      await audit.insert('pipe_run', pipe.source, { id: pipe.id, name: pipe.name, direction: 'outgoing', initiatedBy: caller, purpose, action_type: action.type, outcome, duration_ms });
+    };
+
+    const verdict = await runGateProgram(pipe.program, action);
+    if (verdict.outcome === 'error') {
+      await finish('error', { reason: verdict.message });
+      const reason = isOwner ? `The pipe failed: ${verdict.message}` : 'The pipe failed; the action was not carried out.';
+      return c.json({ ok: false, outcome: 'blocked', reason }, 422);
+    }
+    if (verdict.outcome === 'block') {
+      await finish('blocked', { reason: verdict.reason });
+      return c.json({ ok: false, outcome: 'blocked', reason: verdict.reason }, 422);
+    }
+
+    let result;
+    try {
+      result = await connector.executeAction(action.type, action.data);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      await finish('failed', { reason });
+      return c.json({ ok: false, outcome: 'failed', reason }, 502);
+    }
+    if (!result.success) {
+      await finish('failed', { reason: result.message, result });
+      return c.json({ ok: false, outcome: 'failed', reason: result.message }, 502);
+    }
+    const shown = { message: result.message, ...(result.resultData ?? {}) };
+    await finish('sent', { result: shown });
+    return c.json({ ok: true, outcome: 'sent', result: shown });
   });
 
   return app;
