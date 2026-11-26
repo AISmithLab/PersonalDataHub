@@ -121,6 +121,18 @@ CREATE TABLE IF NOT EXISTS chat_history (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`;
 
+const CREATE_PIPE_LOG = `
+CREATE TABLE IF NOT EXISTS pipe_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pipe_id TEXT NOT NULL,
+  at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  caller TEXT NOT NULL,
+  purpose TEXT NOT NULL DEFAULT '',
+  outcome TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '{}',
+  duration_ms INTEGER NOT NULL DEFAULT 0
+)`;
+
 const CREATE_PIPES = `
 CREATE TABLE IF NOT EXISTS pipes (
   id TEXT PRIMARY KEY,
@@ -168,6 +180,10 @@ export function createTables(db: Database.Database): void {
   db.exec(CREATE_AGENTS);
   db.exec(CREATE_JOIN_CODES);
   db.exec(CREATE_PIPES);
+  try { db.exec("ALTER TABLE pipes ADD COLUMN direction TEXT NOT NULL DEFAULT 'incoming'"); } catch (_) { /* already exists */ }
+  try { db.exec("ALTER TABLE pipes ADD COLUMN test_actions TEXT NOT NULL DEFAULT '[]'"); } catch (_) { /* already exists */ }
+  db.exec(CREATE_PIPE_LOG);
+  db.exec('CREATE INDEX IF NOT EXISTS pipe_log_by_pipe ON pipe_log (pipe_id, id)');
   db.exec(CREATE_CHAT_HISTORY);
   // Migrate existing agent_skills tables
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN instructions TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already exists */ }

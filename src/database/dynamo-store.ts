@@ -43,6 +43,9 @@ import type {
   MemoryRow,
   AgentRow,
   PipeRow,
+  NewPipe,
+  PipeUpdate,
+  PipeLogRow,
   JoinCodeRow,
   SkillRow,
   GitHubRepoRow,
@@ -743,6 +746,8 @@ export class DynamoDataStore implements DataStore {
       query: String(item.query ?? ''),
       program: String(item.program ?? ''),
       enabled: Number(item.enabled ?? 1),
+      direction: item.direction === 'outgoing' ? 'outgoing' : 'incoming',
+      test_actions: String(item.test_actions ?? '[]'),
       created_at: String(item.created_at ?? ''),
       updated_at: String(item.updated_at ?? ''),
     };
@@ -770,17 +775,17 @@ export class DynamoDataStore implements DataStore {
     return result.Item ? this.toPipeRow(result.Item) : null;
   }
 
-  async insertPipe(pipe: { id: string; name: string; description: string; source: string; query: string; program: string; enabled: number }): Promise<void> {
+  async insertPipe(pipe: NewPipe): Promise<void> {
     const now = new Date().toISOString();
     await this.docClient.send(new PutCommand({
       TableName: this.tableName,
-      Item: { PK: `PIPE#${pipe.id}`, SK: 'PIPE', ...pipe, created_at: now, updated_at: now },
+      Item: { PK: `PIPE#${pipe.id}`, SK: 'PIPE', direction: 'incoming', test_actions: '[]', ...pipe, created_at: now, updated_at: now },
       // Never overwrite: an existing id may already be granted to agents.
       ConditionExpression: 'attribute_not_exists(PK)',
     }));
   }
 
-  async updatePipe(id: string, fields: { name?: string; description?: string; source?: string; query?: string; program?: string; enabled?: number }): Promise<void> {
+  async updatePipe(id: string, fields: PipeUpdate): Promise<void> {
     const current = await this.getPipe(id);
     if (!current) return;
     const next = { ...current };
@@ -797,6 +802,13 @@ export class DynamoDataStore implements DataStore {
   async deletePipe(id: string): Promise<void> {
     await this.docClient.send(new DeleteCommand({ TableName: this.tableName, Key: { PK: `PIPE#${id}`, SK: 'PIPE' } }));
   }
+
+  // --- Pipe log (not kept on DynamoDB; outgoing pipes are refused here) ---
+
+  readonly supportsPipeLog = false;
+  async insertPipeLog(_entry: Omit<PipeLogRow, 'id' | 'at'>): Promise<void> {}
+  async listPipeLog(_pipeId: string, _opts: { limit: number; before?: number }): Promise<PipeLogRow[]> { return []; }
+  async deletePipeLog(_pipeId: string): Promise<void> {}
 
   // --- Chat history (not kept on DynamoDB; the page then starts empty, as before) ---
 

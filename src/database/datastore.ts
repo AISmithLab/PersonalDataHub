@@ -82,12 +82,39 @@ export interface PipeRow {
   source: string;
   /** Optional connector search string that sets which items the pipe looks at. */
   query: string;
-  /** JavaScript: the body of an async function that receives `rows` and `ask` and returns an array. */
+  /**
+   * Incoming: the body of an async function that receives `rows` and `ask` and returns an array.
+   * Outgoing: the body of an async function that receives `action` and returns pass() or block(reason).
+   */
   program: string;
   enabled: number;
+  /** incoming: data from a source to agents. outgoing: an agent's action out through the owner's account. Fixed at creation. */
+  direction: 'incoming' | 'outgoing';
+  /** Outgoing pipes: JSON list of example actions the panel re-runs. '[]' otherwise. */
+  test_actions: string;
   created_at: string;
   updated_at: string;
 }
+
+export type NewPipe = { id: string; name: string; description: string; source: string; query: string; program: string; enabled: number; direction?: 'incoming' | 'outgoing'; test_actions?: string };
+export type PipeUpdate = { name?: string; description?: string; source?: string; query?: string; program?: string; enabled?: number; test_actions?: string };
+
+/** One call to a pipe, kept for the owner to review. */
+export interface PipeLogRow {
+  id: number;
+  pipe_id: string;
+  at: string;
+  /** The agent's name, or 'owner'. */
+  caller: string;
+  purpose: string;
+  /** incoming: ok | error. outgoing: sent | blocked | failed | error. */
+  outcome: string;
+  /** JSON: what went in and what came out. */
+  summary: string;
+  duration_ms: number;
+}
+
+export const PIPE_LOG_KEEP = 500;
 
 export interface MemoryRow {
   id: string;
@@ -258,8 +285,17 @@ export interface DataStore {
   // --- Pipes ---
   listPipes(): MaybePromise<PipeRow[]>;
   getPipe(id: string): MaybePromise<PipeRow | null>;
-  insertPipe(pipe: { id: string; name: string; description: string; source: string; query: string; program: string; enabled: number }): MaybePromise<void>;
-  updatePipe(id: string, fields: { name?: string; description?: string; source?: string; query?: string; program?: string; enabled?: number }): MaybePromise<void>;
+  insertPipe(pipe: NewPipe): MaybePromise<void>;
+  updatePipe(id: string, fields: PipeUpdate): MaybePromise<void>;
+
+  // --- Pipe log ---
+  /** False where the log is not kept (DynamoDB); outgoing pipes are refused there. */
+  readonly supportsPipeLog: boolean;
+  /** Inserts, then drops that pipe's entries beyond the newest PIPE_LOG_KEEP. */
+  insertPipeLog(entry: Omit<PipeLogRow, 'id' | 'at'>): MaybePromise<void>;
+  /** Newest first. `before` is an entry id. */
+  listPipeLog(pipeId: string, opts: { limit: number; before?: number }): MaybePromise<PipeLogRow[]>;
+  deletePipeLog(pipeId: string): MaybePromise<void>;
   deletePipe(id: string): MaybePromise<void>;
 
   // --- AI Memories ---

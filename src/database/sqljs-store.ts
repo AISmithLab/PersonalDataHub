@@ -31,6 +31,7 @@ interface SqlJsDatabase {
 interface SqlJsStatic {
   Database: new (data?: Buffer | Uint8Array) => SqlJsDatabase;
 }
+import { PIPE_LOG_KEEP } from './datastore.js';
 import type {
   DataStore,
   StoredTokenRow,
@@ -40,6 +41,9 @@ import type {
   MemoryRow,
   AgentRow,
   PipeRow,
+  NewPipe,
+  PipeUpdate,
+  PipeLogRow,
   JoinCodeRow,
   SkillRow,
   GitHubRepoRow,
@@ -430,13 +434,13 @@ export class SqlJsDataStore implements DataStore {
     return this.getOne<PipeRow>('SELECT * FROM pipes WHERE id = ?', [id]);
   }
 
-  insertPipe(pipe: { id: string; name: string; description: string; source: string; query: string; program: string; enabled: number }): void {
-    this.run('INSERT INTO pipes (id, name, description, source, query, program, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [pipe.id, pipe.name, pipe.description, pipe.source, pipe.query, pipe.program, pipe.enabled, this.now(), this.now()]);
+  insertPipe(pipe: NewPipe): void {
+    this.run('INSERT INTO pipes (id, name, description, source, query, program, enabled, direction, test_actions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [pipe.id, pipe.name, pipe.description, pipe.source, pipe.query, pipe.program, pipe.enabled, pipe.direction ?? 'incoming', pipe.test_actions ?? '[]', this.now(), this.now()]);
   }
 
-  updatePipe(id: string, fields: { name?: string; description?: string; source?: string; query?: string; program?: string; enabled?: number }): void {
-    const keys = (['name', 'description', 'source', 'query', 'program', 'enabled'] as const).filter((k) => fields[k] !== undefined);
+  updatePipe(id: string, fields: PipeUpdate): void {
+    const keys = (['name', 'description', 'source', 'query', 'program', 'enabled', 'test_actions'] as const).filter((k) => fields[k] !== undefined);
     if (!keys.length) return;
     this.run(`UPDATE pipes SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`,
       [...keys.map((k) => fields[k]), this.now(), id]);
@@ -444,6 +448,26 @@ export class SqlJsDataStore implements DataStore {
 
   deletePipe(id: string): void {
     this.run('DELETE FROM pipes WHERE id = ?', [id]);
+  }
+
+  // --- Pipe log ---
+
+  readonly supportsPipeLog = true;
+
+  insertPipeLog(entry: Omit<PipeLogRow, 'id' | 'at'>): void {
+    this.run('INSERT INTO pipe_log (pipe_id, at, caller, purpose, outcome, summary, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [entry.pipe_id, this.now(), entry.caller, entry.purpose, entry.outcome, entry.summary, entry.duration_ms]);
+    this.run('DELETE FROM pipe_log WHERE pipe_id = ? AND id NOT IN (SELECT id FROM pipe_log WHERE pipe_id = ? ORDER BY id DESC LIMIT ?)',
+      [entry.pipe_id, entry.pipe_id, PIPE_LOG_KEEP]);
+  }
+
+  listPipeLog(pipeId: string, opts: { limit: number; before?: number }): PipeLogRow[] {
+    return this.getAll<PipeLogRow>('SELECT * FROM pipe_log WHERE pipe_id = ? AND id < ? ORDER BY id DESC LIMIT ?',
+      [pipeId, opts.before ?? Number.MAX_SAFE_INTEGER, opts.limit]);
+  }
+
+  deletePipeLog(pipeId: string): void {
+    this.run('DELETE FROM pipe_log WHERE pipe_id = ?', [pipeId]);
   }
 
   // --- Chat history ---

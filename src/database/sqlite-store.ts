@@ -9,6 +9,7 @@
  */
 
 import type Database from 'better-sqlite3';
+import { PIPE_LOG_KEEP } from './datastore.js';
 import type {
   DataStore,
   StoredTokenRow,
@@ -18,6 +19,9 @@ import type {
   MemoryRow,
   AgentRow,
   PipeRow,
+  NewPipe,
+  PipeUpdate,
+  PipeLogRow,
   JoinCodeRow,
   GitHubRepoRow,
   GitHubRepoInput,
@@ -386,13 +390,13 @@ export class SqliteDataStore implements DataStore {
     return (this.db.prepare('SELECT * FROM pipes WHERE id = ?').get(id) as PipeRow | undefined) ?? null;
   }
 
-  insertPipe(pipe: { id: string; name: string; description: string; source: string; query: string; program: string; enabled: number }): void {
-    this.db.prepare('INSERT INTO pipes (id, name, description, source, query, program, enabled) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(pipe.id, pipe.name, pipe.description, pipe.source, pipe.query, pipe.program, pipe.enabled);
+  insertPipe(pipe: NewPipe): void {
+    this.db.prepare('INSERT INTO pipes (id, name, description, source, query, program, enabled, direction, test_actions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(pipe.id, pipe.name, pipe.description, pipe.source, pipe.query, pipe.program, pipe.enabled, pipe.direction ?? 'incoming', pipe.test_actions ?? '[]');
   }
 
-  updatePipe(id: string, fields: { name?: string; description?: string; source?: string; query?: string; program?: string; enabled?: number }): void {
-    const keys = (['name', 'description', 'source', 'query', 'program', 'enabled'] as const).filter((k) => fields[k] !== undefined);
+  updatePipe(id: string, fields: PipeUpdate): void {
+    const keys = (['name', 'description', 'source', 'query', 'program', 'enabled', 'test_actions'] as const).filter((k) => fields[k] !== undefined);
     if (!keys.length) return;
     this.db.prepare(`UPDATE pipes SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`)
       .run(...keys.map((k) => fields[k]), id);
@@ -400,6 +404,26 @@ export class SqliteDataStore implements DataStore {
 
   deletePipe(id: string): void {
     this.db.prepare('DELETE FROM pipes WHERE id = ?').run(id);
+  }
+
+  // --- Pipe log ---
+
+  readonly supportsPipeLog = true;
+
+  insertPipeLog(entry: Omit<PipeLogRow, 'id' | 'at'>): void {
+    this.db.prepare('INSERT INTO pipe_log (pipe_id, caller, purpose, outcome, summary, duration_ms) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(entry.pipe_id, entry.caller, entry.purpose, entry.outcome, entry.summary, entry.duration_ms);
+    this.db.prepare('DELETE FROM pipe_log WHERE pipe_id = ? AND id NOT IN (SELECT id FROM pipe_log WHERE pipe_id = ? ORDER BY id DESC LIMIT ?)')
+      .run(entry.pipe_id, entry.pipe_id, PIPE_LOG_KEEP);
+  }
+
+  listPipeLog(pipeId: string, opts: { limit: number; before?: number }): PipeLogRow[] {
+    return this.db.prepare('SELECT * FROM pipe_log WHERE pipe_id = ? AND id < ? ORDER BY id DESC LIMIT ?')
+      .all(pipeId, opts.before ?? Number.MAX_SAFE_INTEGER, opts.limit) as PipeLogRow[];
+  }
+
+  deletePipeLog(pipeId: string): void {
+    this.db.prepare('DELETE FROM pipe_log WHERE pipe_id = ?').run(pipeId);
   }
 
   // --- Chat history ---
