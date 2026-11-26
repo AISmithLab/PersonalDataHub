@@ -235,8 +235,9 @@ export async function runPipeProgram(program: string, rows: DataRow[], ask: AskF
 }
 
 export type PipeRun =
-  | { ok: true; rows: unknown[]; itemsFetched: number; duration_ms: number }
-  | { ok: false; code: 'SOURCE_NOT_CONNECTED' | 'PIPE_ERROR'; message: string; duration_ms: number };
+  | { ok: true; rows: unknown[]; input: DataRow[]; itemsFetched: number; duration_ms: number }
+  // `input` is present when the source was read and the program then failed.
+  | { ok: false; code: 'SOURCE_NOT_CONNECTED' | 'PIPE_ERROR'; message: string; duration_ms: number; input?: DataRow[] };
 
 export function clampLimit(raw: unknown): number {
   const n = Math.floor(Number(raw));
@@ -269,8 +270,8 @@ export async function runPipe(deps: PipeDeps, pipe: PipeRow, opts: { limit?: num
   }
 
   const result = await runPipeProgram(pipe.program, rows, deps.ask);
-  if (!result.ok) return fail('PIPE_ERROR', result.message);
-  return { ok: true, rows: result.rows, itemsFetched: rows.length, duration_ms: Date.now() - started };
+  if (!result.ok) return { ...fail('PIPE_ERROR', result.message), input: rows };
+  return { ok: true, rows: result.rows, input: rows, itemsFetched: rows.length, duration_ms: Date.now() - started };
 }
 
 /** What an agent sees of a pipe: enough to decide whether to call it. The program and query are the owner's. */
@@ -379,6 +380,16 @@ export async function deletePipe(deps: { store: DataStore }, pipe: PipeRow, dele
 }
 
 // A short look at a row for the chat AI: long strings cut, nothing nested deeper than it needs.
+/** The source ids of the rows a program returned, or null when its rows no longer carry one. */
+function releasedIds(rows: unknown[]): Set<string> | null {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const id = row && typeof row === 'object' ? (row as { source_item_id?: unknown }).source_item_id : undefined;
+    if (typeof id === 'string') ids.add(id);
+  }
+  return rows.length > 0 && ids.size === 0 ? null : ids;
+}
+
 function trimForPreview(value: unknown, depth = 0): unknown {
   if (typeof value === 'string') return value.length > 200 ? value.slice(0, 200) + '…' : value;
   if (Array.isArray(value)) return depth > 2 ? `[${value.length} items]` : value.slice(0, 5).map((v) => trimForPreview(v, depth + 1));
@@ -450,12 +461,53 @@ export function createPipeAgentRoutes(deps: PipeDeps): Hono<AccessEnv> {
 /**
  * Owner routes. Mount at /web/pipes behind requireOwner. A pipe's program is
  * written only through chat (the save_pipe tool), so there is no create route.
- *   PUT    /:id   { enabled }
+ *   GET    /:id/preview   runs the pipe on the latest data; returns what went in and what came out
+ *   PUT    /:id           { enabled }
  *   DELETE /:id
  */
 export function createPipeOwnerRoutes(deps: PipeDeps): Hono<AccessEnv> {
   const app = new Hono<AccessEnv>();
   const audit = new AuditLog(deps.store);
+
+  // The owner's view of one run: the items the pipe looked at, each marked released or held
+  // back, beside what an agent would receive. Runs even when the pipe is off, so it can be
+  // tuned before agents see it.
+  app.get('/:id/preview', async (c) => {
+    const pipe = await deps.store.getPipe(c.req.param('id'));
+    if (!pipe) return c.json({ ok: false, error: 'No such pipe' }, 404);
+    const limit = clampLimit(c.req.query('limit'));
+    const run = await runPipe(deps, pipe, { limit });
+    await audit.insert('pipe_run', pipe.source, {
+      id: pipe.id,
+      name: pipe.name,
+      initiatedBy: 'owner',
+      purpose: 'Pipes page preview',
+      itemsFetched: run.ok ? run.itemsFetched : 0,
+      resultsReturned: run.ok ? run.rows.length : 0,
+      duration_ms: run.duration_ms,
+      ...(run.ok ? {} : { error: run.message }),
+    });
+    const released = run.ok ? releasedIds(run.rows) : null;
+    const input = (run.input ?? []).map((row) => ({
+      ...(trimForPreview(row) as Record<string, unknown>),
+      // null: the program reshaped its rows, so they cannot be matched back to the input.
+      released: released ? released.has(row.source_item_id) : null,
+    }));
+    if (!run.ok) return c.json({ ok: false, error: run.message, code: run.code, input, limit });
+    return c.json({
+      ok: true,
+      input,
+      // Exactly the body an agent gets from GET /agent/pipes/:id.
+      agentResponse: {
+        ok: true,
+        pipe: { id: pipe.id, name: pipe.name, description: pipe.description, source: pipe.source },
+        data: run.rows,
+        meta: { itemsFetched: run.itemsFetched, itemsReturned: run.rows.length, duration_ms: run.duration_ms },
+      },
+      limit,
+      maxLimit: MAX_LIMIT,
+    });
+  });
 
   app.put('/:id', async (c) => {
     const pipe = await deps.store.getPipe(c.req.param('id'));

@@ -490,6 +490,73 @@ describe('pipe routes', () => {
     });
   });
 
+  describe('the owner\'s preview', () => {
+    type Preview = { ok: boolean; error?: string; input: Array<{ source_item_id: string; released: boolean | null; data: { title: string; body: string } }>; agentResponse: { data: DataRow[]; meta: { itemsFetched: number; itemsReturned: number } }; limit: number; maxLimit: number };
+    const preview = async (id: string, headers: Record<string, string> = owner) => app.request(`/web/pipes/${id}/preview`, { headers });
+
+    it('shows every item the pipe looked at, marked released or held back, beside what an agent gets', async () => {
+      const id = await makePipe({ program: KEYWORD });
+      const j = await (await preview(id)).json() as Preview;
+      expect(j.ok).toBe(true);
+      expect(j.input.map((r) => [r.source_item_id, r.released])).toEqual([['m1', true], ['m2', false], ['m3', true], ['m4', false]]);
+      expect(j.input[0].data.title).toBe('Letter for PhD applications');
+      // The agent response is the same body GET /agent/pipes/:id returns.
+      const viaAgentRoute = await (await app.request(`/agent/pipes/${id}`, { headers: owner })).json() as { data: DataRow[]; pipe: unknown };
+      expect(j.agentResponse.data).toEqual(viaAgentRoute.data);
+      expect(j.agentResponse.meta).toMatchObject({ itemsFetched: 4, itemsReturned: 2 });
+      expect(j).toMatchObject({ limit: 20, maxLimit: 50 });
+    });
+
+    it('cuts long text in the input list', async () => {
+      const id = await makePipe({ program: 'return rows;' });
+      EMAILS[0].data.body = 'x'.repeat(5000);
+      try {
+        const j = await (await preview(id)).json() as Preview;
+        expect(j.input[0].data.body.length).toBeLessThan(300);
+        expect((j.agentResponse.data[0].data as { body: string }).body.length).toBe(5000); // the agent's copy is whole
+      } finally {
+        EMAILS[0].data.body = 'Could you write me a recommendation letter?';
+      }
+    });
+
+    it('cannot mark items when the program reshapes its rows', async () => {
+      const id = await makePipe({ program: 'return rows.slice(0, 1).map((r) => ({ subject: r.data.title }));' });
+      const j = await (await preview(id)).json() as Preview;
+      expect(j.input.map((r) => r.released)).toEqual([null, null, null, null]);
+    });
+
+    it('runs for the owner while the pipe is off, so it can be tuned before agents see it', async () => {
+      const id = await makePipe({ program: KEYWORD, enabled: false });
+      expect((await app.request(`/agent/pipes/${id}`, { headers: owner })).status).toBe(409);
+      const j = await (await preview(id)).json() as Preview;
+      expect(j.ok).toBe(true);
+      expect(j.agentResponse.data).toHaveLength(2);
+    });
+
+    it('when the program fails, still shows what was read, and why it failed', async () => {
+      const id = await makePipe({ program: KEYWORD });
+      store.updatePipe(id, { program: 'throw new Error("boom")' });
+      const j = await (await preview(id)).json() as Preview;
+      expect(j.ok).toBe(false);
+      expect(j.error).toContain('boom');
+      expect(j.input).toHaveLength(4);
+    });
+
+    it('is the owner\'s only: an agent with the pipe cannot read the input', async () => {
+      const id = await makePipe({ program: KEYWORD });
+      const who = await agent('reader', [`pipe:${id}`]);
+      expect((await preview(id, who)).status).toBe(401);
+      expect((await preview(id, {})).status).toBe(401);
+    });
+
+    it('is written to the audit log', async () => {
+      const id = await makePipe({ program: KEYWORD });
+      await preview(id);
+      const entry = store.queryAuditEntries({ event: 'pipe_run' })[0];
+      expect(JSON.parse(entry.details)).toMatchObject({ id, initiatedBy: 'owner', purpose: 'Pipes page preview', itemsFetched: 4, resultsReturned: 2 });
+    });
+  });
+
   describe('who may run and change a pipe', () => {
     it('needs a credential', async () => {
       const id = await makePipe();

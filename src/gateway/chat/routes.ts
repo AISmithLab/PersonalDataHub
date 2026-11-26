@@ -138,6 +138,8 @@ function pipeDeps(deps: ServerDeps): PipeDeps {
 const PIPE_CONTRACT = [
   'A pipe is a small filter program over ONE source that agents can call as their own endpoint. Use list_pipes() to see them, save_pipe() to create or change one, delete_pipe(id) to remove one.',
   `Sources: ${PIPE_SOURCES.join(', ')}. Optional "query" is the source's own search string and sets which items the pipe looks at (Gmail example: "newer_than:60d"); leave it empty for the newest items. A pipe looks at 20 items by default, 50 at most.`,
+  'Put what the source can search for into "query", not only into the program: a time range ("the past month" is newer_than:30d in Gmail) and plain keywords ("recommendation"). The program only ever sees the newest items that match the query, so a narrow query is what lets the pipe reach everything the owner means. Keep the same condition in the program too when it must hold exactly (a source search can be fuzzy).',
+  'Write "description" as one or two plain sentences that say exactly what is released to agents (which items, from when). The owner reads it to check the pipe does what they asked, and revises it by talking to you.',
   'The program is the BODY of an async JavaScript function. Two names are in scope: `rows` and `ask`. It must `return` an array.',
   '- `rows`: array of { source, source_item_id, type, timestamp, data }. For gmail, data has title (the subject), body, snippet, author_name, author_email, participants, labels, attachments. Quick filters set by the owner are already applied.',
   '- `ask(question, text)`: asks the AI model a yes/no question about the text and resolves to true or false. Use it for judgments a keyword test cannot make ("does this email ask me to write a recommendation letter?"). Call it for all rows at once with Promise.all; it limits its own concurrency and caches answers.',
@@ -154,7 +156,7 @@ export type ChatPage = { page?: 'skills' | 'pipes'; focusId?: string };
 
 async function pageContext(deps: ServerDeps, where: ChatPage): Promise<string[]> {
   if (where.page === 'pipes') {
-    const lines = ['', 'The user is on the Pipes page: this conversation is for creating and refining pipes. Their pipes are shown beside this chat and refresh when you save one, so do not paste a whole program back unless asked.'];
+    const lines = ['', 'After every save the page runs the pipe on the latest data and shows the user the items it looked at, each marked released or held back, beside what agents receive. So after save_pipe, answer in two or three sentences: what the pipe now releases, and how the test run went (how many of the items looked at were released). Do not list the items. If the result looks wrong for what was asked (nothing released, or everything), say so and suggest what to change.', 'The user is on the Pipes page: this conversation is for creating and refining pipes. Their pipes are shown beside this chat and refresh when you save one, so do not paste a whole program back unless asked.'];
     const pipe = where.focusId ? await deps.store.getPipe(where.focusId) : null;
     if (pipe) {
       lines.push('The pipe the user has selected is below. A request like "also drop newsletters" or "make it stricter" means: change THIS pipe (save_pipe with this id), not create a new one.', JSON.stringify(describePipe(pipe, '')));

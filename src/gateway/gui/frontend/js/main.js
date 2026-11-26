@@ -39,7 +39,7 @@ var currentTab = 'ai';
       settingsSection: 'ai',
       aiModels: { byProvider: {}, loading: false, error: null, chosen: null },
       pageChats: { skills: { messages: [], loading: false, error: null, draft: '' }, pipes: { messages: [], loading: false, error: null, draft: '' } },
-      pipes: { items: null, loading: false, selectedId: null, output: null, raw: false, copied: false, error: null },
+      pipes: { items: null, loading: false, selectedId: null, output: null, raw: false, showProgram: false, copied: false, error: null },
       agents: { items: null, loading: false, sources: ['gmail', 'google_calendar', 'github', 'photo'], panel: null, ticked: [], error: null, joined: null },
       onboarding: { active: false, step: 'intro' },
     };
@@ -327,6 +327,8 @@ var currentTab = 'ai';
     window.loadPipes = loadPipes;
 
     function selectPipe(id, quiet) {
+      // Choosing "New pipe" puts the cursor where the description goes.
+      if (!id && quiet !== true) setTimeout(function() { var el = document.getElementById('page-chat-input-pipes'); if (el) el.focus(); }, 0);
       state.pipes.selectedId = id;
       state.pipes.copied = false;
       state.pipes.output = null;
@@ -335,25 +337,26 @@ var currentTab = 'ai';
     }
     window.selectPipe = selectPipe;
 
-    // Runs the selected pipe through the same endpoint an agent calls, so the panel shows exactly what an agent gets.
+    // Runs the selected pipe on the latest data. The hub answers with the items the pipe looked
+    // at (each marked released or held back) and the exact response an agent would get.
     function runSelectedPipe(quiet) {
       var id = state.pipes.selectedId;
       var pipe = (state.pipes.items || []).filter(function(p) { return p.id === id; })[0];
-      if (!pipe || !pipe.enabled) return;
+      if (!pipe) return;
       // Each run gets a number; only the latest one may fill the panel, so an older run of the
       // same pipe (before a switch or an edit) cannot overwrite a newer result.
       var run = ++_pipeRunSeq;
       state.pipes.output = { id: id, loading: true };
       if (quiet !== true) render();
-      fetch('/agent/pipes/' + id + '?purpose=' + encodeURIComponent('Pipes page preview')).then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/pipes/' + id + '/preview').then(function(r) { return r.json(); }).then(function(d) {
         if (run !== _pipeRunSeq || state.pipes.selectedId !== id) return;
         state.pipes.output = d.ok
-          ? { id: id, loading: false, data: d.data, meta: d.meta, body: d }
-          : { id: id, loading: false, error: (d.error && d.error.message) || 'The pipe failed.' };
+          ? { id: id, loading: false, input: d.input || [], data: d.agentResponse.data, meta: d.agentResponse.meta, body: d.agentResponse, limit: d.limit, maxLimit: d.maxLimit }
+          : { id: id, loading: false, input: d.input || [], error: (typeof d.error === 'string' ? d.error : (d.error && d.error.message)) || 'The pipe failed.' };
         if (currentTab === 'pipe') render();
       }).catch(function() {
         if (run !== _pipeRunSeq || state.pipes.selectedId !== id) return;
-        state.pipes.output = { id: id, loading: false, error: 'Could not reach the hub.' };
+        state.pipes.output = { id: id, loading: false, input: [], error: 'Could not reach the hub.' };
         if (currentTab === 'pipe') render();
       });
     }
