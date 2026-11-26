@@ -38,7 +38,7 @@ var currentTab = 'ai';
       settingsSection: 'ai',
       aiModels: { byProvider: {}, loading: false, error: null, chosen: null },
       pageChats: { skills: { messages: [], loading: false, error: null, draft: '' }, pipes: { messages: [], loading: false, error: null, draft: '' } },
-      pipes: { items: null, loading: false, selectedId: null, output: null, raw: false, showProgram: false, copied: false, error: null },
+      pipes: { items: null, loading: false, selectedId: null, output: null, raw: false, showProgram: false, copied: false, error: null, newKind: 'incoming', tab: 'run', tests: null, log: null },
       agents: { items: null, loading: false, sources: ['gmail', 'google_calendar', 'github', 'photo'], panel: null, ticked: [], error: null, joined: null },
       onboarding: { active: false, step: 'intro' },
     };
@@ -257,7 +257,8 @@ var currentTab = 'ai';
           body: JSON.stringify({
             messages: chat.messages.slice(-50).map(function(m) { return { role: m.role, content: m.content }; }),
             page: scope,
-            focusId: focus ? focus.id : undefined
+            focusId: focus ? focus.id : undefined,
+            newKind: scope === 'pipes' && !focus ? state.pipes.newKind : undefined
           })
         });
         var data = await res.json();
@@ -333,10 +334,75 @@ var currentTab = 'ai';
       state.pipes.selectedId = id;
       state.pipes.copied = false;
       state.pipes.output = null;
+      state.pipes.tests = null;
+      state.pipes.log = null;
+      state.pipes.tab = 'run';
       if (id) runSelectedPipe(true);
       if (quiet !== true) render();
     }
     window.selectPipe = selectPipe;
+
+    // "New pipe": which kind the chat should create.
+    function newPipe(kind) {
+      state.pipes.newKind = kind === 'outgoing' ? 'outgoing' : 'incoming';
+      selectPipe(null);
+    }
+    window.newPipe = newPipe;
+
+    function pipeTab(tab) {
+      state.pipes.tab = tab;
+      if (tab === 'log' && !state.pipes.log) loadPipeLog(false);
+      render();
+    }
+    window.pipeTab = pipeTab;
+
+    // An outgoing pipe's test actions, re-run on the hub. Nothing is sent.
+    var _pipeTestSeq = 0;
+    function testSelectedPipe(quiet) {
+      var id = state.pipes.selectedId;
+      var run = ++_pipeTestSeq;
+      state.pipes.tests = { id: id, loading: true };
+      if (quiet !== true) render();
+      fetch('/web/pipes/' + id + '/test', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(d) {
+        if (run !== _pipeTestSeq || state.pipes.selectedId !== id) return;
+        state.pipes.tests = d.ok ? { id: id, loading: false, results: d.results } : { id: id, loading: false, error: d.error || 'Could not run the tests.' };
+        if (currentTab === 'pipe') render();
+      }).catch(function() {
+        if (run !== _pipeTestSeq || state.pipes.selectedId !== id) return;
+        state.pipes.tests = { id: id, loading: false, error: 'Could not reach the hub.' };
+        if (currentTab === 'pipe') render();
+      });
+    }
+    window.testSelectedPipe = testSelectedPipe;
+
+    // The selected pipe's log, newest first; "older" appends the next page.
+    function loadPipeLog(older) {
+      var id = state.pipes.selectedId;
+      if (!id) return;
+      var cur = state.pipes.log && state.pipes.log.id === id ? state.pipes.log : { id: id, entries: [], open: {} };
+      var before = older && cur.entries.length ? cur.entries[cur.entries.length - 1].id : null;
+      cur.loading = true;
+      state.pipes.log = cur;
+      fetch('/web/pipes/' + id + '/log?limit=50' + (before ? '&before=' + before : '')).then(function(r) { return r.json(); }).then(function(d) {
+        if (state.pipes.selectedId !== id) return;
+        cur.loading = false;
+        if (!d.ok) { cur.error = d.error || 'Could not load the log.'; }
+        else {
+          cur.entries = older ? cur.entries.concat(d.entries) : d.entries;
+          cur.more = d.entries.length === 50;
+        }
+        if (currentTab === 'pipe') render();
+      }).catch(function() { cur.loading = false; cur.error = 'Could not reach the hub.'; if (currentTab === 'pipe') render(); });
+    }
+    window.loadPipeLog = loadPipeLog;
+
+    function togglePipeLogEntry(entryId) {
+      var log = state.pipes.log;
+      if (!log) return;
+      log.open[entryId] = !log.open[entryId];
+      render();
+    }
+    window.togglePipeLogEntry = togglePipeLogEntry;
 
     // Runs the selected pipe on the latest data. The hub answers with the items the pipe looked
     // at (each marked released or held back) and the exact response an agent would get.
@@ -344,6 +410,7 @@ var currentTab = 'ai';
       var id = state.pipes.selectedId;
       var pipe = (state.pipes.items || []).filter(function(p) { return p.id === id; })[0];
       if (!pipe) return;
+      if (pipe.direction === 'outgoing') { testSelectedPipe(quiet); return; }
       // Each run gets a number; only the latest one may fill the panel, so an older run of the
       // same pipe (before a switch or an edit) cannot overwrite a newer result.
       var run = ++_pipeRunSeq;
@@ -434,7 +501,7 @@ var currentTab = 'ai';
         return (state.sources || []).some(function(x) { return x.name === s && x.connected; });
       });
       state.agents.ticked = [];
-      connected.forEach(function(s) { state.agents.ticked.push('pull:' + s, 'propose:' + s); });
+      connected.forEach(function(s) { state.agents.ticked.push('pull:' + s); });
       state.agents.error = null;
       state.agents.joined = null;
       state.agents.panel = { kind: 'add' };

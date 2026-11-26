@@ -18,7 +18,7 @@ type Panel = { kind: 'closed' } | { kind: 'add' } | { kind: 'link'; url: string;
 
 /**
  * Settings → Agents. An agent registers with a one-time join link made here and
- * can then read data and propose actions, within what was ticked for it. No
+ * can then read data, and act through outgoing pipes, within what was ticked for it. No
  * secret is ever shown: the hub gives the token to the agent when it joins.
  */
 export function AgentsForm({ state }: { state: AppState }) {
@@ -69,7 +69,7 @@ export function AgentsForm({ state }: { state: AppState }) {
   const openAdd = () => {
     // Start with everything ticked for the sources that are connected.
     const connected = sources.filter((s) => s === 'photo' || state.sources.some((x) => x.name === s && x.connected));
-    setTicked(connected.flatMap((s) => [`pull:${s}`, `propose:${s}`]));
+    setTicked(connected.map((s) => `pull:${s}`));
     setError(null);
     setJustJoined(null);
     setPanel({ kind: 'add' });
@@ -143,8 +143,8 @@ export function AgentsForm({ state }: { state: AppState }) {
   return (
     <View className="gap-4" style={{ maxWidth: 620 }}>
       <Text className="text-body-sm text-on-surface-variant">
-        Agents read your data and propose actions through this hub. Each one registers with a join link and can be
-        revoked on its own. Proposed actions always wait for your approval.
+        Agents read your data and act through this hub. Each one registers with a join link and can be revoked on
+        its own. Pipes, and which agent may use each, are set on the desktop page.
       </Text>
 
       {error ? (
@@ -258,16 +258,12 @@ function PermissionGrid({ sources, ticked, onToggle }: { sources: string[]; tick
       <View className="flex-row items-center">
         <Text className="flex-1 text-label-sm text-on-surface-variant" />
         <Text className="text-label-sm text-on-surface-variant text-center" style={{ width: 70 }}>Read</Text>
-        <Text className="text-label-sm text-on-surface-variant text-center" style={{ width: 150 }}>Propose actions</Text>
       </View>
       {sources.map((s) => (
         <View key={s} className="flex-row items-center">
           <Text className="flex-1 text-body-md text-on-surface">{SOURCE_LABELS[s] ?? s}</Text>
           <View style={{ width: 70 }} className="items-center">
             <Check checked={ticked.includes(`pull:${s}`)} onPress={() => onToggle(`pull:${s}`)} label={`Read ${SOURCE_LABELS[s] ?? s}`} />
-          </View>
-          <View style={{ width: 150 }} className="items-center">
-            <Check checked={ticked.includes(`propose:${s}`)} onPress={() => onToggle(`propose:${s}`)} label={`Propose actions for ${SOURCE_LABELS[s] ?? s}`} />
           </View>
         </View>
       ))}
@@ -289,13 +285,14 @@ function Check({ checked, onPress, label }: { checked: boolean; onPress: () => v
   );
 }
 
-// "Gmail (read, propose) · GitHub (read)"
+// "Gmail (read) · GitHub (read) · 2 pipes"
 function summarize(permissions: string[], sources: string[]): string {
   const parts: string[] = [];
   for (const s of sources) {
-    const can = [permissions.includes(`pull:${s}`) ? 'read' : null, permissions.includes(`propose:${s}`) ? 'propose' : null].filter(Boolean);
-    if (can.length) parts.push(`${SOURCE_LABELS[s] ?? s} (${can.join(', ')})`);
+    if (permissions.includes(`pull:${s}`)) parts.push(`${SOURCE_LABELS[s] ?? s} (read)`);
   }
+  const pipes = permissions.filter((p) => p.startsWith('pipe:')).length;
+  if (pipes) parts.push(`${pipes} pipe${pipes === 1 ? '' : 's'}`);
   return parts.length ? parts.join(' · ') : 'No permissions';
 }
 

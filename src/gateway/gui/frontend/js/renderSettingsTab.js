@@ -144,25 +144,17 @@ function renderSettingsTab() {
         var pipeList = state.pipes.items || [];
         var SRC = { gmail: 'Gmail', google_calendar: 'Calendar', github: 'GitHub', photo: 'Photos' };
         var grid = function() {
-          var g = '<table class="text-body-sm font-body-sm"><thead><tr><th></th>';
-          g += '<th class="px-md py-1 font-semibold text-on-surface-variant text-xs">Read</th>';
-          g += '<th class="px-md py-1 font-semibold text-on-surface-variant text-xs">Propose actions</th></tr></thead><tbody>';
-          ag.sources.forEach(function(src) {
-            g += '<tr><td class="pr-lg py-1 text-on-surface">' + escapeHtml(SRC[src] || src) + '</td>';
-            ['pull', 'propose'].forEach(function(kind) {
-              var perm = kind + ':' + src;
-              g += '<td class="px-md py-1 text-center"><input type="checkbox" class="w-4 h-4 accent-primary" aria-label="' + escapeAttr((kind === 'pull' ? 'Read ' : 'Propose actions for ') + (SRC[src] || src)) + '"' + (ag.ticked.indexOf(perm) >= 0 ? ' checked' : '') + ' onchange="agentToggle(\x27' + perm + '\x27)"></td>';
-            });
-            g += '</tr>';
-          });
-          g += '</tbody></table>';
-          // A pipe is ticked on its own: it gives the agent that one filtered view, without the source.
-          g += '<div class="pt-sm mt-sm border-t border-outline-variant/60"><div class="font-semibold text-on-surface-variant text-xs mb-xs">Pipes it may run</div>';
-          if (!pipeList.length) g += '<div class="text-xs text-on-surface-variant">No pipes yet. Create one on the Pipes page.</div>';
-          pipeList.forEach(function(p) {
-            var perm = 'pipe:' + p.id;
-            g += '<label class="flex items-center gap-sm py-1 text-body-sm cursor-pointer"><input type="checkbox" class="w-4 h-4 accent-primary"' + (ag.ticked.indexOf(perm) >= 0 ? ' checked' : '') + ' onchange="agentToggle(\x27' + perm + '\x27)"><span class="text-on-surface">' + escapeHtml(p.name) + '</span><span class="text-xs text-on-surface-variant">' + escapeHtml(SRC[p.source] || p.source) + (p.enabled ? '' : ' · off') + '</span></label>';
-          });
+          var tick = function(perm, label) {
+            return '<label class="flex items-center gap-sm py-1 text-body-sm cursor-pointer"><input type="checkbox" class="w-4 h-4 accent-primary"' + (ag.ticked.indexOf(perm) >= 0 ? ' checked' : '') + ' onchange="agentToggle(\x27' + perm + '\x27)"><span class="text-on-surface">' + label + '</span></label>';
+          };
+          var incoming = pipeList.filter(function(p) { return p.direction !== 'outgoing'; });
+          var outgoing = pipeList.filter(function(p) { return p.direction === 'outgoing'; });
+          var g = '<div class="font-semibold text-on-surface-variant text-xs mb-xs">Can read</div>';
+          ag.sources.forEach(function(src) { g += tick('pull:' + src, 'All of ' + escapeHtml(SRC[src] || src)); });
+          incoming.forEach(function(p) { g += tick('pipe:' + p.id, escapeHtml(p.name) + ' <span class="text-xs text-on-surface-variant">(incoming pipe)</span>'); });
+          g += '<div class="pt-sm mt-sm border-t border-outline-variant/60"><div class="font-semibold text-on-surface-variant text-xs mb-xs">Can act through</div>';
+          if (!outgoing.length) g += '<div class="text-xs text-on-surface-variant">No outgoing pipes yet. Create one on the Pipes page to let an agent send or create anything.</div>';
+          outgoing.forEach(function(p) { g += tick('pipe:' + p.id, escapeHtml(p.name) + ' <span class="text-xs text-on-surface-variant">(outgoing pipe' + (p.enabled ? '' : ', off') + ')</span>'); });
           return g + '</div>';
         };
         var summary = function(perms) {
@@ -170,13 +162,12 @@ function renderSettingsTab() {
           ag.sources.forEach(function(src) {
             var can = [];
             if (perms.indexOf('pull:' + src) >= 0) can.push('read');
-            if (perms.indexOf('propose:' + src) >= 0) can.push('propose');
             if (can.length) parts.push((SRC[src] || src) + ' (' + can.join(', ') + ')');
           });
           perms.forEach(function(perm) {
             if (perm.indexOf('pipe:') !== 0) return;
             var p = pipeList.filter(function(x) { return x.id === perm.slice(5); })[0];
-            parts.push('pipe: ' + (p ? p.name : perm.slice(5) + ' (deleted)'));
+            parts.push((p && p.direction === 'outgoing' ? 'acts through: ' : 'pipe: ') + (p ? p.name : perm.slice(5) + ' (deleted)'));
           });
           return parts.length ? parts.join(' · ') : 'No permissions';
         };
@@ -187,7 +178,7 @@ function renderSettingsTab() {
         html += '<div class="space-y-lg">';
         html += '  <div class="border-b border-outline-variant pb-xs">';
         html += '    <h2 class="font-headline-lg text-headline-lg text-on-surface">Agents</h2>';
-        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Agents read your data and propose actions through this hub. Each one registers with a join link and can be revoked on its own. Proposed actions always wait for your approval.</p>';
+        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Agents read your data and act through this hub. Each one registers with a join link and can be revoked on its own. An agent sends or creates nothing except through an outgoing pipe you ticked for it.';
         html += '  </div>';
 
         if (ag.error) html += '<div class="bg-error/10 border border-error/30 rounded-lg p-3 text-error text-body-sm">' + escapeHtml(ag.error) + '</div>';
