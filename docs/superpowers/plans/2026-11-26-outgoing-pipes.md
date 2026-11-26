@@ -26,11 +26,10 @@
 
 ## Review Focus
 
-1. **Header injection.** `subject: "Hi\r\nBcc: x@evil.com"` or a `to` containing CR/LF would add headers in `createMimeMessage`. Expect: rejected with 400 before the program runs. Test in Task 2.
-2. **Forged pass.** A program returning `true`, `"pass"`, `{ outcome: 'pass' }` or nothing. Expect: blocked; only the value `pass()` returned in that run counts. Test in Task 2.
-3. **Fields the program never saw.** An agent sends `cc`, `bcc`, `attendees` as objects, extra keys. Expect: the connector gets exactly the normalised fields the program saw; unknown keys are dropped; `attendees` (which sends invitations) is normalised to lowercased addresses and visible to the program. Test in Task 2.
-4. **Connector fails after a pass.** Gmail throws or returns `success: false`. Expect: response `outcome: "failed"`, a `failed` log entry, never reported as sent. Test in Task 4.
-5. **Pipe switched off or edited during a call.** Expect: the pipe row is read once at the start of the request and that version decides; a pipe that is off at that moment is 409 `PIPE_OFF` and nothing runs. Test in Task 4.
+1. **Connector fails after a pass.** Gmail throws or returns `success: false`. Expect: response `outcome: "failed"`, a `failed` log entry, never reported as sent. Test in Task 4.
+2. **Pipe switched off or edited during a call.** Expect: the pipe row is read once at the start of the request and that version decides; a pipe that is off at that moment is 409 `PIPE_OFF` and nothing runs. Test in Task 4.
+
+Deferred to future work by Haojian ("leave this for future work. use a simpler version first."): rejecting line breaks in subject and recipients (header injection), keeping only a fixed set of fields per action, normalising recipient addresses, and making `pass()` unforgeable. See the spec's "Future work".
 
 ---
 
@@ -72,34 +71,21 @@
   - `export const OUTGOING_SOURCES = ['gmail', 'google_calendar'] as const`
   - `export const ACTION_TYPES: Record<'gmail' | 'google_calendar', readonly string[]>` with the values in Global Constraints.
   - `export type OutgoingAction = { type: string; data: Record<string, unknown> }`
-  - `export function normalizeAction(source: string, input: unknown): { ok: true; action: OutgoingAction } | { ok: false; message: string }`. Per type it keeps only these fields, all strings except as noted:
-    - `send_email`, `draft_email`: `to` (string[]), `subject`, `body`
-    - `reply_email`: `to` (string[]), `subject`, `body`, `in_reply_to`
-    - `create_event`: `title`, `body`, `location`, `start`, `end`, `timeZone`, `attendees` (string[])
-    - `update_event`: `eventId`, `title`, `body`, `location`, `start`, `end`
-    - `delete_event`: `eventId`
-    
-    `to` and `attendees` accept a string with commas or semicolons, an array of strings, or (attendees) `[{ email }]`. Each is trimmed, lowercased and reduced to the bare address when given as `Name <a@b>`. An entry that is not a plausible address, or empty `to` for email types, is an error. Any CR or LF in `to`, `subject`, `in_reply_to` or an address is an error.
-  - `export function toConnectorData(action: OutgoingAction): Record<string, unknown>`: `to` joined with `", "`; `attendees` as `[{ email }]`; everything else as is.
+  - `export function checkAction(source: string, input: unknown): { ok: true; action: OutgoingAction } | { ok: false; message: string }`: `input` must be an object with a string `type` in `ACTION_TYPES[source]` and an object `data`. `data` is passed on as the agent sent it.
   - `export type GateResult = { outcome: 'pass' } | { outcome: 'block'; reason: string } | { outcome: 'error'; message: string }`
-  - `export async function runGateProgram(program: string, action: OutgoingAction, timeoutMs?: number): Promise<GateResult>`. `pass` and `block` are created per run and return objects tagged with a per-run `Symbol` kept outside the sandbox; any other return value is `{ outcome: 'error', message: 'The program must return pass() or block(reason).' }`. `block` reason is `String(reason).slice(0, 500)`, or `'Blocked by the pipe.'` when empty. No `ask` in scope.
+  - `export async function runGateProgram(program: string, action: OutgoingAction, timeoutMs?: number): Promise<GateResult>`. `pass()` returns `{ outcome: 'pass' }` and `block(reason)` returns `{ outcome: 'block', reason }`; any return value whose `outcome` is not one of these is `{ outcome: 'error', message: 'The program must return pass() or block(reason).' }`. `block` reason is `String(reason).slice(0, 500)`, or `'Blocked by the pipe.'` when empty. No `ask` in scope.
 
 - [ ] **Step 1: Write the failing tests**
-  - `normalises recipients: "Alice <ALICE@ucsd.edu>; bob@ucsd.edu"` gives `to: ['alice@ucsd.edu', 'bob@ucsd.edu']`.
-  - `drops fields the type does not have` (`cc`, `bcc`, `foo` gone from `send_email`).
-  - `rejects CR or LF in subject, to and in_reply_to` (`subject: 'Hi\r\nBcc: x@evil.com'` gives `ok: false`).
   - `rejects an unknown type for the source` (`create_event` on gmail) and an unknown source.
-  - `create_event attendees as [{ email }] become lowercased strings`, and `toConnectorData` turns them back into `[{ email }]`.
   - `pass and block`: the spec's example program (students list) passes `alice@ucsd.edu`, blocks `dean@ucsd.edu` with reason `'Not a lab student: dean@ucsd.edu'`.
-  - `a forged pass is an error`: programs `return true;`, `return "pass";`, `return { outcome: 'pass' };`, `return;` each give `outcome: 'error'`.
-  - `a pass object from another run does not count`: a program that stores `pass()` on a global and a second run returning it. Use a fresh context per run, so the second run errors.
+  - `anything but pass() or block() is an error`: programs `return true;`, `return "pass";`, `return;` each give `outcome: 'error'`.
   - `throws, never settles, and endless loop are errors` (timeout 300 ms in the test).
   - `ask, require, fetch, process and setTimeout are not defined`.
   - `the program gets a copy`: mutating `action.data.to` inside the program does not change the caller's object.
 - [ ] **Step 2: Run** `npx vitest run src/gateway/pipes-outgoing.test.ts`. Expected: FAIL (module missing).
-- [ ] **Step 3: Implement** the four exports above. The action enters the sandbox as a JSON string and is parsed inside, as `runPipeProgram` does with rows.
+- [ ] **Step 3: Implement** the exports above. The action enters the sandbox as a JSON string and is parsed inside, as `runPipeProgram` does with rows.
 - [ ] **Step 4: Run** the test file. Expected: PASS.
-- [ ] **Step 5: Commit** `git commit -m "Outgoing pipes: action normalisation and the gate program"`
+- [ ] **Step 5: Commit** `git commit -m "Outgoing pipes: action check and the gate program"`
 
 ### Task 3: Pipe log for both directions
 
@@ -112,7 +98,7 @@
 - Consumes: Task 1 store methods.
 - Produces:
   - `export async function logIncomingRun(store: DataStore, pipe: PipeRow, caller: string, purpose: string, run: PipeRun): Promise<void>`. Outcome `ok` | `error`; summary `{ itemsFetched, itemsReturned, released: [{ source_item_id, title }] }` (title from `data.title ?? data.subject ?? data.summary`, cut to 200 characters), or `{ error }`.
-  - `export async function logOutgoingCall(store: DataStore, pipe: PipeRow, caller: string, purpose: string, entry: { outcome: 'sent' | 'blocked' | 'failed' | 'error'; action: OutgoingAction | null; reason?: string; result?: unknown; duration_ms: number }): Promise<void>`. Summary is the full normalised action plus reason and result.
+  - `export async function logOutgoingCall(store: DataStore, pipe: PipeRow, caller: string, purpose: string, entry: { outcome: 'sent' | 'blocked' | 'failed' | 'error'; action: OutgoingAction | null; reason?: string; result?: unknown; duration_ms: number }): Promise<void>`. Summary is the full action plus reason and result.
   - Owner route `GET /web/pipes/:id/log?limit=50&before=<id>` returns `{ ok: true, entries: Array<PipeLogRow & { summary: object }> }`; `limit` defaults to 50, at most 200.
 
 - [ ] **Step 1: Write the failing tests**
@@ -133,30 +119,29 @@
 - Test: `src/gateway/pipes-outgoing-routes.test.ts` (new; reuse the setup pattern of `src/gateway/pipes.test.ts:260-308` with a stand-in Gmail connector whose `executeAction` records calls and can be told to throw or return `success: false`)
 
 **Interfaces:**
-- Consumes: `normalizeAction`, `toConnectorData`, `runGateProgram` (Task 2); `logOutgoingCall` (Task 3).
+- Consumes: `checkAction`, `runGateProgram` (Task 2); `logOutgoingCall` (Task 3).
 - Produces:
   - `POST /agent/pipes/:id` body `{ action: { type, data }, purpose }`. Responses:
     - 200 `{ ok: true, outcome: 'sent', result: { message, ...resultData } }`
     - 422 `{ ok: false, outcome: 'blocked', reason }`
     - 422 `{ ok: false, outcome: 'blocked', reason: 'The pipe failed; the action was not carried out.' }` on a program error (the owner, calling as owner, gets the real message)
     - 502 `{ ok: false, outcome: 'failed', reason }` when the connector throws or returns `success: false`
-    - 400 invalid body or `normalizeAction` error (not logged; nothing ran)
+    - 400 invalid body or `checkAction` error (not logged; nothing ran)
     - 403 without `pipe:<id>`, 404 unknown id (permission checked first, as for GET), 409 `PIPE_OFF`, 400 `SOURCE_NOT_CONNECTED`
   - `GET /agent/pipes/:id` on an outgoing pipe and `POST` on an incoming one: 405 `{ ok: false, error: { code: 'WRONG_DIRECTION', message } }`.
   - `describePipe` and `describePipeForAgent` include `direction`; `GET /agent/pipes` lists both kinds.
 
 - [ ] **Step 1: Write the failing tests**
-  - `a passing email is sent once, with exactly the normalised fields, and logged as sent`.
+  - `a passing email is sent once, with the data the agent sent, and logged as sent`.
   - `a blocked email is not sent; the agent gets the program's reason; logged as blocked`.
   - `a program error blocks, hides the message from an agent, shows it to the owner, and is logged as error with the message`.
-  - `the connector throwing or returning success false is failed, logged, and not reported as sent` (Review Focus 4).
-  - `a switched-off pipe sends nothing and is 409` (Review Focus 5); `the version read at the start decides`: start a call whose program awaits a promise the test controls, update the program in the store meanwhile, release it, expect the original verdict.
-  - `header injection is a 400 and nothing is logged or sent` (Review Focus 1, end to end).
+  - `the connector throwing or returning success false is failed, logged, and not reported as sent` (Review Focus 1).
+  - `a switched-off pipe sends nothing and is 409` (Review Focus 2); `the version read at the start decides`: start a call whose program awaits a promise the test controls, update the program in the store meanwhile, release it, expect the original verdict.
   - `wrong direction is 405 both ways`.
   - `permission: an agent without pipe:<id> is 403; having propose or pull gmail does not help`.
   - `the list shows direction`.
 - [ ] **Step 2: Run** `npx vitest run src/gateway/pipes-outgoing-routes.test.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement** the route: read the pipe once, check permission, direction, enabled, connection; normalise; run gate; on pass call `connector.executeAction(action.type, toConnectorData(action))`; log; also keep the existing audit entry (`pipe_run` with `direction: 'outgoing'`, outcome).
+- [ ] **Step 3: Implement** the route: read the pipe once, check permission, direction, enabled, connection; `checkAction`; run gate; on pass call `connector.executeAction(action.type, action.data)`; log; also keep the existing audit entry (`pipe_run` with `direction: 'outgoing'`, outcome).
 - [ ] **Step 4: Run** the new file and `npx vitest run src/gateway/pipes.test.ts`. Expected: PASS.
 - [ ] **Step 5: Commit** `git commit -m "Outgoing pipes: the agent route, carried out at once when the program passes"`
 
@@ -170,11 +155,11 @@
 - Consumes: Tasks 1, 2.
 - Produces:
   - `SavePipeInput` gains `direction?: unknown` and `examples?: unknown` (list of `{ type, data, expect: 'pass' | 'block' }`).
-  - `savePipe` for outgoing: source must be in `OUTGOING_SOURCES`; `query` ignored; direction immutable (error like the source rule); stores `test_actions` = valid `examples` (normalised; invalid ones reported back, not stored) merged with earlier ones, newest first, at most 20; test-runs the program over stored test actions plus the last 10 agent actions from the log (caller other than `owner`, entries with an action). Saves only if no run is `error`. A block is fine. Result `test: [{ type, to_or_title, expect, outcome, reason }]`. Always `enabled: 0` after an outgoing save; the result says `"Saved and switched off. The owner switches it on in the Pipes panel."`. Refused with a clear error when `store.supportsPipeLog` is false.
+  - `savePipe` for outgoing: source must be in `OUTGOING_SOURCES`; `query` ignored; direction immutable (error like the source rule); stores `test_actions` = valid `examples` (checked with `checkAction`; invalid ones reported back, not stored) merged with earlier ones, newest first, at most 20; test-runs the program over stored test actions plus the last 10 agent actions from the log (caller other than `owner`, entries with an action). Saves only if no run is `error`. A block is fine. Result `test: [{ type, to_or_title, expect, outcome, reason }]`. Always `enabled: 0` after an outgoing save; the result says `"Saved and switched off. The owner switches it on in the Pipes panel."`. Refused with a clear error when `store.supportsPipeLog` is false.
   - `savePipe` called from chat ignores `enabled: true` for outgoing pipes (the tool schema documents it).
   - Owner route `POST /web/pipes/:id/test` re-runs the stored test actions and the last 10 agent actions; returns `{ ok: true, results: [...] }` in the same shape; never executes, never logs.
   - The panel's on/off still uses `PUT /web/pipes/:id { enabled }`; for outgoing it is the only way to enable.
-  - `PIPE_CONTRACT` gains the outgoing contract: `action`, `pass()`, `block(reason)`, no `ask`, failing closed, the action types and normalised fields from Task 2, `examples` with cases that should pass and should block from the owner's words, description says exactly what may go out, and that a save switches the pipe off.
+  - `PIPE_CONTRACT` gains the outgoing contract: `action`, `pass()`, `block(reason)`, no `ask`, failing closed, the action types from Task 2 and the fields each connector reads (gmail: `to`, `subject`, `body`, `in_reply_to`; calendar: `title`, `body`, `location`, `start`, `end`, `timeZone`, `attendees`, `eventId`), `examples` with cases that should pass and should block from the owner's words, description says exactly what may go out, and that a save switches the pipe off.
   - `pageContext` for a selected outgoing pipe includes its test actions. `ChatPage` gains `newKind?: 'incoming' | 'outgoing'`, read from `POST /web/chat`; with no pipe selected it tells the model which kind to create.
 
 - [ ] **Step 1: Write the failing tests**

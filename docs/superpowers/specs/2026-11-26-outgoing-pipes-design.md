@@ -59,14 +59,13 @@ The body of an async function. In scope:
 
 Nothing else: no `ask`, no network, no files, no timers (the existing vm sandbox, with `ask` left out). A program that throws, times out or returns anything other than `pass()`/`block(...)` blocks the action, and the reason says so. Failing closed is the point.
 
-`to` may be a string with several addresses; the hub normalises it to an array of lowercased addresses before the program sees it, so a list check cannot be bypassed by case or by `"a@x, b@y"`. (My call.)
-
 Example, from Haojian's request:
 
 ```js
 const students = ["alice@ucsd.edu", "bob@ucsd.edu"];
 if (action.type !== "send_email" && action.type !== "draft_email") return block("Only emails and drafts.");
-const outside = action.data.to.filter((r) => !students.includes(r));
+const to = String(action.data.to).toLowerCase().split(/[,;]/).map((r) => r.trim());
+const outside = to.filter((r) => !students.includes(r));
 if (outside.length) return block("Not a lab student: " + outside.join(", "));
 return pass();
 ```
@@ -151,6 +150,15 @@ Grant ticks are grouped: "Can read" (pull per source, incoming pipes) and "Can a
 
 
 1. **A cap per pipe** (for example 20 sends a day) would limit damage from a runaway agent. Not asked for; proposed as a later addition.
+
+## Future work
+
+Deferred by Haojian ("leave this for future work. use a simpler version first."). In this first version the program sees the action exactly as the agent sent it, and the same data goes to Gmail or Calendar.
+
+- **Line breaks in subject or recipients.** Gmail's message builder writes headers line by line, so a subject such as `"Hi\nBcc: x@y"` adds a recipient the program never checked. Fix: refuse CR/LF in header fields before the program runs.
+- **Fixed fields per action.** Keep only the fields each action type uses, so the connector never acts on a field the program did not see (Calendar `attendees` sends invitations).
+- **Normalised recipients.** Hand the program a lowercased list of bare addresses, so list checks are not bypassed by case or `Name <a@b>`.
+- **Unforgeable pass.** Count only the `pass()` value created in that run.
 
 ## Left to the builder
 
