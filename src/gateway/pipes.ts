@@ -492,7 +492,7 @@ async function saveOutgoing(
     path: `/agent/pipes/${id}`,
     saved: true,
     enabled: false,
-    note: 'Saved and switched off. The owner switches it on in the Pipes panel after checking the test results.',
+    note: 'Saved, not deployed. The owner deploys it in the Pipes panel after checking the test results.',
     test: results,
     ...(invalidExamples.length ? { invalidExamples } : {}),
   };
@@ -606,7 +606,7 @@ export function createPipeAgentRoutes(deps: PipeDeps): Hono<AccessEnv> {
     const pipe = await deps.store.getPipe(id);
     if (!pipe) return c.json(error('NOT_FOUND', 'No such pipe.'), 404);
     if (pipe.direction !== 'outgoing') return c.json(error('WRONG_DIRECTION', `"${pipe.name}" is an incoming pipe: read it with GET.`), 405);
-    if (!pipe.enabled) return c.json(error('PIPE_OFF', `The pipe "${pipe.name}" is switched off. The owner can switch it on in the Pipes page.`), 409);
+    if (!pipe.enabled) return c.json(error('PIPE_OFF', `The pipe "${pipe.name}" has changes the owner has not deployed yet. Ask the owner to deploy it on the Pipes page.`), 409);
 
     if (!body || typeof body !== 'object') return c.json(error('BAD_REQUEST', 'Send JSON: { action: { type, data }, purpose }.'), 400);
     if (typeof body.purpose !== 'string' || !body.purpose.trim()) return c.json(error('BAD_REQUEST', 'purpose is required: say why you are taking this action.'), 400);

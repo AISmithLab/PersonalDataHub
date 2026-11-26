@@ -218,7 +218,7 @@ describe('outgoing pipes', () => {
       expect(pipe).toMatchObject({ direction: 'outgoing', enabled: 0 });
       expect(JSON.parse(pipe.test_actions)).toHaveLength(2);
       expect(r.test.map((t) => [t.expect, t.outcome])).toEqual([['pass', 'pass'], ['block', 'block']]);
-      expect(r.note).toContain('switched off');
+      expect(r.note).toContain('not deployed');
       expect(sent).toEqual([]);
     });
 

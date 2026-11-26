@@ -184,7 +184,7 @@
         html += '<label class="flex items-center gap-xs text-body-sm cursor-pointer"><input type="checkbox" class="w-4 h-4 accent-primary"' + (on ? ' checked' : '') + ' onchange="pipeBindAgent(\x27' + escapeAttr(a.id) + '\x27, \x27' + p.id + '\x27, this.checked)"><span class="text-on-surface">' + escapeHtml(a.name) + '</span></label>';
       });
       html += '</div>';
-      html += '<div class="text-xs text-on-surface-variant mt-xs">' + (p.direction === 'outgoing' ? 'A bound agent can act through this pipe while it is switched on.' : 'A bound agent can read what this pipe releases, and nothing else of the source.') + '</div>';
+      html += '<div class="text-xs text-on-surface-variant mt-xs">' + (p.direction === 'outgoing' ? 'A bound agent can act through this pipe once it is deployed. Untick an agent to take its access away.' : 'A bound agent can read what this pipe releases, and nothing else of the source. Untick an agent to take its access away.') + '</div>';
       return html + '</div>';
     }
 
@@ -195,9 +195,9 @@
       html += '<div class="flex items-center gap-xs"><h2 class="font-headline-md text-headline-md text-on-surface">' + escapeHtml(p.name) + '</h2><span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-tertiary/10 text-tertiary">Outgoing</span></div>';
       html += '<p class="font-body-md text-body-md text-on-surface mt-xs">' + escapeHtml(p.description || 'No description.') + '</p>';
       html += '<div class="text-xs text-on-surface-variant mt-xs">Acts with your ' + escapeHtml(SRC[p.source] || p.source) + ' account. What it passes is carried out at once.</div></div>';
-      html += '<label class="flex items-center gap-xs shrink-0 cursor-pointer text-body-sm text-on-surface-variant"><input type="checkbox" class="w-4 h-4 accent-primary" ' + (p.enabled ? 'checked' : '') + ' onchange="togglePipe(\x27' + p.id + '\x27, this.checked)">Available to agents</label>';
+
       html += '</div>';
-      if (!p.enabled) html += '<div class="text-body-sm text-on-surface bg-surface-container rounded-lg p-sm">Off. Review the test actions, then switch it on.</div>';
+      if (!p.enabled) html += '<div class="flex items-center justify-between gap-md text-body-sm text-on-surface bg-surface-container rounded-lg p-sm"><span>Not deployed: bound agents cannot use this version yet. Review the test actions, then deploy.</span><button onclick="togglePipe(\x27' + p.id + '\x27, true)" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-md py-xs rounded-lg shrink-0">Deploy</button></div>';
 
       html += pipeTabs(pp, 'Test actions');
       if (pp.tab === 'log') {
@@ -273,7 +273,7 @@
             html += '<div class="flex-grow min-w-0"><div class="font-body-md text-body-md font-semibold text-on-surface truncate">' + escapeHtml(x.name) + '</div>';
             html += '<div class="text-xs text-on-surface-variant truncate">' + escapeHtml(SRC[x.source] || x.source) + (x.description ? ' · ' + escapeHtml(x.description) : '') + '</div></div>';
             html += '<span class="text-[11px] font-semibold shrink-0 px-2 py-0.5 rounded-full ' + (x.direction === 'outgoing' ? 'bg-tertiary/10 text-tertiary' : 'bg-primary/10 text-primary') + '">' + (x.direction === 'outgoing' ? 'Outgoing' : 'Incoming') + '</span>';
-            html += '<span class="text-xs font-semibold shrink-0 ' + (x.enabled ? 'text-primary' : 'text-on-surface-variant') + '">' + (x.enabled ? 'On' : 'Off') + '</span>';
+            if (!x.enabled) html += '<span class="text-xs font-semibold shrink-0 text-on-surface-variant">' + (x.direction === 'outgoing' ? 'Not deployed' : 'Off') + '</span>';
             html += '</div>';
           });
           html += '</div>';
@@ -297,7 +297,7 @@
           var chosen = kinds.filter(function(k) { return k.k === pp.newKind; })[0] || kinds[0];
           html += '<div class="text-body-sm text-on-surface-variant">Describe it in the chat. For example: <i>' + escapeHtml(chosen.ex) + '</i>.</div>';
           html += '<div class="text-body-sm text-on-surface-variant">' + (chosen.k === 'outgoing'
-            ? 'The pipe is tested on example actions, and nothing is sent while you build it. It is saved switched off; you switch it on here once the results look right.'
+            ? 'The pipe is tested on example actions, and nothing is sent while you build it. It is saved undeployed; you deploy it here once the results look right, and bind the agents that may use it.'
             : 'The pipe is then run on your latest data, and the items it looked at and the ones it released are shown here. Keep describing changes until it releases what you want.') + '</div>';
           html += '</div>';
         } else if (p.direction === 'outgoing') {
@@ -310,9 +310,9 @@
           html += '<h2 class="font-headline-md text-headline-md text-on-surface">' + escapeHtml(p.name) + '</h2>';
           html += '<p class="font-body-md text-body-md text-on-surface mt-xs">' + escapeHtml(p.description || 'No description.') + '</p>';
           html += '<div class="text-xs text-on-surface-variant mt-xs">Source: ' + escapeHtml(SRC[p.source] || p.source) + (p.query ? ' · searches for: <code class="font-mono">' + escapeHtml(p.query) + '</code>' : ' · looks at the newest items') + '</div></div>';
-          html += '<label class="flex items-center gap-xs shrink-0 cursor-pointer text-body-sm text-on-surface-variant"><input type="checkbox" class="w-4 h-4 accent-primary" ' + (p.enabled ? 'checked' : '') + ' onchange="togglePipe(\x27' + p.id + '\x27, this.checked)">Available to agents</label>';
+
           html += '</div>';
-          if (!p.enabled) html += '<div class="text-body-sm text-on-surface-variant bg-surface-container rounded-lg p-sm">This pipe is off: agents that call it get an error. The example below still runs for you.</div>';
+          if (!p.enabled) html += '<div class="flex items-center justify-between gap-md text-body-sm text-on-surface-variant bg-surface-container rounded-lg p-sm"><span>This pipe is off: bound agents get an error when they call it.</span><button onclick="togglePipe(\x27' + p.id + '\x27, true)" class="border border-outline hover:bg-surface-container-high text-on-surface-variant text-xs px-3 py-1.5 rounded-lg shrink-0">Switch on</button></div>';
 
           html += pipeTabs(pp, 'Example');
           if (pp.tab === 'log') { html += renderPipeLog(p, pp); } else {

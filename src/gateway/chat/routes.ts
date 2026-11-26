@@ -156,7 +156,7 @@ const PIPE_CONTRACT = [
   '- It must `return pass()` or `return block(reason)`. The reason is shown to the agent. Anything else, a throw, or a timeout blocks the action. There is no ask(): the decision must be a fixed rule. Nothing else exists: no require, fetch, process or timers.',
   '- Compare addresses case-insensitively and split `to` on commas and semicolons.',
   '- Pass `examples`: actions that should pass and actions that should block, taken from the owner\'s words, as [{ type, data, expect: "pass" | "block" }]. save_pipe runs the program on them (and on the last real agent actions) without carrying anything out, and saves unless the program fails on one.',
-  '- Saving always switches an outgoing pipe off. Only the owner switches it on, in the Pipes panel, after checking the test results. Say so after saving.',
+  '- Saving leaves an outgoing pipe undeployed. Only the owner deploys it, in the Pipes panel, after checking the test results, and binds the agents that may use it. Say so after saving.',
   '- Write "description" as exactly what agents may do through it (which actions, to whom).',
   'Example outgoing program:',
   '  const students = ["alice@ucsd.edu", "bob@ucsd.edu"];',
