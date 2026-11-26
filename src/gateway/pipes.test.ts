@@ -640,7 +640,7 @@ describe('pipe routes', () => {
 
       const list = await (await app.request('/agent/pipes', { headers: who })).json() as { pipes: Array<Record<string, unknown>> };
       // an agent learns what a pipe returns, not how it decides: no program, no query
-      expect(list.pipes).toEqual([{ id: a, name: 'Recommendation letter requests', description: 'Emails asking me for a recommendation letter.', source: 'gmail', enabled: true, url: `http://localhost/agent/pipes/${a}` }]);
+      expect(list.pipes).toEqual([{ id: a, name: 'Recommendation letter requests', description: 'Emails asking me for a recommendation letter.', source: 'gmail', direction: 'incoming', enabled: true, url: `http://localhost/agent/pipes/${a}` }]);
     });
 
     it('having the source does not give the pipes over it', async () => {
