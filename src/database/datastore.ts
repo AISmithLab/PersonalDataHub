@@ -50,6 +50,72 @@ export interface AuditRow {
   details: string;
 }
 
+/** A registered agent. Created when an agent redeems a join link. */
+export interface AgentRow {
+  id: string;
+  name: string;
+  /** SHA-256 hex of the agent's token; the token itself is never stored. */
+  token_hash: string;
+  /** JSON array of permission strings, e.g. ["pull:gmail","propose:gmail"]. */
+  permissions: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+/** A one-time join link's code, made by the owner and redeemed by an agent. */
+export interface JoinCodeRow {
+  code: string;
+  permissions: string;
+  created_at: string;
+  /** ISO timestamp. */
+  expires_at: string;
+  used_at: string | null;
+}
+
+/** A pipe: a small filter program over one source, exposed to agents as its own endpoint. */
+export interface PipeRow {
+  /** Also the last part of the pipe's URL: 8 characters of a-z and 2-7. */
+  id: string;
+  name: string;
+  description: string;
+  /** gmail, google_calendar or github. */
+  source: string;
+  /** Optional connector search string that sets which items the pipe looks at. */
+  query: string;
+  /**
+   * Incoming: the body of an async function that receives `rows` and `ask` and returns an array.
+   * Outgoing: the body of an async function that receives `action` and returns pass() or block(reason).
+   */
+  program: string;
+  enabled: number;
+  /** incoming: data from a source to agents. outgoing: an agent's action out through the owner's account. Fixed at creation. */
+  direction: 'incoming' | 'outgoing';
+  /** Outgoing pipes: JSON list of example actions the panel re-runs. '[]' otherwise. */
+  test_actions: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type NewPipe = { id: string; name: string; description: string; source: string; query: string; program: string; enabled: number; direction?: 'incoming' | 'outgoing'; test_actions?: string };
+export type PipeUpdate = { name?: string; description?: string; source?: string; query?: string; program?: string; enabled?: number; test_actions?: string };
+
+/** One call to a pipe, kept for the owner to review. */
+export interface PipeLogRow {
+  id: number;
+  pipe_id: string;
+  at: string;
+  /** The agent's name, or 'owner'. */
+  caller: string;
+  purpose: string;
+  /** incoming: ok | error. outgoing: sent | blocked | failed | error. */
+  outcome: string;
+  /** JSON: what went in and what came out. */
+  summary: string;
+  duration_ms: number;
+}
+
+export const PIPE_LOG_KEEP = 500;
+
 export interface MemoryRow {
   id: string;
   content: string;
@@ -194,6 +260,43 @@ export interface DataStore {
   // --- OAuth State (CSRF) ---
   setOAuthState(state: string, data: OAuthStateData): MaybePromise<void>;
   getAndDeleteOAuthState(state: string): MaybePromise<OAuthStateData | null>;
+
+  // --- Agents ---
+  listAgents(): MaybePromise<AgentRow[]>;
+  insertAgent(agent: { id: string; name: string; token_hash: string; permissions: string }): MaybePromise<void>;
+  getAgentByTokenHash(tokenHash: string): MaybePromise<AgentRow | null>;
+  touchAgent(id: string): MaybePromise<void>;
+  updateAgentPermissions(id: string, permissions: string): MaybePromise<void>;
+  deleteAgent(id: string): MaybePromise<void>;
+
+  // --- Join codes ---
+  insertJoinCode(code: { code: string; permissions: string; expires_at: string }): MaybePromise<void>;
+  getJoinCode(code: string): MaybePromise<JoinCodeRow | null>;
+  /** Marks the code used. True only for the first caller; false if it was already used or is unknown. */
+  consumeJoinCode(code: string): MaybePromise<boolean>;
+  /** Undoes consumeJoinCode, for a join that failed after consuming. */
+  releaseJoinCode(code: string): MaybePromise<void>;
+
+  // --- Chat history (the owner's conversations, one per page) ---
+  getChatHistory(scope: string): MaybePromise<string | null>;
+  setChatHistory(scope: string, messagesJson: string): MaybePromise<void>;
+  deleteChatHistory(scope: string): MaybePromise<void>;
+
+  // --- Pipes ---
+  listPipes(): MaybePromise<PipeRow[]>;
+  getPipe(id: string): MaybePromise<PipeRow | null>;
+  insertPipe(pipe: NewPipe): MaybePromise<void>;
+  updatePipe(id: string, fields: PipeUpdate): MaybePromise<void>;
+
+  // --- Pipe log ---
+  /** False where the log is not kept (DynamoDB); outgoing pipes are refused there. */
+  readonly supportsPipeLog: boolean;
+  /** Inserts, then drops that pipe's entries beyond the newest PIPE_LOG_KEEP. */
+  insertPipeLog(entry: Omit<PipeLogRow, 'id' | 'at'>): MaybePromise<void>;
+  /** Newest first. `before` is an entry id. */
+  listPipeLog(pipeId: string, opts: { limit: number; before?: number }): MaybePromise<PipeLogRow[]>;
+  deletePipeLog(pipeId: string): MaybePromise<void>;
+  deletePipe(id: string): MaybePromise<void>;
 
   // --- AI Memories ---
   listMemories(): MaybePromise<MemoryRow[]>;

@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import OpenAI from 'openai';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -10,6 +9,9 @@ import type { MemoryRow, SkillRow } from '../../database/datastore.js';
 import { parseTriggerEvents, serializeTriggerEvents } from '../../database/datastore.js';
 import { runCode } from '../code-runner/runner.js';
 import { setContacts, labelWithContact } from './contacts-cache.js';
+import { complete, createLlmClient, describeError, readableErrors, type LlmClient, type LlmMessage, type LlmParams, type LlmResponse, type LlmTool } from './llm.js';
+import { OUTGOING_SOURCES, ACTION_TYPES } from '../pipes-outgoing.js';
+import { makeAsk, savePipe, deletePipe, describePipe, PIPE_SOURCES, type AskFn, type PipeDeps } from '../pipes.js';
 
 type SmsMessage = { address: string; body: string; date: number };
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
@@ -19,14 +21,16 @@ type ToolOutput = { name: string; input: Record<string, unknown>; output: string
 const MEMORY_LIMIT = 50;
 
 const DEFAULT_MODELS: Record<string, string> = {
-  anthropic: 'claude-sonnet-4-6',
+  anthropic: 'claude-sonnet-5-5',
   openai: 'gpt-4o',
   groq: 'llama-3.3-70b-versatile',
-  google: 'gemini-2.0-flash',
+  // An alias Google keeps pointed at its current Flash model; fixed model names get retired.
+  google: 'gemini-flash-latest',
   ollama: 'llama3',
 };
 
-const DEFAULT_BASE_URLS: Record<string, string> = {
+// Where each provider lists its models, for the Settings dropdown.
+const MODEL_LIST_BASE_URLS: Record<string, string> = {
   anthropic: 'https://api.anthropic.com/v1',
   groq: 'https://api.groq.com/openai/v1',
   google: 'https://generativelanguage.googleapis.com/v1beta/openai/',
@@ -40,25 +44,164 @@ const MAX_TOOL_ROUNDS = 5;
 // it replays queued SMS via ?drain=true, stores them here, and the WebView picks them up.
 const pendingAutoReplies = new Map<string, { to: string; body: string; createdAt: number }>();
 
-function parseCookie(cookieHeader: string, name: string): string | null {
-  const match = cookieHeader.match(new RegExp('(?:^|;)\\s*' + name + '=([^;]*)'));
-  return match ? decodeURIComponent(match[1]) : null;
+export function getClient(deps: ServerDeps): LlmClient {
+  return createLlmClient(deps.config.ai!);
 }
 
-export function getClient(deps: ServerDeps): OpenAI {
-  const ai = deps.config.ai!;
-  const provider = ai.provider ?? 'anthropic';
-  const baseURL = ai.base_url ?? DEFAULT_BASE_URLS[provider];
-  return new OpenAI({ apiKey: ai.api_key, ...(baseURL ? { baseURL } : {}) });
+/**
+ * Models to move to, in order, when the one asked for is overloaded or has been
+ * retired. A provider can be out of capacity on one model for hours while its
+ * others answer normally, and a fixed default would leave the hub unusable.
+ */
+const MODEL_FALLBACKS: Record<string, string[]> = {
+  anthropic: ['claude-sonnet-5-5', 'claude-sonnet-4-6'],
+  // Newest Flash first, stepping down to older ones, so the best available model is used.
+  google: ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-flash-lite-latest'],
+};
+
+/** Per provider, the model that last answered. Used when the owner has not chosen a model. */
+const workingModel = new Map<string, string>();
+
+/** Forget which models answered. For tests. */
+export function forgetWorkingModels(): void {
+  workingModel.clear();
 }
 
 export function getModel(deps: ServerDeps): string {
   const ai = deps.config.ai!;
-  return ai.model ?? DEFAULT_MODELS[ai.provider ?? 'anthropic'] ?? 'claude-sonnet-4-6';
+  const provider = ai.provider ?? 'anthropic';
+  return ai.model ?? workingModel.get(provider) ?? DEFAULT_MODELS[provider] ?? 'claude-sonnet-4-6';
 }
 
-async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]> {
-  const tools: OpenAI.ChatCompletionTool[] = [];
+function fallbackProvider(model: string): string | null {
+  for (const [provider, models] of Object.entries(MODEL_FALLBACKS)) if (models.includes(model)) return provider;
+  // A model picked from the provider's own list can still be closed to this account
+  // ("no longer available to new users"); it gets the same fallbacks.
+  if (/^gemini-/.test(model)) return 'google';
+  if (/^claude-/.test(model)) return 'anthropic';
+  return null;
+}
+
+/** Models that are not for chat: speech, images, embeddings and the like. */
+const NOT_CHAT = /(embed|tts|audio|image|imagen|veo|whisper|transcribe|realtime|live|robotics|computer-use|moderation|guard|dall-e|sora|nano-banana|omni|aqa|learnlm)/i;
+
+/**
+ * The chat models a provider offers to this key, for the model dropdown in
+ * Settings. Asked from the provider itself, because a list kept in the hub goes
+ * stale: providers retire models every few months. The hub's recommended models
+ * come first.
+ */
+export async function listProviderModels(provider: string, apiKey: string, baseUrl?: string): Promise<string[]> {
+  const base = (baseUrl ?? MODEL_LIST_BASE_URLS[provider] ?? 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const headers: Record<string, string> = provider === 'anthropic'
+    ? { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
+    : { Authorization: `Bearer ${apiKey}` };
+  const res = await readableErrors(`${base}/models${provider === 'anthropic' ? '?limit=100' : ''}`, { headers, signal: AbortSignal.timeout(15_000) });
+  const body = await res.json().catch(() => null) as { data?: Array<{ id?: unknown }>; error?: { message?: string } } | null;
+  if (!res.ok) throw new Error(body?.error?.message || `The provider answered ${res.status}.`);
+  const ids = (body?.data ?? [])
+    .map((m) => String(m.id ?? '').replace(/^models\//, ''))
+    .filter((id) => id && !NOT_CHAT.test(id))
+    .filter((id) => provider !== 'google' || id.startsWith('gemini-'))
+    .filter((id) => provider !== 'openai' || /^(gpt-|o\d|chatgpt-)/.test(id));
+  const recommended = (MODEL_FALLBACKS[provider] ?? [DEFAULT_MODELS[provider]].filter(Boolean)).filter((m) => ids.includes(m));
+  const rest = [...new Set(ids)].filter((id) => !recommended.includes(id)).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  return [...recommended, ...rest].slice(0, 60);
+}
+
+// The `ask(question, text)` helper that pipe programs call: one yes/no question to the
+// configured model. One instance per server, so its answer cache is shared by every run.
+const pipeAsks = new WeakMap<ServerDeps, AskFn>();
+
+export function pipeAsk(deps: ServerDeps): AskFn {
+  let ask = pipeAsks.get(deps);
+  if (!ask) {
+    ask = makeAsk(async (system, user) => {
+      if (!deps.config.ai?.api_key) throw new Error('ask() needs an AI key. Add one in Settings → AI Settings.');
+      const response = await callChatCompletionWithRetry(getClient(deps), {
+        model: getModel(deps),
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+        // Room for a model that thinks before it answers; the answer itself is a few words.
+        max_tokens: 2048,
+      });
+      return response.choices[0]?.message.content ?? '';
+    });
+    pipeAsks.set(deps, ask);
+  }
+  return ask;
+}
+
+function pipeDeps(deps: ServerDeps): PipeDeps {
+  return { ...deps, ask: pipeAsk(deps) };
+}
+
+/** What a pipe program is, for the model that writes them. */
+const PIPE_CONTRACT = [
+  'A pipe is a small filter program over ONE source that agents can call as their own endpoint. Use list_pipes() to see them, save_pipe() to create or change one, delete_pipe(id) to remove one.',
+  `Sources: ${PIPE_SOURCES.join(', ')}. Optional "query" is the source's own search string and sets which items the pipe looks at (Gmail example: "newer_than:60d"); leave it empty for the newest items. A pipe looks at 20 items by default, 50 at most.`,
+  'Put what the source can search for into "query", not only into the program: a time range ("the past month" is newer_than:30d in Gmail) and plain keywords ("recommendation"). The program only ever sees the newest items that match the query, so a narrow query is what lets the pipe reach everything the owner means. Keep the same condition in the program too when it must hold exactly (a source search can be fuzzy).',
+  'Write "description" as one or two plain sentences that say exactly what is released to agents (which items, from when). The owner reads it to check the pipe does what they asked, and revises it by talking to you.',
+  'The program is the BODY of an async JavaScript function. Two names are in scope: `rows` and `ask`. It must `return` an array.',
+  '- `rows`: array of { source, source_item_id, type, timestamp, data }. For gmail, data has title (the subject), body, snippet, author_name, author_email, participants, labels, attachments. Quick filters set by the owner are already applied.',
+  '- `ask(question, text)`: asks the AI model a yes/no question about the text and resolves to true or false. Use it for judgments a keyword test cannot make ("does this email ask me to write a recommendation letter?"). Call it for all rows at once with Promise.all; it limits its own concurrency and caches answers.',
+  '- Nothing else exists: no require, fetch, process, Buffer or timers. Do not use console for output.',
+  '- Return the rows to keep. You may also return trimmed copies (for example without the body) when the agent does not need every field.',
+  'Example program:',
+  '  const keep = await Promise.all(rows.map((r) => ask("Does this email ask the recipient to write a recommendation letter?", r.data.title + "\\n" + (r.data.snippet || r.data.body || ""))));',
+  '  return rows.filter((_, i) => keep[i]);',
+  '',
+  'OUTGOING pipes are the other direction: an agent sends an action, the program decides, and what passes is carried out at once with the owner\'s account (no approval step). Create one with save_pipe and direction "outgoing".',
+  `- Sources: ${OUTGOING_SOURCES.join(', ')}. Action types: ${OUTGOING_SOURCES.map((src) => `${src}: ${ACTION_TYPES[src].join(', ')}`).join('; ')}.`,
+  '- The program is the BODY of an async function with `action` in scope: { type, data } exactly as the agent sent it. Gmail data has to (a string, possibly several addresses separated by commas), subject, body, and for reply_email in_reply_to. Calendar data has title, body, location, start, end, timeZone, attendees ([{ email }], which sends invitations), and eventId for update/delete.',
+  '- It must `return pass()` or `return block(reason)`. The reason is shown to the agent. Anything else, a throw, or a timeout blocks the action. There is no ask(): the decision must be a fixed rule. Nothing else exists: no require, fetch, process or timers.',
+  '- Compare addresses case-insensitively and split `to` on commas and semicolons.',
+  '- Pass `examples`: actions that should pass and actions that should block, taken from the owner\'s words, as [{ type, data, expect: "pass" | "block" }]. save_pipe runs the program on them (and on the last real agent actions) without carrying anything out, and saves unless the program fails on one.',
+  '- Saving leaves an outgoing pipe undeployed. Only the owner deploys it, in the Pipes panel, after checking the test results, and binds the agents that may use it. Say so after saving.',
+  '- Write "description" as exactly what agents may do through it (which actions, to whom).',
+  'Example outgoing program:',
+  '  const students = ["alice@ucsd.edu", "bob@ucsd.edu"];',
+  '  if (action.type !== "send_email" && action.type !== "draft_email") return block("Only emails and drafts.");',
+  '  const to = String(action.data.to).toLowerCase().split(/[,;]/).map((r) => r.trim());',
+  '  const outside = to.filter((r) => !students.includes(r));',
+  '  if (outside.length) return block("Not a lab student: " + outside.join(", "));',
+  '  return pass();',
+  '',
+  'save_pipe test-runs the program on up to 10 items first and saves it only if the run succeeds. If it answers ok:false, nothing was saved (an existing pipe is unchanged): fix the program and call save_pipe again. On success read the `test` field. To change an existing pipe pass its id; only the fields you pass are changed, and its source cannot be changed. Tell the user what the pipe keeps and how many of the tested items matched. Agents need the owner to tick the pipe for them in Settings → Agents before they can call it.',
+].join('\n');
+
+/** Which page the chat is embedded in, and what the user has selected there. */
+export type ChatPage = { page?: 'skills' | 'pipes'; focusId?: string; newKind?: 'incoming' | 'outgoing' };
+
+async function pageContext(deps: ServerDeps, where: ChatPage): Promise<string[]> {
+  if (where.page === 'pipes') {
+    const lines = ['', 'After every save the page runs the pipe on the latest data and shows the user the items it looked at, each marked released or held back, beside what agents receive. So after save_pipe, answer in two or three sentences: what the pipe now releases, and how the test run went (how many of the items looked at were released). Do not list the items. If the result looks wrong for what was asked (nothing released, or everything), say so and suggest what to change.', 'The user is on the Pipes page: this conversation is for creating and refining pipes. Their pipes are shown beside this chat and refresh when you save one, so do not paste a whole program back unless asked.'];
+    const pipe = where.focusId ? await deps.store.getPipe(where.focusId) : null;
+    if (pipe) {
+      lines.push('The pipe the user has selected is below. A request like "also drop newsletters" or "make it stricter" means: change THIS pipe (save_pipe with this id), not create a new one.', JSON.stringify(describePipe(pipe, '')));
+    } else {
+      lines.push(where.newKind === 'outgoing'
+        ? 'No pipe is selected and the user chose "New pipe: outgoing". Create an OUTGOING pipe (save_pipe with direction "outgoing"): a gate on what agents may do with the owner\'s account.'
+        : where.newKind === 'incoming'
+          ? 'No pipe is selected and the user chose "New pipe: incoming". Create an INCOMING pipe: a filter on what agents may read.'
+          : 'No pipe is selected. A request that describes a new filter means: create an incoming pipe; a request about what agents may send or do means: create an outgoing pipe.');
+    }
+    return lines;
+  }
+  if (where.page === 'skills') {
+    const lines = ['', 'The user is on the Skills page: this conversation is for creating and refining skills. Their skills are shown beside this chat and refresh when you save one.'];
+    const skill = where.focusId ? (await deps.store.listSkills()).find((s) => s.id === where.focusId) : null;
+    if (skill) {
+      lines.push('The skill the user has selected is below. A request to adjust behavior means: change THIS skill (save_skill with this id), not create a new one.', JSON.stringify({ id: skill.id, name: skill.name, instructions: skill.instructions, trigger_events: parseTriggerEvents(skill.trigger_event), primitive_type: skill.primitive_type, enabled: !!skill.enabled }));
+    } else {
+      lines.push('No skill is selected. A request that describes new behavior means: create a skill.');
+    }
+    return lines;
+  }
+  return [];
+}
+
+async function buildTools(deps: ServerDeps): Promise<LlmTool[]> {
+  const tools: LlmTool[] = [];
 
   if (await deps.tokenManager.hasToken('gmail')) {
     tools.push({
@@ -72,40 +215,6 @@ async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]
             query: { type: 'string', description: 'Gmail search query (e.g. "is:unread from:alice")' },
             limit: { type: 'number', description: 'Max results (default 20)' },
           },
-        },
-      },
-    });
-    tools.push({
-      type: 'function',
-      function: {
-        name: 'draft_email',
-        description: 'Propose creating an email draft. Staged for owner review before saving.',
-        parameters: {
-          type: 'object',
-          properties: {
-            to: { type: 'string', description: 'Recipient email address' },
-            subject: { type: 'string', description: 'Email subject' },
-            body: { type: 'string', description: 'Email body' },
-            in_reply_to: { type: 'string', description: 'Message ID for threading (optional)' },
-          },
-          required: ['to', 'subject', 'body'],
-        },
-      },
-    });
-    tools.push({
-      type: 'function',
-      function: {
-        name: 'send_email',
-        description: 'Propose sending an email. Staged for owner review before sending.',
-        parameters: {
-          type: 'object',
-          properties: {
-            to: { type: 'string', description: 'Recipient email address' },
-            subject: { type: 'string', description: 'Email subject' },
-            body: { type: 'string', description: 'Email body' },
-            in_reply_to: { type: 'string', description: 'Message ID for threading (optional)' },
-          },
-          required: ['to', 'subject', 'body'],
         },
       },
     });
@@ -123,24 +232,6 @@ async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]
             after: { type: 'string', description: 'ISO timestamp — only events after this time' },
             limit: { type: 'number', description: 'Max results (default 20)' },
           },
-        },
-      },
-    });
-    tools.push({
-      type: 'function',
-      function: {
-        name: 'create_calendar_event',
-        description: 'Propose creating a Google Calendar event. Staged for owner review.',
-        parameters: {
-          type: 'object',
-          properties: {
-            title: { type: 'string', description: 'Event title' },
-            start: { type: 'string', description: 'ISO start time' },
-            end: { type: 'string', description: 'ISO end time' },
-            body: { type: 'string', description: 'Event description (optional)' },
-            location: { type: 'string', description: 'Event location (optional)' },
-          },
-          required: ['title', 'start', 'end'],
         },
       },
     });
@@ -294,6 +385,58 @@ async function buildTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]
   tools.push({
     type: 'function',
     function: {
+      name: 'list_pipes',
+      description: 'List all pipes: id, name, description, source, query, program, enabled.',
+      parameters: { type: 'object', properties: {} },
+    },
+  });
+
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'save_pipe',
+      description: 'Create a pipe, or change one when id is given. Test-runs the program on up to 10 items and saves it only if the run succeeds; returns the result in `test` (itemsFetched, itemsReturned, sample).',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Id of the pipe to change. Omit to create a new pipe.' },
+          name: { type: 'string', description: 'Short name, e.g. "Recommendation letter requests"' },
+          description: { type: 'string', description: 'One sentence saying what the pipe returns. Agents read this to decide whether to call it.' },
+          source: { type: 'string', enum: [...PIPE_SOURCES], description: 'The one source the pipe reads' },
+          query: { type: 'string', description: 'Optional search string for the source that sets which items are looked at. Empty for the newest items.' },
+          program: { type: 'string', description: 'Incoming: body of an async function with `rows` and `ask` in scope; returns an array. Outgoing: body of an async function with `action` in scope; returns pass() or block(reason).' },
+          enabled: { type: 'boolean', description: 'Incoming only: whether agents can call it (default true). Outgoing pipes are always saved off; only the owner switches them on.' },
+          direction: { type: 'string', enum: ['incoming', 'outgoing'], description: 'incoming (default): what agents may read. outgoing: what agents may do. Cannot change after creation.' },
+          examples: {
+            type: 'array',
+            description: 'Outgoing only: example actions to test the program on, some that should pass and some that should block.',
+            items: {
+              type: 'object',
+              properties: {
+                type: { type: 'string' },
+                data: { type: 'object' },
+                expect: { type: 'string', enum: ['pass', 'block'] },
+              },
+              required: ['type', 'data'],
+            },
+          },
+        },
+      },
+    },
+  });
+
+  tools.push({
+    type: 'function',
+    function: {
+      name: 'delete_pipe',
+      description: 'Delete a pipe by id.',
+      parameters: { type: 'object', properties: { id: { type: 'string', description: 'Pipe id' } }, required: ['id'] },
+    },
+  });
+
+  tools.push({
+    type: 'function',
+    function: {
       name: 'delete_skill',
       description: 'Delete an agent skill by ID.',
       parameters: {
@@ -340,10 +483,11 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
   const lines = [
     `You are a personal AI assistant inside PersonalDataHub on the user's Android phone. Today is ${today}.`,
     '',
-    'You help the user understand and act on their personal data. Read tools fetch live data. Write tools (send_sms, send_email, etc.) create staged proposals that the user must review and explicitly approve before anything is sent or saved — always make clear you are proposing, not executing.',
-    'By default, proactively access and edit data sources (calendar, email, sms, etc.) in response to a trigger or implicit request. For example, if someone asks to meet, absolutely propose adding that to the calendar. Do not be passive; use your tools to take concrete action.',
+    'You help the user understand their personal data and author the pipes and skills that decide what agents may read and do. Read tools fetch live data. You cannot send email or change the calendar yourself: say so if asked, and offer to build an outgoing pipe that lets an agent do it within rules the user sets.',
     '',
     `Connected sources: ${Object.keys(deps.config.sources).join(', ') || 'none'}`,
+    // A model does not know its own name unless told; without this it guesses or declines.
+    `You are running as the model "${getModel(deps)}" from the provider "${deps.config.ai?.provider ?? 'anthropic'}", as chosen in Settings → AI Settings. If asked which model you are, say that.`,
   ];
 
   if (memories.length > 0) {
@@ -353,6 +497,7 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
 
   lines.push('', 'Memory: Use save_memory() to record important facts the user shares (preferences, ongoing projects, personal context). Use update_memory(id) when a fact changes. Use delete_memory(id) for stale facts. Be proactive but concise — one clear sentence per memory. If a memory is about someone in an SMS conversation, refer to them by their contact name (shown in the conversation header) rather than their phone number.');
   lines.push('', 'Skills: Skills are primitive rules (labels and actions). Use list_skills() to view them. Use save_skill(name, instructions, trigger_events, enabled) to create/update a primitive. A skill can be tagged with multiple trigger_events (e.g. both sms_received and photo_added) and is only pulled into a task when that task\'s context matches one of its tags. Labels classify incoming events and append tags to the context ground truth. Actions define how to respond based on the context. Ensure one primitive per rule. Do not disable other skills for the same trigger unless explicitly replacing them, as multiple primitives compose together. Currently supported triggers: sms_received, photo_added, email_received, calendar_event_starting, manual_shortcut. Specify allowed_sources to scope permissions.');
+  lines.push('', 'Pipes: ' + PIPE_CONTRACT);
   lines.push('', 'Code execution: Use run_code() to run JavaScript on this device. Supports top-level await, fetch, require (fs, path, etc.), Buffer, and __dataDir (path to app data). Use console.log() to emit output — return values are ignored. Each call is a fresh context; write files at __dataDir to persist data between calls. When asked to find photos matching some criteria, or to clean up duplicates/clutter, prefer writing this logic yourself in run_code over guessing from read_photos summaries alone — see the run_code tool description for the __photos bindings.');
 
   if (sms && sms.length > 0) {
@@ -519,35 +664,8 @@ async function executeToolInner(
       return JSON.stringify({ ok: true, actionId, status: 'pending_review', note: 'Staged for owner approval before sending' });
     }
 
-    case 'draft_email': {
-      const actionId = `act_${randomUUID().slice(0, 12)}`;
-      await deps.store.insertStagingAction({
-        actionId, manifestId: '', source: 'gmail', actionType: 'draft_email',
-        actionData: JSON.stringify(input), purpose: `AI: draft email to ${input.to}`,
-      });
-      stagedActionIds.push(actionId);
-      return JSON.stringify({ ok: true, actionId, status: 'pending_review' });
-    }
 
-    case 'send_email': {
-      const actionId = `act_${randomUUID().slice(0, 12)}`;
-      await deps.store.insertStagingAction({
-        actionId, manifestId: '', source: 'gmail', actionType: 'send_email',
-        actionData: JSON.stringify(input), purpose: `AI: send email to ${input.to}`,
-      });
-      stagedActionIds.push(actionId);
-      return JSON.stringify({ ok: true, actionId, status: 'pending_review' });
-    }
 
-    case 'create_calendar_event': {
-      const actionId = `act_${randomUUID().slice(0, 12)}`;
-      await deps.store.insertStagingAction({
-        actionId, manifestId: '', source: 'google_calendar', actionType: 'create_event',
-        actionData: JSON.stringify(input), purpose: `AI: create event "${input.title}"`,
-      });
-      stagedActionIds.push(actionId);
-      return JSON.stringify({ ok: true, actionId, status: 'pending_review' });
-    }
 
     case 'save_memory': {
       const content = String(input.content ?? '').trim();
@@ -618,6 +736,23 @@ async function executeToolInner(
       return JSON.stringify({ ok: true });
     }
 
+    case 'list_pipes': {
+      const pipes = (await deps.store.listPipes()).map((p) => describePipe(p, ''));
+      return JSON.stringify({ ok: true, pipes });
+    }
+
+    case 'save_pipe': {
+      return JSON.stringify(await savePipe(pipeDeps(deps), input));
+    }
+
+    case 'delete_pipe': {
+      const id = String(input.id ?? '').trim();
+      const pipe = id ? await deps.store.getPipe(id) : null;
+      if (!pipe) return JSON.stringify({ ok: false, error: `No pipe with id "${id}"` });
+      await deletePipe(deps, pipe, 'chat');
+      return JSON.stringify({ ok: true });
+    }
+
     case 'run_code': {
       const code = String(input.code ?? '').trim();
       if (!code) return JSON.stringify({ error: 'code is required' });
@@ -648,45 +783,69 @@ async function executeToolInner(
   }
 }
 
-async function callChatCompletionWithRetry(
-  client: OpenAI,
-  params: OpenAI.ChatCompletionCreateParamsNonStreaming,
+export async function callChatCompletionWithRetry(
+  client: LlmClient,
+  params: LlmParams,
   maxAttempts = 3,
-): Promise<OpenAI.ChatCompletion> {
+): Promise<LlmResponse> {
+  const tried = new Set<string>([params.model]);
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await client.chat.completions.create(params);
+      const response = await complete(client, params);
+      const provider = fallbackProvider(params.model);
+      if (provider) workingModel.set(provider, params.model);
+      return response;
     } catch (err: any) {
-      const status = err?.status || err?.statusCode;
-      const msg = String(err?.message || '');
-      const is429 = status === 429 || msg.includes('429');
-      if (is429 && attempt < maxAttempts) {
-        const waitMs = attempt * 2000;
-        console.warn(`[chat] 429 Rate Limit encountered. Retrying in ${waitMs}ms (${attempt}/${maxAttempts})...`);
+      const { status, message: msg, timedOut } = describeError(err);
+      // Overloaded (503) or retired (404) model: another model of the same provider will do.
+      const unavailable = status === 503 || timedOut || (status === 404 && /model/i.test(msg));
+      const provider = unavailable ? fallbackProvider(params.model) : null;
+      const next = provider ? MODEL_FALLBACKS[provider].find((m) => !tried.has(m)) : undefined;
+      if (next) {
+        console.warn(`[chat] ${params.model} is unavailable (${timedOut ? 'no answer in time' : status}); using ${next} instead.`);
+        tried.add(next);
+        params = { ...params, model: next };
+        attempt--; // switching models is not a retry
+        continue;
+      }
+      // 429: over the rate limit. 503: the provider is overloaded. Both pass if we wait.
+      const busy = status === 429 || status === 503 || msg.includes('429');
+      if (busy && attempt < maxAttempts) {
+        // Providers often say how long ("Please retry in 23.3s"); a short fixed wait would just fail again.
+        const hinted = /retry in ([\d.]+)\s*s/i.exec(msg);
+        const waitMs = hinted ? Math.min(Math.ceil(Number(hinted[1]) * 1000) + 500, 45_000) : attempt * 2000;
+        console.warn(`[chat] provider busy (${status}). Retrying in ${waitMs}ms (${attempt}/${maxAttempts})...`);
         await new Promise((resolve) => setTimeout(resolve, waitMs));
         continue;
       }
-      if (is429) {
-        throw new Error('AI provider rate limit reached (429 Too Many Requests). Please wait a few seconds and try again, or check your API quota in Settings.');
+      if (status === 429 || msg.includes('429')) {
+        throw new Error(`AI provider rate limit reached. ${providerSaid(msg)}`);
       }
-      throw err;
+      const tail = tried.size > 1 ? ` (tried ${[...tried].join(', ')})` : status === 503 || status === 404 ? ' Set another model in Settings → AI Settings.' : '';
+      throw new Error((providerSaid(msg) || 'The AI provider returned an error.') + tail);
     }
   }
   throw new Error('Chat completion failed');
+}
+
+// The provider's own sentence, without the SDK's status prefix and without the long tail of links.
+function providerSaid(message: string): string {
+  return message.replace(/^\d{3}\s+/, '').split('\n')[0].trim().slice(0, 400);
 }
 
 async function runAgentLoop(
   deps: ServerDeps,
   messages: ChatMessage[],
   sms: SmsMessage[] | null,
+  where: ChatPage = {},
 ): Promise<{ reply: string; toolsUsed: string[]; stagedActionIds: string[]; toolOutputs: ToolOutput[] }> {
   const client = getClient(deps);
   const model = getModel(deps);
   const tools = await buildTools(deps);
   const memories = await deps.store.listMemories();
-  const system = buildSystemPrompt(deps, sms, memories);
+  const system = [buildSystemPrompt(deps, sms, memories), ...(await pageContext(deps, where))].join('\n');
 
-  const chatMessages: OpenAI.ChatCompletionMessageParam[] = [
+  const chatMessages: LlmMessage[] = [
     { role: 'system', content: system },
     ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
   ];
@@ -708,7 +867,7 @@ async function runAgentLoop(
 
     if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls?.length) {
       chatMessages.push(choice.message);
-      const results: OpenAI.ChatCompletionToolMessageParam[] = [];
+      const results: LlmMessage[] = [];
       for (const tc of choice.message.tool_calls) {
         if (tc.type !== 'function') continue;
         toolsUsed.push(tc.function.name);
@@ -741,8 +900,8 @@ async function runAgentLoop(
   };
 }
 
-async function buildAutoReplyTools(deps: ServerDeps): Promise<OpenAI.ChatCompletionTool[]> {
-  const tools: OpenAI.ChatCompletionTool[] = [];
+async function buildAutoReplyTools(deps: ServerDeps): Promise<LlmTool[]> {
+  const tools: LlmTool[] = [];
 
   if (await deps.tokenManager.hasToken('gmail')) {
     tools.push({
@@ -773,24 +932,6 @@ async function buildAutoReplyTools(deps: ServerDeps): Promise<OpenAI.ChatComplet
             after: { type: 'string', description: 'ISO timestamp — only events after this time' },
             limit: { type: 'number', description: 'Max results (default 20)' },
           },
-        },
-      },
-    });
-    tools.push({
-      type: 'function',
-      function: {
-        name: 'create_calendar_event',
-        description: 'Create a Google Calendar event immediately — no approval required.',
-        parameters: {
-          type: 'object',
-          properties: {
-            title: { type: 'string', description: 'Event title' },
-            start: { type: 'string', description: 'ISO start time' },
-            end: { type: 'string', description: 'ISO end time' },
-            body: { type: 'string', description: 'Event description (optional)' },
-            location: { type: 'string', description: 'Event location (optional)' },
-          },
-          required: ['title', 'start', 'end'],
         },
       },
     });
@@ -895,20 +1036,6 @@ async function executeAutoReplyToolInner(
       }));
     }
 
-    case 'create_calendar_event': {
-      const connector = deps.connectorRegistry.get('google_calendar');
-      if (!connector) return JSON.stringify({ error: 'Google Calendar not connected' });
-      const result = await connector.executeAction('create_event', input);
-      if (result.success) {
-        await deps.store.insertAuditEntry({
-          timestamp: new Date().toISOString(),
-          event: 'calendar_event_created',
-          source: 'google_calendar',
-          details: JSON.stringify({ title: input.title, start: input.start, end: input.end, createdBy: 'auto_reply' }),
-        });
-      }
-      return JSON.stringify(result);
-    }
 
     case 'save_memory': {
       const content = String(input.content ?? '').trim();
@@ -943,7 +1070,7 @@ async function executeAutoReplyToolInner(
 }
 
 async function evaluateLabels(
-  client: OpenAI,
+  client: LlmClient,
   model: string,
   from: string,
   smsBody: string,
@@ -961,15 +1088,17 @@ async function evaluateLabels(
   try {
     const response = await callChatCompletionWithRetry(client, {
       model,
-      messages: [{ role: 'system', content: prompt }],
-      response_format: { type: 'json_object' }
+      // A user message: providers other than OpenAI refuse a request that has only a system prompt.
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 512,
     });
     const content = response.choices[0]?.message.content?.trim();
     if (!content) return [];
     
     let tags: string[] = [];
     try {
-      const parsed = JSON.parse(content);
+      // The model may wrap the object in a code fence or a sentence; take the object itself.
+      const parsed = JSON.parse(content.slice(content.indexOf('{'), content.lastIndexOf('}') + 1));
       if (parsed.tags && Array.isArray(parsed.tags)) tags = parsed.tags;
     } catch (e) {
       tags = labelSkills.map(s => s.label_tag).filter(tag => tag && content.includes(tag));
@@ -1035,12 +1164,11 @@ async function runAutoReplyLoop(
     `You are an AI SMS auto-reply assistant on the user's Android phone. Today is ${today}.`,
     '',
     'Reply with just the message text — no quotes, no labels, no preamble.',
-    'By default, proactively access and edit data sources (calendar, email, sms, etc.) in response to triggers in the SMS. For example, if the sender asks to meet, absolutely use create_calendar_event to add that to the calendar. Do not be passive; take concrete action.',
+    'Use the read tools for context. You cannot change the calendar or send email.',
     '',
     '--- Tools available ---',
     '- read_calendar_events: check upcoming events and availability',
     '- read_emails: scan recent email threads for context',
-    '- create_calendar_event: create a new event (requires explicit time from sender)',
     '- read_sms_thread: review conversation history with this contact',
     '- save_memory / update_memory / delete_memory: persist facts about contacts (use the contact\'s name, not their phone number, when one is known)',
   ];
@@ -1068,7 +1196,7 @@ async function runAutoReplyLoop(
   }
 
   const labelTagsStr = appliedLabels.length > 0 ? ` [Labels: ${appliedLabels.join(', ')}]` : '';
-  const chatMessages: OpenAI.ChatCompletionMessageParam[] = [
+  const chatMessages: LlmMessage[] = [
     { role: 'system', content: systemLines.join('\n') },
     { role: 'user', content: `Incoming SMS from ${from}: "${smsBody}"${labelTagsStr}` },
   ];
@@ -1090,7 +1218,7 @@ async function runAutoReplyLoop(
 
     if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls?.length) {
       chatMessages.push(choice.message);
-      const results: OpenAI.ChatCompletionToolMessageParam[] = [];
+      const results: LlmMessage[] = [];
       for (const tc of choice.message.tool_calls) {
         if (tc.type !== 'function') continue;
         let input: Record<string, unknown> = {};
@@ -1108,23 +1236,69 @@ async function runAutoReplyLoop(
   return '';
 }
 
+const CHAT_SCOPES = ['chat', 'skills', 'pipes'];
+const HISTORY_MAX_MESSAGES = 200;
+const HISTORY_MAX_BYTES = 1_000_000;
+
+type StoredMessage = { role: 'user' | 'assistant'; content: string; toolOutputs?: ToolOutput[] };
+
+/**
+ * A conversation as the page sends it, reduced to what is kept: the newest messages,
+ * within a size limit (tool outputs can hold whole emails). Null when it is not a conversation.
+ */
+export function cleanHistory(input: unknown): StoredMessage[] | null {
+  if (!Array.isArray(input)) return null;
+  const out: StoredMessage[] = [];
+  for (const m of input as Array<Record<string, unknown>>) {
+    if (!m || (m.role !== 'user' && m.role !== 'assistant') || typeof m.content !== 'string') return null;
+    const msg: StoredMessage = { role: m.role, content: m.content };
+    if (Array.isArray(m.toolOutputs)) {
+      msg.toolOutputs = (m.toolOutputs as Array<Record<string, unknown>>)
+        .filter((t) => t && typeof t.name === 'string' && typeof t.output === 'string')
+        .map((t) => ({ name: t.name as string, input: (t.input && typeof t.input === 'object' ? t.input : {}) as Record<string, unknown>, output: t.output as string }));
+    }
+    out.push(msg);
+  }
+  let kept = out.slice(-HISTORY_MAX_MESSAGES);
+  // Too large: first drop the tool outputs of older messages, then the oldest messages.
+  for (let i = 0; i < kept.length - 1 && Buffer.byteLength(JSON.stringify(kept)) > HISTORY_MAX_BYTES; i++) delete kept[i].toolOutputs;
+  while (kept.length > 1 && Buffer.byteLength(JSON.stringify(kept)) > HISTORY_MAX_BYTES) kept = kept.slice(1);
+  if (kept.length === 1 && Buffer.byteLength(JSON.stringify(kept)) > HISTORY_MAX_BYTES) { delete kept[0].toolOutputs; kept[0].content = kept[0].content.slice(0, 100_000); }
+  return kept;
+}
+
 export function createChatRoutes(deps: ServerDeps): Hono {
   const app = new Hono();
 
-  // Session auth — same pattern as gui/routes.ts
-  app.use('/api/*', async (c, next) => {
-    if (c.req.path === '/api/auth/status') {
-      await next();
-      return;
-    }
-    const cookie = parseCookie(c.req.header('Cookie') ?? '', 'pdh_session');
-    if (!cookie) return c.json({ ok: false, error: 'Unauthorized' }, 401);
-    const session = await deps.store.getValidSession(cookie);
-    if (!session) return c.json({ ok: false, error: 'Unauthorized' }, 401);
-    await next();
+  // Mounted under /web behind requireOwner (see server.ts).
+  // The owner's conversations, kept so a page reload does not lose them. One per page.
+  // The page sends the whole conversation after each exchange; the hub only stores it.
+  app.get('/chat/history/:scope', async (c) => {
+    const scope = c.req.param('scope');
+    if (!CHAT_SCOPES.includes(scope)) return c.json({ ok: false, error: 'Unknown conversation.' }, 404);
+    let messages: unknown = [];
+    try { messages = JSON.parse((await deps.store.getChatHistory(scope)) ?? '[]'); } catch { /* unreadable: start empty */ }
+    return c.json({ ok: true, messages: Array.isArray(messages) ? messages : [] });
   });
 
-  app.get('/api/chat/status', (c) => {
+  app.put('/chat/history/:scope', async (c) => {
+    const scope = c.req.param('scope');
+    if (!CHAT_SCOPES.includes(scope)) return c.json({ ok: false, error: 'Unknown conversation.' }, 404);
+    const body = await c.req.json().catch(() => null) as { messages?: unknown } | null;
+    const messages = cleanHistory(body?.messages);
+    if (!messages) return c.json({ ok: false, error: 'messages must be a list of { role, content }.' }, 400);
+    await deps.store.setChatHistory(scope, JSON.stringify(messages));
+    return c.json({ ok: true, kept: messages.length });
+  });
+
+  app.delete('/chat/history/:scope', async (c) => {
+    const scope = c.req.param('scope');
+    if (!CHAT_SCOPES.includes(scope)) return c.json({ ok: false, error: 'Unknown conversation.' }, 404);
+    await deps.store.deleteChatHistory(scope);
+    return c.json({ ok: true });
+  });
+
+  app.get('/chat/status', (c) => {
     return c.json({
       ok: true,
       configured: !!deps.config.ai?.api_key,
@@ -1133,23 +1307,46 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     });
   });
 
-  app.post('/api/settings/ai-key', async (c) => {
+  // The models to offer in the Settings dropdown. Uses the key being typed, or the
+  // saved key when the provider is the saved one.
+  app.post('/settings/ai-models', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { provider?: unknown; api_key?: unknown };
+    const saved = deps.config.ai;
+    const provider = typeof body.provider === 'string' && body.provider ? body.provider : saved?.provider ?? '';
+    if (!(provider in DEFAULT_MODELS)) return c.json({ ok: false, error: 'Unknown provider' }, 400);
+    const typed = typeof body.api_key === 'string' ? body.api_key.trim() : '';
+    const key = typed || (saved?.provider === provider ? saved.api_key : '');
+    if (!key && provider !== 'ollama') return c.json({ ok: true, models: [], needsKey: true });
+    try {
+      return c.json({ ok: true, models: await listProviderModels(provider, key || 'ollama') });
+    } catch (err) {
+      return c.json({ ok: false, error: providerSaid(err instanceof Error ? err.message : String(err)) || 'Could not list models.' });
+    }
+  });
+
+  app.post('/settings/ai-key', async (c) => {
     const body = await c.req.json();
-    const { api_key, model, provider, base_url } = body;
-    if (!api_key || typeof api_key !== 'string' || !api_key.trim()) {
+    const { api_key, model, provider } = body;
+    // No base URL in the form any more: each provider's address is known. An address set by
+    // hand in the config file is kept as long as the provider stays the same.
+    const base_url = body.base_url ?? (deps.config.ai?.provider === provider ? (deps.config.ai as Record<string, unknown> | undefined)?.base_url : undefined);
+    const prov = (provider && typeof provider === 'string' && provider.trim()) ? provider.trim() : 'anthropic';
+    // Changing only the model does not need the key typed again: the saved key is kept
+    // when the provider is the saved one.
+    const typedKey = typeof api_key === 'string' ? api_key.trim() : '';
+    const key = typedKey || (deps.config.ai?.provider === prov ? deps.config.ai.api_key : '');
+    if (!key) {
       return c.json({ ok: false, error: 'api_key is required' }, 400);
     }
-    const prov = (provider && typeof provider === 'string' && provider.trim()) ? provider.trim() : 'anthropic';
-    const key = api_key.trim();
 
-    if (!deps.config.ai) {
-      (deps.config as Record<string, unknown>).ai = { provider: prov, api_key: key };
-    } else {
-      deps.config.ai.provider = prov;
-      deps.config.ai.api_key = key;
-    }
-    if (model && typeof model === 'string' && model.trim()) deps.config.ai!.model = model.trim();
-    if (base_url && typeof base_url === 'string' && base_url.trim()) (deps.config.ai as Record<string, unknown>).base_url = base_url.trim();
+    // Replace the whole setting. Keeping an earlier provider's model or base URL when
+    // only the provider and key change would send, say, a Claude model name to Google.
+    (deps.config as Record<string, unknown>).ai = {
+      provider: prov,
+      api_key: key,
+      ...(model && typeof model === 'string' && model.trim() ? { model: model.trim() } : {}),
+      ...(base_url && typeof base_url === 'string' && base_url.trim() ? { base_url: base_url.trim() } : {}),
+    };
 
     // Persist to config file — PDH_CONFIG_PATH is set by android.ts at startup
     const configPath = process.env.PDH_CONFIG_PATH;
@@ -1171,12 +1368,12 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     return c.json({ ok: true });
   });
 
-  app.get('/api/memories', async (c) => {
+  app.get('/memories', async (c) => {
     const memories = await deps.store.listMemories();
     return c.json({ ok: true, memories });
   });
 
-  app.post('/api/memories', async (c) => {
+  app.post('/memories', async (c) => {
     const body = await c.req.json();
     const content = typeof body.content === 'string' ? body.content.trim() : '';
     if (!content) return c.json({ ok: false, error: 'content is required' }, 400);
@@ -1190,7 +1387,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     return c.json({ ok: true, id });
   });
 
-  app.patch('/api/memories/:id', async (c) => {
+  app.patch('/memories/:id', async (c) => {
     const id = c.req.param('id');
     const body = await c.req.json();
     const content = typeof body.content === 'string' ? body.content.trim() : '';
@@ -1200,14 +1397,14 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     return c.json({ ok: true });
   });
 
-  app.delete('/api/memories/:id', async (c) => {
+  app.delete('/memories/:id', async (c) => {
     const id = c.req.param('id');
     await deps.store.deleteMemory(id);
     await deps.store.insertAuditEntry({ timestamp: new Date().toISOString(), event: 'ai_memory_deleted', source: null, details: JSON.stringify({ id, deletedBy: 'user' }) });
     return c.json({ ok: true });
   });
 
-  app.post('/api/chat', async (c) => {
+  app.post('/chat', async (c) => {
     if (!deps.config.ai?.api_key) {
       return c.json({ ok: false, error: 'AI not configured. Add an API key in Settings.' }, 400);
     }
@@ -1216,8 +1413,14 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     if (!Array.isArray(messages)) {
       return c.json({ ok: false, error: 'messages array required' }, 400);
     }
+    // The Skills and Pipes pages embed this chat and say what is selected beside it.
+    const where: ChatPage = {
+      page: body.page === 'skills' || body.page === 'pipes' ? body.page : undefined,
+      focusId: typeof body.focusId === 'string' ? body.focusId : undefined,
+      newKind: body.newKind === 'incoming' || body.newKind === 'outgoing' ? body.newKind : undefined,
+    };
     try {
-      const result = await runAgentLoop(deps, messages as ChatMessage[], sms ?? null);
+      const result = await runAgentLoop(deps, messages as ChatMessage[], sms ?? null, where);
       return c.json({ ok: true, reply: result.reply, toolsUsed: result.toolsUsed, stagedActionIds: result.stagedActionIds, toolOutputs: result.toolOutputs });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -1228,7 +1431,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
 
   // Direct code execution — user-triggered (e.g. "Run" button on a code block in the chat UI).
   // This is NOT the agent's path; the agent uses run_code as a tool via executeTool().
-  app.post('/api/code/run', async (c) => {
+  app.post('/code/run', async (c) => {
     const body = await c.req.json();
     const code = typeof body.code === 'string' ? body.code.trim() : '';
     if (!code) return c.json({ ok: false, error: 'code is required' }, 400);
@@ -1249,7 +1452,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
   });
 
   // Auto-reply toggle — session-protected
-  app.get('/api/settings/auto-reply', async (c) => {
+  app.get('/settings/auto-reply', async (c) => {
     return c.json({
       ok: true,
       enabled: deps.config.autoReply?.enabled ?? false,
@@ -1257,7 +1460,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     });
   });
 
-  app.post('/api/settings/auto-reply', async (c) => {
+  app.post('/settings/auto-reply', async (c) => {
     const body = await c.req.json();
     const enabled = Boolean(body.enabled);
     const maxToolRounds = typeof body.maxToolRounds === 'number'
@@ -1283,11 +1486,11 @@ export function createChatRoutes(deps: ServerDeps): Hono {
   });
 
   // Onboarding completion flag — gates the first-run walkthrough in the frontend
-  app.get('/api/settings/onboarding', async (c) => {
+  app.get('/settings/onboarding', async (c) => {
     return c.json({ ok: true, completed: deps.config.onboardingCompleted ?? false });
   });
 
-  app.post('/api/settings/onboarding', async (c) => {
+  app.post('/settings/onboarding', async (c) => {
     const body = await c.req.json();
     const completed = Boolean(body.completed);
     (deps.config as Record<string, unknown>).onboardingCompleted = completed;
@@ -1307,8 +1510,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
   // Contact list sync — called by the RN app (App.tsx) whenever it (re)reads the device
   // contact list, so backend prompt-building code can resolve phone numbers to names
   // synchronously, in-process, with no extra tool/API call per SMS reply or memory.
-  // Uses /device/ prefix (not /api/) to bypass session middleware, same reasoning as /sms/*.
-  app.post('/device/contacts-sync', async (c) => {
+  app.post('/device/contacts', async (c) => {
     const body = await c.req.json();
     const contacts = Array.isArray(body.contacts) ? body.contacts : [];
     setContacts(contacts);
@@ -1316,8 +1518,8 @@ export function createChatRoutes(deps: ServerDeps): Hono {
   });
 
   // Auto-reply execute — called by Android SmsReceiver.
-  // Uses /sms/ prefix (not /api/) to bypass session middleware; safe because server only binds to 127.0.0.1.
-  app.post('/sms/auto-reply', async (c) => {
+  // The receiver authenticates with the device secret (see auth/access.ts).
+  app.post('/device/sms/auto-reply', async (c) => {
     if (!deps.config.autoReply?.enabled) {
       return c.json({ ok: true, enabled: false });
     }
@@ -1384,7 +1586,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
   });
 
   // Manual one-tap reply from the SMS tab (session-protected, bypasses auto-reply toggle)
-  app.post('/api/sms/manual-reply', async (c) => {
+  app.post('/device/sms/manual-reply', async (c) => {
     if (!deps.config.ai?.api_key) {
       return c.json({ ok: false, error: 'AI not configured — add an API key in Settings.' }, 400);
     }
@@ -1434,7 +1636,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
 
   // WebView polls this to pick up drain-path pending replies and send them via AndroidSms.
   // Only populated when ?drain=true is used (by android.ts drainSmsQueue).
-  app.get('/api/sms/pending-replies', async (c) => {
+  app.get('/device/sms/pending-replies', async (c) => {
     const cutoff = Date.now() - 60_000;
     const replies: Array<{ id: string; to: string; body: string }> = [];
     for (const [id, r] of pendingAutoReplies) {
@@ -1447,7 +1649,7 @@ export function createChatRoutes(deps: ServerDeps): Hono {
     return c.json({ ok: true, replies });
   });
 
-  app.delete('/api/sms/pending-replies/:id', async (c) => {
+  app.delete('/device/sms/pending-replies/:id', async (c) => {
     pendingAutoReplies.delete(c.req.param('id'));
     return c.json({ ok: true });
   });

@@ -13,7 +13,7 @@ import { GitHubConnector } from '../connectors/github/connector.js';
 import { PhotoConnector } from '../connectors/photo/connector.js';
 import { Octokit } from 'octokit';
 import { FILTER_TYPES, applyFilters, type QuickFilter } from '../filters.js';
-import { getClient, getModel } from '../chat/routes.js';
+import { getClient, getModel, callChatCompletionWithRetry } from '../chat/routes.js';
 
 interface GuiDeps {
   store: DataStore;
@@ -26,21 +26,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   const app = new Hono();
   const auditLog = new AuditLog(deps.store);
 
-  // Serve the SPA
-  app.get('/', (c) => {
-    return c.html(getIndexHtml());
-  });
-
-  // Temporary strangler route for the React/NativeWind rewrite (see the
-  // migration plan). Serves src/gateway/gui/frontend-web's Vite build via
-  // frontend.generated.next.ts. Becomes '/' at the Phase 5 cutover, when
-  // this route and frontend.generated.next.ts are deleted.
-  app.get('/next', async (c) => {
-    const { getIndexHtml: getNextIndexHtml } = await import('./frontend.generated.next.js');
-    return c.html(getNextIndexHtml());
-  });
-
-  app.post('/api/error-log', async (c) => {
+  app.post('/error-log', async (c) => {
     try {
       const body = await c.req.json();
       const fs = await import('node:fs');
@@ -57,40 +43,10 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
     return c.json({ ok: true });
   });
 
-  // --- Auth endpoints (before middleware) ---
-
-  // Auth status check — also tells frontend if signup is needed
-  app.get('/api/auth/status', async (c) => {
-    const cookie = parseCookie(c.req.header('Cookie') ?? '', 'pdh_session');
-    const hasUsers = (await deps.store.getUserCount()) > 0;
-    if (!cookie) return c.json({ authenticated: false, hasUsers });
-    const session = await deps.store.getValidSession(cookie);
-    return c.json({ authenticated: !!session, hasUsers });
-  });
-
-  // Logout
-  app.post('/api/logout', async (c) => {
-    const cookie = parseCookie(c.req.header('Cookie') ?? '', 'pdh_session');
-    if (cookie) {
-      await deps.store.deleteSession(cookie);
-    }
-    c.header('Set-Cookie', 'pdh_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0');
-    return c.json({ ok: true });
-  });
-
-  // Session auth middleware for all /api/* routes below
-  app.use('/api/*', async (c, next) => {
-    const cookie = parseCookie(c.req.header('Cookie') ?? '', 'pdh_session');
-    if (!cookie) return c.json({ ok: false, error: 'Unauthorized' }, 401);
-    const session = await deps.store.getValidSession(cookie);
-    if (!session) return c.json({ ok: false, error: 'Unauthorized' }, 401);
-    await next();
-  });
-
-  // --- GUI API endpoints (protected by session middleware) ---
+  // --- GUI API endpoints. Mounted under /web behind requireOwner (see server.ts). ---
 
   // Get all sources and their status
-  app.get('/api/sources', async (c) => {
+  app.get('/sources', async (c) => {
     const sources = await Promise.all(Object.entries(deps.config.sources).map(async ([name, config]) => ({
       name,
       enabled: config.enabled,
@@ -133,7 +89,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   });
 
   // Get filters for a source
-  app.get('/api/filters', async (c) => {
+  app.get('/filters', async (c) => {
     const source = c.req.query('source');
     const filters = source
       ? await deps.store.getFiltersBySource(source)
@@ -142,7 +98,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   });
 
   // Create or update a filter
-  app.post('/api/filters', async (c) => {
+  app.post('/filters', async (c) => {
     const body = await c.req.json();
     const { id, source, type, value, enabled } = body;
 
@@ -163,20 +119,20 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   });
 
   // Delete a filter
-  app.delete('/api/filters/:id', async (c) => {
+  app.delete('/filters/:id', async (c) => {
     const id = c.req.param('id');
     await deps.store.deleteFilter(id);
     return c.json({ ok: true });
   });
 
   // Get staging queue
-  app.get('/api/staging', async (c) => {
+  app.get('/staging', async (c) => {
     const actions = await deps.store.getAllStagingActions();
     return c.json({ ok: true, actions });
   });
 
   // Approve/reject a staged action
-  app.post('/api/staging/:actionId/resolve', async (c) => {
+  app.post('/staging/:actionId/resolve', async (c) => {
     const actionId = c.req.param('actionId');
     const body = await c.req.json();
     const { decision } = body; // 'approve' or 'reject'
@@ -223,7 +179,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   });
 
   // Get single staging action
-  app.get('/api/staging/:actionId', async (c) => {
+  app.get('/staging/:actionId', async (c) => {
     const actionId = c.req.param('actionId');
     const action = await deps.store.getStagingAction(actionId);
     if (!action) return c.json({ ok: false, error: 'Not found' }, 404);
@@ -235,7 +191,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   });
 
   // Edit staging action data (only when pending)
-  app.post('/api/staging/:actionId/edit', async (c) => {
+  app.post('/staging/:actionId/edit', async (c) => {
     const actionId = c.req.param('actionId');
     const body = await c.req.json();
     const action = await deps.store.getStagingAction(actionId);
@@ -248,7 +204,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
   });
 
   // Get audit log
-  app.get('/api/audit', async (c) => {
+  app.get('/audit', async (c) => {
     const limit = parseInt(c.req.query('limit') ?? '50', 10);
     const event = c.req.query('event');
     const source = c.req.query('source');
@@ -257,19 +213,19 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
     return c.json({ ok: true, entries });
   });
 
-  app.delete('/api/audit', async (c) => {
+  app.delete('/audit', async (c) => {
     await auditLog.clearAll();
     return c.json({ ok: true });
   });
 
   // --- Agent Skills endpoints ---
 
-  app.get('/api/skills', async (c) => {
+  app.get('/skills', async (c) => {
     const skills = await deps.store.listSkills();
     return c.json({ ok: true, skills });
   });
 
-  app.post('/api/skills', async (c) => {
+  app.post('/skills', async (c) => {
     const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; trigger_events?: string[]; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null; allowed_sources?: string | null };
     if (!body.name?.trim()) return c.json({ ok: false, error: 'name is required' }, 400);
     const id = `skill_${randomUUID().slice(0, 12)}`;
@@ -290,7 +246,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
     return c.json({ ok: true, id });
   });
 
-  app.put('/api/skills/:id', async (c) => {
+  app.put('/skills/:id', async (c) => {
     const id = c.req.param('id');
     const body = await c.req.json() as { name?: string; instructions?: string; trigger_event?: string; trigger_events?: string[]; enabled?: boolean; current_view?: string; logic_tree?: string; summary?: string; primitive_type?: string; label_tag?: string | null; allowed_sources?: string | null };
     if (body.enabled !== undefined) {
@@ -312,20 +268,20 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
     return c.json({ ok: true });
   });
 
-  app.delete('/api/skills/:id', async (c) => {
+  app.delete('/skills/:id', async (c) => {
     const id = c.req.param('id');
     await deps.store.deleteSkill(id);
     return c.json({ ok: true });
   });
 
-  app.post('/api/skills/translate/logical-to-summarized', async (c) => {
+  app.post('/skills/translate/logical-to-summarized', async (c) => {
     try {
       const body = await c.req.json() as { logicTree: any[] };
       const logicTree = body.logicTree || [];
       const client = getClient(deps as any);
       const model = getModel(deps as any);
       
-      const response = await client.chat.completions.create({
+      const response = await callChatCompletionWithRetry(client, {
         model,
         messages: [
           {
@@ -346,7 +302,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
     }
   });
 
-  app.post('/api/skills/translate/summarized-to-logical', async (c) => {
+  app.post('/skills/translate/summarized-to-logical', async (c) => {
     try {
       const body = await c.req.json() as { nlSummary: string };
       const nlSummary = body.nlSummary || '';
@@ -358,7 +314,7 @@ export function createGuiRoutes(deps: GuiDeps): Hono {
       const client = getClient(deps as any);
       const model = getModel(deps as any);
       
-      const response = await client.chat.completions.create({
+      const response = await callChatCompletionWithRetry(client, {
         model,
         messages: [
           {
@@ -407,7 +363,7 @@ Rules:
   // --- GitHub repo discovery endpoints ---
 
   // Fetch all repos from GitHub API, upsert into DB, return with selection state
-  app.get('/api/github/repos', async (c) => {
+  app.get('/github/repos', async (c) => {
     const storedToken = await deps.tokenManager.getToken('github');
     if (!storedToken) {
       return c.json({ ok: false, error: 'GitHub not connected' }, 401);
@@ -458,7 +414,7 @@ Rules:
   });
 
   // Save user's repo selection and permissions
-  app.post('/api/github/repos', async (c) => {
+  app.post('/github/repos', async (c) => {
     const body = await c.req.json() as {
       repos: Record<string, { enabled: boolean; permissions: string[] }>;
     };
@@ -487,7 +443,7 @@ Rules:
   });
 
   // Fetch real calendar events from connected account
-  app.get('/api/calendar/events', async (c) => {
+  app.get('/calendar/events', async (c) => {
     const connector = deps.connectorRegistry.get('google_calendar');
     if (!connector || !(connector instanceof GoogleCalendarConnector)) {
       return c.json({ ok: false, error: 'Calendar not connected' }, 401);
@@ -521,7 +477,7 @@ Rules:
   });
 
   // Preview calendar events with filters applied
-  app.get('/api/calendar/preview', async (c) => {
+  app.get('/calendar/preview', async (c) => {
     const connector = deps.connectorRegistry.get('google_calendar');
     if (!connector || !(connector instanceof GoogleCalendarConnector)) {
       return c.json({ ok: false, error: 'Calendar not connected' }, 401);
@@ -563,7 +519,7 @@ Rules:
   });
 
   // Fetch real emails from connected Gmail account
-  app.get('/api/gmail/emails', async (c) => {
+  app.get('/gmail/emails', async (c) => {
     const connector = deps.connectorRegistry.get('gmail');
     if (!connector || !(connector instanceof GmailConnector)) {
       return c.json({ ok: false, error: 'Gmail not connected' }, 401);
@@ -605,7 +561,7 @@ Rules:
   });
 
   // Preview emails with filters applied (for GUI preview)
-  app.get('/api/gmail/preview', async (c) => {
+  app.get('/gmail/preview', async (c) => {
     const connector = deps.connectorRegistry.get('gmail');
     if (!connector || !(connector instanceof GmailConnector)) {
       return c.json({ ok: false, error: 'Gmail not connected' }, 401);
@@ -656,7 +612,7 @@ Rules:
   });
 
   // Device photos endpoint
-  app.get('/api/photos', async (c) => {
+  app.get('/photos', async (c) => {
     const connector = deps.connectorRegistry.get('photo');
     if (!connector || !(connector instanceof PhotoConnector)) {
       return c.json({ ok: false, error: 'Photo not connected' }, 401);
@@ -688,7 +644,7 @@ Rules:
   });
 
   // Preview photos with EXIF stripped / filters applied
-  app.get('/api/photos/preview', async (c) => {
+  app.get('/photos/preview', async (c) => {
     const connector = deps.connectorRegistry.get('photo');
     if (!connector || !(connector instanceof PhotoConnector)) {
       return c.json({ ok: false, error: 'Photo not connected' }, 401);
@@ -728,7 +684,7 @@ Rules:
     }
   });
 
-  app.post('/api/photos/sync', async (c) => {
+  app.post('/device/photos', async (c) => {
     const connector = deps.connectorRegistry.get('photo');
     if (!connector || !(connector instanceof PhotoConnector)) {
       return c.json({ ok: false, error: 'Photo not connected' }, 401);
@@ -762,9 +718,22 @@ Rules:
   return app;
 }
 
-function parseCookie(header: string, name: string): string | null {
-  const match = header.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return match ? match[1] : null;
+/** The pages themselves. They carry no data; each shows its own sign-in screen. */
+export function createPageRoutes(): Hono {
+  const app = new Hono();
+
+  app.get('/', (c) => c.html(getIndexHtml()));
+
+  // Temporary strangler route for the React/NativeWind rewrite (see the
+  // migration plan). Serves src/gateway/gui/frontend-web's Vite build via
+  // frontend.generated.next.ts. Becomes '/' at the Phase 5 cutover, when
+  // this route and frontend.generated.next.ts are deleted.
+  app.get('/next', async (c) => {
+    const { getIndexHtml: getNextIndexHtml } = await import('./frontend.generated.next.js');
+    return c.html(getNextIndexHtml());
+  });
+
+  return app;
 }
 
 import { getIndexHtml } from './frontend.generated.js';

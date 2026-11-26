@@ -31,6 +31,7 @@ interface SqlJsDatabase {
 interface SqlJsStatic {
   Database: new (data?: Buffer | Uint8Array) => SqlJsDatabase;
 }
+import { PIPE_LOG_KEEP } from './datastore.js';
 import type {
   DataStore,
   StoredTokenRow,
@@ -38,6 +39,12 @@ import type {
   FilterRow,
   AuditRow,
   MemoryRow,
+  AgentRow,
+  PipeRow,
+  NewPipe,
+  PipeUpdate,
+  PipeLogRow,
+  JoinCodeRow,
   SkillRow,
   GitHubRepoRow,
   GitHubRepoInput,
@@ -365,6 +372,116 @@ export class SqlJsDataStore implements DataStore {
     if (!data) return null;
     this.pendingStates.delete(state);
     return data;
+  }
+
+  // --- Agents ---
+
+  listAgents(): AgentRow[] {
+    return this.getAll<AgentRow>('SELECT * FROM agents ORDER BY created_at ASC, id ASC');
+  }
+
+  insertAgent(agent: { id: string; name: string; token_hash: string; permissions: string }): void {
+    this.run('INSERT INTO agents (id, name, token_hash, permissions, created_at) VALUES (?, ?, ?, ?, ?)',
+      [agent.id, agent.name, agent.token_hash, agent.permissions, this.now()]);
+  }
+
+  getAgentByTokenHash(tokenHash: string): AgentRow | null {
+    return this.getOne<AgentRow>('SELECT * FROM agents WHERE token_hash = ?', [tokenHash]);
+  }
+
+  touchAgent(id: string): void {
+    this.run('UPDATE agents SET last_used_at = ? WHERE id = ?', [this.now(), id]);
+  }
+
+  updateAgentPermissions(id: string, permissions: string): void {
+    this.run('UPDATE agents SET permissions = ? WHERE id = ?', [permissions, id]);
+  }
+
+  deleteAgent(id: string): void {
+    this.run('DELETE FROM agents WHERE id = ?', [id]);
+  }
+
+  // --- Join codes ---
+
+  insertJoinCode(code: { code: string; permissions: string; expires_at: string }): void {
+    this.run('INSERT INTO join_codes (code, permissions, created_at, expires_at) VALUES (?, ?, ?, ?)',
+      [code.code, code.permissions, this.now(), code.expires_at]);
+  }
+
+  getJoinCode(code: string): JoinCodeRow | null {
+    return this.getOne<JoinCodeRow>('SELECT * FROM join_codes WHERE code = ?', [code]);
+  }
+
+  consumeJoinCode(code: string): boolean {
+    // sql.js runs in this process with no awaits in between, so read-then-write is atomic here.
+    const row = this.getOne<JoinCodeRow>('SELECT * FROM join_codes WHERE code = ? AND used_at IS NULL', [code]);
+    if (!row) return false;
+    this.run('UPDATE join_codes SET used_at = ? WHERE code = ?', [this.now(), code]);
+    return true;
+  }
+
+  releaseJoinCode(code: string): void {
+    this.run('UPDATE join_codes SET used_at = NULL WHERE code = ?', [code]);
+  }
+
+  // --- Pipes ---
+
+  listPipes(): PipeRow[] {
+    return this.getAll<PipeRow>('SELECT * FROM pipes ORDER BY created_at ASC, id ASC');
+  }
+
+  getPipe(id: string): PipeRow | null {
+    return this.getOne<PipeRow>('SELECT * FROM pipes WHERE id = ?', [id]);
+  }
+
+  insertPipe(pipe: NewPipe): void {
+    this.run('INSERT INTO pipes (id, name, description, source, query, program, enabled, direction, test_actions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [pipe.id, pipe.name, pipe.description, pipe.source, pipe.query, pipe.program, pipe.enabled, pipe.direction ?? 'incoming', pipe.test_actions ?? '[]', this.now(), this.now()]);
+  }
+
+  updatePipe(id: string, fields: PipeUpdate): void {
+    const keys = (['name', 'description', 'source', 'query', 'program', 'enabled', 'test_actions'] as const).filter((k) => fields[k] !== undefined);
+    if (!keys.length) return;
+    this.run(`UPDATE pipes SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`,
+      [...keys.map((k) => fields[k]), this.now(), id]);
+  }
+
+  deletePipe(id: string): void {
+    this.run('DELETE FROM pipes WHERE id = ?', [id]);
+  }
+
+  // --- Pipe log ---
+
+  readonly supportsPipeLog = true;
+
+  insertPipeLog(entry: Omit<PipeLogRow, 'id' | 'at'>): void {
+    this.run('INSERT INTO pipe_log (pipe_id, at, caller, purpose, outcome, summary, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [entry.pipe_id, this.now(), entry.caller, entry.purpose, entry.outcome, entry.summary, entry.duration_ms]);
+    this.run('DELETE FROM pipe_log WHERE pipe_id = ? AND id NOT IN (SELECT id FROM pipe_log WHERE pipe_id = ? ORDER BY id DESC LIMIT ?)',
+      [entry.pipe_id, entry.pipe_id, PIPE_LOG_KEEP]);
+  }
+
+  listPipeLog(pipeId: string, opts: { limit: number; before?: number }): PipeLogRow[] {
+    return this.getAll<PipeLogRow>('SELECT * FROM pipe_log WHERE pipe_id = ? AND id < ? ORDER BY id DESC LIMIT ?',
+      [pipeId, opts.before ?? Number.MAX_SAFE_INTEGER, opts.limit]);
+  }
+
+  deletePipeLog(pipeId: string): void {
+    this.run('DELETE FROM pipe_log WHERE pipe_id = ?', [pipeId]);
+  }
+
+  // --- Chat history ---
+
+  getChatHistory(scope: string): string | null {
+    return this.getAll<{ messages: string }>('SELECT messages FROM chat_history WHERE scope = ?', [scope])[0]?.messages ?? null;
+  }
+
+  setChatHistory(scope: string, messagesJson: string): void {
+    this.run('INSERT OR REPLACE INTO chat_history (scope, messages, updated_at) VALUES (?, ?, ?)', [scope, messagesJson, this.now()]);
+  }
+
+  deleteChatHistory(scope: string): void {
+    this.run('DELETE FROM chat_history WHERE scope = ?', [scope]);
   }
 
   // --- AI Memories ---

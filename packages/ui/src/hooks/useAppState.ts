@@ -64,6 +64,9 @@ export function useAppState() {
   const [memories, setMemories] = useState<MemoryRow[] | null>(null);
   const [memoriesLoading, setMemoriesLoading] = useState(false);
 
+  const [auth, setAuth] = useState<'checking' | 'signedIn' | 'signedOut'>('checking');
+  const [hasAccount, setHasAccount] = useState(true);
+
   const [skills, setSkills] = useState<SkillRow[] | null>(null);
   const [skillsLoading, setSkillsLoading] = useState(false);
 
@@ -549,7 +552,7 @@ export function useAppState() {
   }, []);
 
   const saveAiSettings = useCallback(
-    async (input: { api_key: string; provider?: string; model?: string; base_url?: string }) => {
+    async (input: { api_key: string; provider?: string; model?: string }) => {
       const d = await api.saveAiSettings(input);
       if (d.ok) {
         if (input.provider) setAiProvider(input.provider);
@@ -702,28 +705,59 @@ export function useAppState() {
     api.setOnboardingCompleted(true).catch(() => {});
   }, []);
 
+  // Everything under /web needs the owner. On the phone the shell has already
+  // given us the device secret (see api/client.ts setDeviceSecret), so status says
+  // authenticated straight away. On the web the owner signs in first; loading data
+  // before that would just 401 silently and look like an empty hub.
+  const loadEverything = useCallback(() => {
+    refreshAll();
+    loadAiStatus();
+    loadAutoReplySettings();
+    checkOnboarding();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
-    // The native app has no login screen — mirrors main.js's legacy
-    // "check auth on load, auto-create a device session if needed" sequence.
-    // Every /api/* route is gated by a session cookie middleware, so skipping
-    // this means every data fetch below 401s silently (empty-looking state,
-    // easy to miss — e.g. default-seeded skills just never show up).
+    api.setUnauthorizedHandler(() => setAuth((cur) => (cur === 'signedIn' ? 'signedOut' : cur)));
+    return () => api.setUnauthorizedHandler(null);
+  }, []);
+
+  useEffect(() => {
     async function bootstrap() {
       try {
         const status = await api.getAuthStatus();
-        if (!status.authenticated) {
-          await api.deviceLogin();
+        setHasAccount(status.hasUsers);
+        if (status.authenticated) {
+          setAuth('signedIn');
+          loadEverything();
+        } else {
+          setAuth('signedOut');
         }
       } catch (err) {
-        console.warn('[useAppState] Auth bootstrap failed:', err);
+        console.warn('[useAppState] Auth check failed:', err);
+        setAuth('signedOut');
       }
-      refreshAll();
-      loadAiStatus();
-      loadAutoReplySettings();
-      checkOnboarding();
     }
     bootstrap();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const signIn = useCallback(
+    async (email: string, password: string, createAccount: boolean) => {
+      const d = await api.signIn(email, password, createAccount);
+      if (d.ok) {
+        setHasAccount(true);
+        setAuth('signedIn');
+        loadEverything();
+      }
+      return d;
+    },
+    [loadEverything]
+  );
+
+  const signOut = useCallback(async () => {
+    await api.signOut().catch(() => {});
+    setAuth('signedOut');
   }, []);
 
   const disconnectSource = useCallback(
@@ -747,6 +781,10 @@ export function useAppState() {
   );
 
   return {
+    auth,
+    hasAccount,
+    signIn,
+    signOut,
     sources,
     filters,
     filterTypes,

@@ -1,10 +1,6 @@
 function renderGmailTab() {
       var gmail = state.sources.find(function(s) { return s.name === 'gmail'; });
       var s = state.gmail;
-      var realStaging = state.staging.filter(function(a) { return a.source === 'gmail'; });
-      var gmailStaging = realStaging;
-      var pendingCount = gmailStaging.filter(function(a) { return a.status === 'pending'; }).length;
-
       var gmailFilters = (state.filters || []).filter(function(f) { return f.source === 'gmail'; });
 
       var gmailConnected = gmail && gmail.connected;
@@ -71,63 +67,6 @@ function renderGmailTab() {
         emailListHtml += '</div>';
       });
 
-      // Build action cards
-      var actionHtml = '';
-      gmailStaging.forEach(function(a) {
-        var data = typeof a.action_data === 'string' ? JSON.parse(a.action_data) : a.action_data;
-        var isPending = a.status === 'pending';
-        var isReviewing = state.editingAction === a.action_id;
-        var safe = a.action_id.replace(/'/g, "\\'");
-        var borderClass = isPending ? 'border-left:3px solid var(--warning)' : a.status === 'approved' ? 'border-left:3px solid var(--success);opacity:0.6' : 'border-left:3px solid var(--destructive);opacity:0.6';
-        var statusClass = isPending ? 'pending' : a.status === 'approved' ? 'connected' : 'rejected';
-        var typeLabel = a.action_type === 'reply_email' ? 'reply' : a.action_type === 'draft_email' ? 'draft' : a.action_type;
-        var time = new Date(a.proposed_at || a.createdAt);
-        var timeStr = time.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-
-        actionHtml += '<div class="card" style="padding:16px;' + borderClass + '">';
-        actionHtml += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
-        actionHtml += '<div style="display:flex;align-items:center;gap:6px">';
-        actionHtml += '<span class="status ' + statusClass + '" style="font-size:14px;font-family:JetBrains Mono,monospace;text-transform:uppercase;padding:2px 8px">' + a.status + '</span>';
-        actionHtml += '<span style="font-size:14px;font-family:JetBrains Mono,monospace;color:var(--muted);text-transform:uppercase">' + typeLabel + '</span>';
-        actionHtml += '</div>';
-        actionHtml += '<span style="font-size:14px;font-family:JetBrains Mono,monospace;color:var(--muted)">' + timeStr + '</span>';
-        actionHtml += '</div>';
-        if (a.purpose) actionHtml += '<p style="font-size:14px;color:var(--muted);margin-bottom:8px">' + escapeHtml(a.purpose) + '</p>';
-
-        // Collapsed: show To, Subj, truncated body
-        if (!isReviewing) {
-          actionHtml += '<div style="font-size:14px;display:flex;flex-direction:column;gap:4px">';
-          actionHtml += '<div style="display:flex;gap:8px"><span style="color:var(--muted);width:36px;flex-shrink:0">To:</span><span class="font-mono" style="color:var(--fg)">' + escapeHtml(data.to || '') + '</span></div>';
-          actionHtml += '<div style="display:flex;gap:8px"><span style="color:var(--muted);width:36px;flex-shrink:0">Subj:</span><span class="font-mono" style="color:var(--fg)">' + escapeHtml(data.subject || '') + '</span></div>';
-          actionHtml += '<pre class="font-mono" style="white-space:pre-wrap;background:rgba(0,0,0,0.03);border-radius:6px;padding:8px;font-size:14px;color:var(--fg);max-height:80px;overflow:hidden;margin-top:4px;cursor:pointer;position:relative" onclick="toggleEditAction(\'' + safe + '\')">' + escapeHtml(data.body || '') + '<span style="position:absolute;bottom:0;left:0;right:0;height:28px;background:linear-gradient(transparent,#f5f5f5);pointer-events:none"></span></pre>';
-          actionHtml += '</div>';
-        }
-
-        // Expanded: full editable view
-        if (isReviewing) {
-          actionHtml += '<div style="font-size:14px;display:flex;flex-direction:column;gap:6px">';
-          actionHtml += '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--muted);width:36px;flex-shrink:0">To:</span><input type="text" class="email-edit-input" id="edit-to-' + a.action_id + '" value="' + escapeAttr(data.to || '') + '" style="font-family:JetBrains Mono,monospace;font-size:14px;padding:4px 8px"></div>';
-          actionHtml += '<div style="display:flex;align-items:center;gap:8px"><span style="color:var(--muted);width:36px;flex-shrink:0">Subj:</span><input type="text" class="email-edit-input" id="edit-subj-' + a.action_id + '" value="' + escapeAttr(data.subject || '') + '" style="font-family:JetBrains Mono,monospace;font-size:14px;padding:4px 8px"></div>';
-          actionHtml += '<div><span style="color:var(--muted);display:block;margin-bottom:4px">Body:</span><textarea class="email-body-edit" id="edit-body-' + a.action_id + '" style="font-family:JetBrains Mono,monospace;font-size:14px;min-height:160px">' + escapeHtml(data.body || '') + '</textarea></div>';
-          actionHtml += '</div>';
-        }
-
-        // Buttons
-        if (isPending) {
-          actionHtml += '<div style="display:flex;align-items:center;gap:6px;margin-top:12px">';
-          if (!isReviewing) {
-            actionHtml += '<button class="btn btn-sm btn-outline" style="gap:4px" onclick="toggleEditAction(\'' + safe + '\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Review</button>';
-          } else {
-            actionHtml += '<button class="btn btn-sm btn-outline" style="color:var(--destructive);border-color:rgba(239,68,68,0.3);gap:4px" onclick="resolveAction(\'' + safe + '\', \'reject\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Deny</button>';
-            actionHtml += '<button class="btn btn-sm" style="background:var(--primary);color:#fff;gap:4px" onclick="approveAction(\'' + safe + '\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg> Save to Draft</button>';
-            actionHtml += '<button class="btn btn-sm" style="background:var(--success);color:#fff;gap:4px" onclick="sendAction(\'' + safe + '\')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send</button>';
-          }
-          actionHtml += '</div>';
-        }
-        actionHtml += '</div>';
-      });
-      if (!actionHtml) actionHtml = '<div class="card" style="padding:24px;text-align:center;color:var(--muted);font-size:14px">No pending actions from agents.</div>';
-
       return `
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px">
           <div style="display:flex;align-items:center;gap:16px">
@@ -144,8 +83,7 @@ function renderGmailTab() {
           ${renderFilterCards(gmailFilters)}
         </div>
 
-        <div class="gmail-grid">
-          <div class="gmail-grid-left">
+        <div>
             <div class="action-review-header">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted)"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
               <h2 style="margin:0">Agent Access Preview</h2>
@@ -162,17 +100,6 @@ function renderGmailTab() {
                   ? '<div style="padding:40px;text-align:center"><p style="color:var(--destructive);font-size:14px">Error: ' + escapeHtml(state.emailsError) + '</p><button class="btn btn-primary" onclick="refreshEmails()" style="margin-top:12px">Retry</button></div>'
                   : '<div class="email-list">' + (emailListHtml || '<p class="empty" style="padding:40px">No emails found.</p>') + '</div>'}
             </div>
-          </div>
-
-          <div class="gmail-grid-right">
-            <div class="action-review-header">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted)"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-              <h2 style="margin:0">Agent Action Review</h2>
-              ${pendingCount ? '<span class="nav-badge">' + pendingCount + '</span>' : ''}
-            </div>
-            ${actionHtml}
-          </div>
-        </div>
         </div>
       `;
     }

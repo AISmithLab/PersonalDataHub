@@ -3,6 +3,7 @@
  * and builds the gateway. Used by both src/index.ts and src/lambda.ts.
  */
 
+import { retireProposals } from './gateway/agents.js';
 import { resolve } from 'node:path';
 import type { Hono } from 'hono';
 import type { DataStore } from './database/datastore.js';
@@ -45,6 +46,12 @@ export async function createApp(config: HubConfigParsed): Promise<AppResult> {
 
   // Seed default skills on first run
   await seedDefaultSkills(store);
+
+  // Agents act only through outgoing pipes now; retire the old proposal grants and queue.
+  const retired = await retireProposals(store);
+  if (retired.agentsChanged || retired.proposalsRejected) {
+    console.log(`[agents] proposals retired: ${retired.agentsChanged} agent(s) lost propose permissions, ${retired.proposalsRejected} pending proposal(s) rejected`);
+  }
 
   const encryptionKey = config.encryption_key ?? process.env.PDH_ENCRYPTION_KEY ?? 'pdh-default-key';
 

@@ -38,13 +38,20 @@ export interface ProposeResult {
 
 export interface HubClientConfig {
   hubUrl: string;
+  /** The agent's hub token, sent as Authorization: Bearer on every call. */
+  apiKey?: string;
 }
 
 export class HubClient {
   private hubUrl: string;
+  private headers: Record<string, string>;
 
   constructor(config: HubClientConfig) {
     this.hubUrl = config.hubUrl.replace(/\/+$/, '');
+    this.headers = {
+      'Content-Type': 'application/json',
+      ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+    };
   }
 
   /**
@@ -52,11 +59,9 @@ export class HubClient {
    * The Hub applies the owner's manifest/policy to filter, redact, and shape the data.
    */
   async pull(params: PullParams): Promise<PullResult> {
-    const res = await fetch(`${this.hubUrl}/app/v1/pull`, {
+    const res = await fetch(`${this.hubUrl}/agent/pull`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: this.headers,
       body: JSON.stringify(params),
     });
 
@@ -73,11 +78,9 @@ export class HubClient {
    * The action goes to the owner's staging queue for review before execution.
    */
   async propose(params: ProposeParams): Promise<ProposeResult> {
-    const res = await fetch(`${this.hubUrl}/app/v1/propose`, {
+    const res = await fetch(`${this.hubUrl}/agent/propose`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: this.headers,
       body: JSON.stringify(params),
     });
 

@@ -1,9 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { init, reset, writeConfig, readConfig, CONFIG_PATH, CONFIG_DIR } from './cli.js';
 import { makeTmpDir } from './test-utils.js';
+
+describe('test isolation', () => {
+  it('does not use the real ~/.pdh', () => {
+    expect(CONFIG_DIR).not.toBe(join(homedir(), '.pdh'));
+  });
+});
 
 describe('CLI init', () => {
   let tmpDir: string;
@@ -70,7 +77,12 @@ describe('CLI init', () => {
     const config = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
     expect(config.hubUrl).toBe('http://localhost:3000');
     expect(config.hubDir).toBe(tmpDir);
-    expect(config).not.toHaveProperty('apiKey');
+    // Agents register through join links; nothing agent-related is written here.
+    expect(Object.keys(config).sort()).toEqual(['hubDir', 'hubUrl']);
+    const db = new Database(result.dbPath);
+    const agents = db.prepare('SELECT COUNT(*) AS n FROM agents').get() as { n: number };
+    db.close();
+    expect(agents.n).toBe(0);
   });
 
   it('writes config with custom port', async () => {

@@ -21,7 +21,6 @@ var currentTab = 'ai';
       github: { repoList: [], reposLoading: false, reposLoaded: false, filterOwner: '', search: '' },
       expandedRepos: {},
       expandedEmail: null,
-      editingAction: null,
       realEmails: null,
       emailsLoading: false,
       emailsError: null,
@@ -37,6 +36,10 @@ var currentTab = 'ai';
       settingsProvider: 'anthropic',
       autoReply: { enabled: false, maxToolRounds: 3, loading: false, testResult: null, testLoading: false },
       settingsSection: 'ai',
+      aiModels: { byProvider: {}, loading: false, error: null, chosen: null },
+      pageChats: { skills: { messages: [], loading: false, error: null, draft: '' }, pipes: { messages: [], loading: false, error: null, draft: '' } },
+      pipes: { items: null, loading: false, selectedId: null, output: null, raw: false, showProgram: false, copied: false, error: null, newKind: 'incoming', tab: 'run', tests: null, log: null },
+      agents: { items: null, loading: false, sources: ['gmail', 'google_calendar', 'github', 'photo'], panel: null, ticked: [], error: null, joined: null },
       onboarding: { active: false, step: 'intro' },
     };
     var ONBOARDING_STEPS = ['intro', 'apikey', 'sms', 'chat', 'memory'];
@@ -48,6 +51,8 @@ var currentTab = 'ai';
       document.querySelectorAll('.nav-item[data-tab], #bottom-nav a[data-tab]').forEach(function(el) {
         el.classList.toggle('active', el.dataset.tab === tab);
       });
+      // Pipes can also be made or deleted from the plain Chat tab, so re-read them when a page that shows them opens.
+      if ((tab === 'pipe' || tab === 'settings') && state.pipes.items !== null && typeof loadPipes === 'function') loadPipes();
       render();
     }
     window.switchTab = switchTab;
@@ -64,10 +69,10 @@ var currentTab = 'ai';
     async function fetchData() {
       try {
         var resList = await Promise.all([
-          fetch('/api/sources').then(function(r) { return r.json(); }),
-          fetch('/api/filters').then(function(r) { return r.json(); }),
-          fetch('/api/staging').then(function(r) { return r.json(); }),
-          fetch('/api/audit?limit=20').then(function(r) { return r.json(); })
+          fetch('/web/sources').then(function(r) { return r.json(); }),
+          fetch('/web/filters').then(function(r) { return r.json(); }),
+          fetch('/web/staging').then(function(r) { return r.json(); }),
+          fetch('/web/audit?limit=20').then(function(r) { return r.json(); })
         ]);
         var sources = resList[0];
         var filtersData = resList[1];
@@ -88,7 +93,7 @@ var currentTab = 'ai';
       if (gm && gm.connected && !state.realEmails && !state.emailsLoading) {
         state.emailsLoading = true;
         state.emailsError = null;
-        fetch('/api/gmail/preview?limit=20&t=' + Date.now())
+        fetch('/web/gmail/preview?limit=20&t=' + Date.now())
           .then(function(r) { return r.json(); })
           .then(function(data) {
             state.emailsLoading = false;
@@ -112,7 +117,7 @@ var currentTab = 'ai';
       if (cal && cal.connected && !state.realEvents && !state.eventsLoading) {
         state.eventsLoading = true;
         state.eventsError = null;
-        fetch('/api/calendar/preview?limit=20&t=' + Date.now())
+        fetch('/web/calendar/preview?limit=20&t=' + Date.now())
           .then(function(r) { return r.json(); })
           .then(function(data) {
             state.eventsLoading = false;
@@ -128,18 +133,21 @@ var currentTab = 'ai';
       // Always sync device photos on startup if available
       loadPhotos(true);
 
+      loadChatHistories();
+
       // Check AI configuration status
-      fetch('/api/chat/status').then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/chat/status').then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
           state.chat.aiAvailable = d.configured;
           if (d.provider) state.settingsProvider = d.provider;
+          state.chat.configuredProvider = d.provider || '';
           if (d.model) state.chat.configuredModel = d.model;
           if (currentTab === 'ai' || currentTab === 'settings') render();
         }
       }).catch(function() { /* non-fatal */ });
 
       // Check auto-reply status
-      fetch('/api/settings/auto-reply').then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/settings/auto-reply').then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
           state.autoReply.enabled = d.enabled;
           if (typeof d.maxToolRounds === 'number') state.autoReply.maxToolRounds = d.maxToolRounds;
@@ -148,7 +156,7 @@ var currentTab = 'ai';
       }).catch(function() { /* non-fatal */ });
 
       // Load skills
-      fetch('/api/skills').then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/skills').then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
           state.skills.items = d.skills;
           state.skills.loaded = true;
@@ -163,7 +171,7 @@ var currentTab = 'ai';
       if (!force && state.skills.loaded) return;
       if (state.skills.loading) return;
       state.skills.loading = true;
-      fetch('/api/skills').then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/skills').then(function(r) { return r.json(); }).then(function(d) {
         state.skills.loading = false;
         if (d.ok) { state.skills.items = d.skills; state.skills.loaded = true; if (currentTab === 'skill') render(); }
       }).catch(function() { state.skills.loading = false; });
@@ -174,7 +182,7 @@ var currentTab = 'ai';
       if (!force && state.memories.loaded) return;
       if (state.memories.loading) return;
       state.memories.loading = true;
-      fetch('/api/memories').then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/memories').then(function(r) { return r.json(); }).then(function(d) {
         state.memories.loading = false;
         if (d.ok) {
           state.memories.items = d.memories;
@@ -189,8 +197,405 @@ var currentTab = 'ai';
     }
     window.loadMemories = loadMemories;
 
+    // --- Skills and Pipes pages: embedded chat ---
+    // Keep the newest message in view, but only when one arrived: a re-render for another
+    // reason (a pipe finished running) must not yank the chat away from where the user scrolled.
+    var _pageChatSeen = {};
+    function scrollPageChat() {
+      var el = document.getElementById('page-chat-messages');
+      if (!el) return;
+      var scope = currentTab === 'pipe' ? 'pipes' : 'skills';
+      var chat = state.pageChats[scope];
+      var mark = chat.messages.length + (chat.loading ? 0.5 : 0);
+      if (_pageChatSeen[scope] !== mark) { _pageChatSeen[scope] = mark; el.scrollTop = el.scrollHeight; }
+      else if (_pageChatSeen[scope + ':top'] != null) el.scrollTop = _pageChatSeen[scope + ':top'];
+      el.onscroll = function() { _pageChatSeen[scope + ':top'] = el.scrollTop; };
+    }
+
+    function sourcePage(html) { return '<div class="source-page">' + html + '</div>'; }
+
+    function pageTab(scope) { return scope === 'pipes' ? 'pipe' : 'skill'; }
+
+    // Conversations are kept by the hub, so a reload (or another browser) shows them again.
+    // scope: 'chat' (the Chat tab), 'skills', 'pipes'.
+    function chatOf(scope) { return scope === 'chat' ? state.chat : state.pageChats[scope]; }
+    function loadChatHistories() {
+      ['chat', 'skills', 'pipes'].forEach(function(scope) {
+        fetch('/web/chat/history/' + scope).then(function(r) { return r.json(); }).then(function(d) {
+          var chat = chatOf(scope);
+          // Do not overwrite a conversation the user already started while this was loading.
+          if (!d.ok || !d.messages || !d.messages.length || chat.messages.length) return;
+          chat.messages = d.messages;
+          if (currentTab === (scope === 'chat' ? 'ai' : pageTab(scope))) render();
+        }).catch(function() { /* non-fatal: the page starts with an empty conversation */ });
+      });
+    }
+    function saveChatHistory(scope) {
+      var messages = chatOf(scope).messages.map(function(m) { return { role: m.role, content: m.content, toolOutputs: m.toolOutputs }; });
+      fetch('/web/chat/history/' + scope, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: messages }) }).catch(function() { /* non-fatal */ });
+    }
+    function forgetChatHistory(scope) {
+      fetch('/web/chat/history/' + scope, { method: 'DELETE' }).catch(function() { /* non-fatal */ });
+    }
+
+    async function sendPageChat(scope) {
+      var chat = state.pageChats[scope];
+      var text = (chat.draft || '').trim();
+      if (!text || chat.loading) return;
+      chat.draft = '';
+      chat.messages.push({ role: 'user', content: text });
+      chat.loading = true;
+      chat.error = null;
+      if (currentTab === pageTab(scope)) render();
+
+      var focus = pageChatFocus(scope);
+      var selectionAtSend = scope === 'pipes' ? state.pipes.selectedId : null;
+      try {
+        var res = await fetch('/web/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: chat.messages.slice(-50).map(function(m) { return { role: m.role, content: m.content }; }),
+            page: scope,
+            focusId: focus ? focus.id : undefined,
+            newKind: scope === 'pipes' && !focus ? state.pipes.newKind : undefined
+          })
+        });
+        var data = await res.json();
+        chat.loading = false;
+        if (data.ok) {
+          chat.messages.push({ role: 'assistant', content: data.reply, toolOutputs: data.toolOutputs || [] });
+          await syncAfterChat(scope, data.toolOutputs || [], selectionAtSend);
+        } else {
+          chat.error = data.error || 'Unknown error';
+        }
+      } catch (err) {
+        chat.loading = false;
+        chat.error = err.message || 'Network error';
+      }
+      saveChatHistory(scope);
+      if (currentTab === pageTab(scope)) render();
+    }
+    window.sendPageChat = sendPageChat;
+
+    // The right panel follows the chat: whatever the AI just saved is reloaded and selected.
+    async function syncAfterChat(scope, toolOutputs, selectionAtSend) {
+      var touched = function(names) { return toolOutputs.some(function(t) { return names.indexOf(t.name) >= 0; }); };
+      var savedId = function(name) {
+        var id = null;
+        toolOutputs.forEach(function(t) {
+          if (t.name !== name) return;
+          try { var o = JSON.parse(t.output); if (o && o.ok !== false && o.id) id = o.id; } catch (e) { /* not JSON */ }
+        });
+        return id;
+      };
+      if (touched(['save_pipe', 'delete_pipe'])) {
+        await loadPipes();
+        var pid = savedId('save_pipe');
+        // Follow the chat to the pipe it saved, unless the user picked another pipe while waiting.
+        if (pid && state.pipes.selectedId === selectionAtSend) selectPipe(pid, true);
+        else if (pid && state.pipes.selectedId === pid) selectPipe(pid, true);
+        else if (state.pipes.selectedId && !(state.pipes.items || []).some(function(p) { return p.id === state.pipes.selectedId; })) state.pipes.selectedId = null;
+      }
+      if (touched(['save_skill', 'delete_skill'])) {
+        var d = await fetch('/web/skills').then(function(r) { return r.json(); }).catch(function() { return {}; });
+        if (d.ok) { state.skills.items = d.skills; state.skills.loaded = true; }
+      }
+    }
+
+    function clearPageChat(scope) {
+      state.pageChats[scope].messages = [];
+      state.pageChats[scope].error = null;
+      forgetChatHistory(scope);
+      render();
+    }
+    window.clearPageChat = clearPageChat;
+
+    // --- Pipes page ---
+    var _pipeRunSeq = 0;
+    function loadPipes() {
+      state.pipes.loading = true;
+      return fetch('/agent/pipes').then(function(r) { return r.json(); }).then(function(d) {
+        state.pipes.loading = false;
+        if (d.ok) { state.pipes.items = d.pipes; state.pipes.error = null; }
+        else { state.pipes.error = 'Could not load pipes.'; if (state.pipes.items === null) state.pipes.items = []; }
+        if (currentTab === 'pipe' || (currentTab === 'settings' && state.settingsSection === 'agents')) render();
+      }).catch(function() {
+        state.pipes.loading = false; state.pipes.error = 'Could not load pipes.';
+        if (state.pipes.items === null) state.pipes.items = [];
+        if (currentTab === 'pipe') render();
+      });
+    }
+    window.loadPipes = loadPipes;
+
+    function selectPipe(id, quiet) {
+      // Choosing "New pipe" puts the cursor where the description goes.
+      if (!id && quiet !== true) setTimeout(function() { var el = document.getElementById('page-chat-input-pipes'); if (el) el.focus(); }, 0);
+      state.pipes.selectedId = id;
+      state.pipes.copied = false;
+      state.pipes.output = null;
+      state.pipes.tests = null;
+      state.pipes.log = null;
+      state.pipes.tab = 'run';
+      if (id) runSelectedPipe(true);
+      if (quiet !== true) render();
+    }
+    window.selectPipe = selectPipe;
+
+    // "New pipe": which kind the chat should create.
+    function newPipe(kind) {
+      state.pipes.newKind = kind === 'outgoing' ? 'outgoing' : 'incoming';
+      selectPipe(null);
+    }
+    window.newPipe = newPipe;
+
+    function pipeTab(tab) {
+      state.pipes.tab = tab;
+      if (tab === 'log' && !state.pipes.log) loadPipeLog(false);
+      render();
+    }
+    window.pipeTab = pipeTab;
+
+    // An outgoing pipe's test actions, re-run on the hub. Nothing is sent.
+    var _pipeTestSeq = 0;
+    function testSelectedPipe(quiet) {
+      var id = state.pipes.selectedId;
+      var run = ++_pipeTestSeq;
+      state.pipes.tests = { id: id, loading: true };
+      if (quiet !== true) render();
+      fetch('/web/pipes/' + id + '/test', { method: 'POST' }).then(function(r) { return r.json(); }).then(function(d) {
+        if (run !== _pipeTestSeq || state.pipes.selectedId !== id) return;
+        state.pipes.tests = d.ok ? { id: id, loading: false, results: d.results } : { id: id, loading: false, error: d.error || 'Could not run the tests.' };
+        if (currentTab === 'pipe') render();
+      }).catch(function() {
+        if (run !== _pipeTestSeq || state.pipes.selectedId !== id) return;
+        state.pipes.tests = { id: id, loading: false, error: 'Could not reach the hub.' };
+        if (currentTab === 'pipe') render();
+      });
+    }
+    window.testSelectedPipe = testSelectedPipe;
+
+    // The selected pipe's log, newest first; "older" appends the next page.
+    function loadPipeLog(older) {
+      var id = state.pipes.selectedId;
+      if (!id) return;
+      var cur = state.pipes.log && state.pipes.log.id === id ? state.pipes.log : { id: id, entries: [], open: {} };
+      var before = older && cur.entries.length ? cur.entries[cur.entries.length - 1].id : null;
+      cur.loading = true;
+      state.pipes.log = cur;
+      fetch('/web/pipes/' + id + '/log?limit=50' + (before ? '&before=' + before : '')).then(function(r) { return r.json(); }).then(function(d) {
+        if (state.pipes.selectedId !== id) return;
+        cur.loading = false;
+        if (!d.ok) { cur.error = d.error || 'Could not load the log.'; }
+        else {
+          cur.entries = older ? cur.entries.concat(d.entries) : d.entries;
+          cur.more = d.entries.length === 50;
+        }
+        if (currentTab === 'pipe') render();
+      }).catch(function() { cur.loading = false; cur.error = 'Could not reach the hub.'; if (currentTab === 'pipe') render(); });
+    }
+    window.loadPipeLog = loadPipeLog;
+
+    function togglePipeLogEntry(entryId) {
+      var log = state.pipes.log;
+      if (!log) return;
+      log.open[entryId] = !log.open[entryId];
+      render();
+    }
+    window.togglePipeLogEntry = togglePipeLogEntry;
+
+    // Runs the selected pipe on the latest data. The hub answers with the items the pipe looked
+    // at (each marked released or held back) and the exact response an agent would get.
+    function runSelectedPipe(quiet) {
+      var id = state.pipes.selectedId;
+      var pipe = (state.pipes.items || []).filter(function(p) { return p.id === id; })[0];
+      if (!pipe) return;
+      if (pipe.direction === 'outgoing') { testSelectedPipe(quiet); return; }
+      // Each run gets a number; only the latest one may fill the panel, so an older run of the
+      // same pipe (before a switch or an edit) cannot overwrite a newer result.
+      var run = ++_pipeRunSeq;
+      state.pipes.output = { id: id, loading: true };
+      if (quiet !== true) render();
+      fetch('/web/pipes/' + id + '/preview').then(function(r) { return r.json(); }).then(function(d) {
+        if (run !== _pipeRunSeq || state.pipes.selectedId !== id) return;
+        state.pipes.output = d.ok
+          ? { id: id, loading: false, input: d.input || [], data: d.agentResponse.data, meta: d.agentResponse.meta, body: d.agentResponse, limit: d.limit, maxLimit: d.maxLimit }
+          : { id: id, loading: false, input: d.input || [], error: (typeof d.error === 'string' ? d.error : (d.error && d.error.message)) || 'The pipe failed.' };
+        if (currentTab === 'pipe') render();
+      }).catch(function() {
+        if (run !== _pipeRunSeq || state.pipes.selectedId !== id) return;
+        state.pipes.output = { id: id, loading: false, input: [], error: 'Could not reach the hub.' };
+        if (currentTab === 'pipe') render();
+      });
+    }
+    window.runSelectedPipe = runSelectedPipe;
+
+    function togglePipe(id, enabled) {
+      fetch('/web/pipes/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !!enabled }) })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (!d.ok) state.pipes.error = d.error || 'Could not change the pipe.';
+          return loadPipes();
+        })
+        .then(function() { if (state.pipes.selectedId === id) { state.pipes.output = null; runSelectedPipe(); } });
+    }
+    window.togglePipe = togglePipe;
+
+    function deletePipe(id) {
+      var pipe = (state.pipes.items || []).filter(function(p) { return p.id === id; })[0];
+      if (!pipe || !confirm('Delete the pipe "' + pipe.name + '"? Agents that call it will get an error.')) return;
+      fetch('/web/pipes/' + id, { method: 'DELETE' }).then(function(r) { return r.json(); }).then(function(d) {
+        if (!d.ok) state.pipes.error = d.error || 'Could not delete the pipe.';
+        if (state.pipes.selectedId === id) { state.pipes.selectedId = null; state.pipes.output = null; }
+        state.agents.items = null; // the pipe's permission was removed from every agent
+        loadPipes();
+      });
+    }
+    window.deletePipe = deletePipe;
+
+    function copyPipeUrl() {
+      var pipe = (state.pipes.items || []).filter(function(p) { return p.id === state.pipes.selectedId; })[0];
+      if (!pipe || !navigator.clipboard) return;
+      navigator.clipboard.writeText(pipe.url).then(function() { state.pipes.copied = true; render(); }).catch(function() {});
+    }
+    window.copyPipeUrl = copyPipeUrl;
+
+    // --- Agents (Settings → Agents) ---
+    // An agent registers with a one-time join link the owner makes here, then reads data and
+    // proposes actions within what was ticked for it. The owner never sees a token.
+    var _agentPoll = null;
+
+    function loadAgents() {
+      state.agents.loading = true;
+      return fetch('/web/agents').then(function(r) { return r.json(); }).then(function(d) {
+        state.agents.loading = false;
+        if (!d.ok) return;
+        // Notice an agent that appears while a join link is on screen.
+        if (state.agents.items && state.agents.panel && state.agents.panel.kind === 'link') {
+          var known = state.agents.items.map(function(a) { return a.id; });
+          var fresh = d.agents.filter(function(a) { return known.indexOf(a.id) < 0; })[0];
+          if (fresh) { state.agents.joined = fresh.name; agentClosePanel(true); }
+        }
+        state.agents.items = d.agents;
+        if (d.sources && d.sources.length) state.agents.sources = d.sources;
+        if (currentTab === 'settings' && state.settingsSection === 'agents') render();
+      }).catch(function() {
+        // An empty list, not null: null would make the section try to load again on every render.
+        state.agents.loading = false; state.agents.error = 'Could not load agents.';
+        if (state.agents.items === null) state.agents.items = [];
+        if (currentTab === 'settings' && state.settingsSection === 'agents') render();
+      });
+    }
+    window.loadAgents = loadAgents;
+
+    function agentClosePanel(quiet) {
+      state.agents.panel = null;
+      if (_agentPoll) { clearInterval(_agentPoll); _agentPoll = null; }
+      if (quiet !== true) render();
+    }
+    window.agentClosePanel = agentClosePanel;
+
+    // Registering an agent grants nothing: the link is made with no permissions, and
+    // the owner binds pipes to the agent afterwards (on the Pipes page, or with Edit here).
+    function agentAddOpen() {
+      state.agents.ticked = [];
+      state.agents.error = null;
+      state.agents.joined = null;
+      agentCreateLink();
+    }
+    window.agentAddOpen = agentAddOpen;
+
+    // Binds a pipe to an agent, or unbinds it, from the pipe's panel.
+    function pipeBindAgent(agentId, pipeId, bound) {
+      var a = (state.agents.items || []).filter(function(x) { return x.id === agentId; })[0];
+      if (!a) return;
+      var perm = 'pipe:' + pipeId;
+      var next = a.permissions.filter(function(p) { return p !== perm; });
+      if (bound) next.push(perm);
+      agentRequest('/web/agents/' + encodeURIComponent(agentId), 'PUT', { permissions: next }).then(function(d) {
+        if (d.ok) { a.permissions = (d.agent && d.agent.permissions) || next; state.pipes.bindError = null; }
+        else state.pipes.bindError = d.error || 'Could not change the agent.';
+        render();
+      });
+    }
+    window.pipeBindAgent = pipeBindAgent;
+
+    function agentEditOpen(id) {
+      var a = (state.agents.items || []).filter(function(x) { return x.id === id; })[0];
+      if (!a) return;
+      state.agents.ticked = a.permissions.slice();
+      state.agents.error = null;
+      state.agents.panel = { kind: 'edit', id: a.id, name: a.name };
+      render();
+    }
+    window.agentEditOpen = agentEditOpen;
+
+    function agentToggle(permission) {
+      var i = state.agents.ticked.indexOf(permission);
+      if (i >= 0) state.agents.ticked.splice(i, 1); else state.agents.ticked.push(permission);
+    }
+    window.agentToggle = agentToggle;
+
+    function agentRequest(path, method, body) {
+      return fetch(path, { method: method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+        .then(function(r) { return r.json(); })
+        .catch(function() { return { ok: false, error: 'Could not reach the hub.' }; });
+    }
+
+    function agentCreateLink() {
+      agentRequest('/web/agents/join-links', 'POST', { permissions: state.agents.ticked }).then(function(d) {
+        if (d.ok && d.url) {
+          state.agents.error = null;
+          state.agents.panel = { kind: 'link', url: d.url, expiresAt: d.expires_at, copied: false };
+          // While the link is showing, watch for the agent to arrive.
+          if (_agentPoll) clearInterval(_agentPoll);
+          _agentPoll = setInterval(function() {
+            if (currentTab === 'settings' && state.settingsSection === 'agents' && state.agents.panel && state.agents.panel.kind === 'link') loadAgents();
+            else if (!state.agents.panel) { clearInterval(_agentPoll); _agentPoll = null; }
+          }, 3000);
+        } else state.agents.error = d.error || 'Could not create the join link.';
+        render();
+      });
+    }
+    window.agentCreateLink = agentCreateLink;
+
+    function agentSavePermissions() {
+      var panel = state.agents.panel;
+      if (!panel || panel.kind !== 'edit') return;
+      agentRequest('/web/agents/' + encodeURIComponent(panel.id), 'PUT', { permissions: state.agents.ticked }).then(function(d) {
+        if (d.ok) { state.agents.error = null; state.agents.panel = null; loadAgents(); }
+        else { state.agents.error = d.error || 'Could not save.'; render(); }
+      });
+    }
+    window.agentSavePermissions = agentSavePermissions;
+
+    function agentRevoke(id) {
+      var a = (state.agents.items || []).filter(function(x) { return x.id === id; })[0];
+      if (!a || !confirm('Revoke ' + a.name + '? It will lose access to this hub immediately.')) return;
+      agentRequest('/web/agents/' + encodeURIComponent(id), 'DELETE').then(function(d) {
+        state.agents.error = d.ok ? null : (d.error || 'Could not revoke.');
+        if (state.agents.panel && state.agents.panel.id === id) state.agents.panel = null;
+        if (state.agents.joined === a.name) state.agents.joined = null;
+        loadAgents();
+      });
+    }
+    window.agentRevoke = agentRevoke;
+
+    function agentCopyLink() {
+      var panel = state.agents.panel;
+      if (!panel || panel.kind !== 'link' || !navigator.clipboard) return;
+      navigator.clipboard.writeText(panel.url).then(function() { panel.copied = true; render(); }).catch(function() {});
+    }
+    window.agentCopyLink = agentCopyLink;
+
+    // SQLite stores UTC as "YYYY-MM-DD HH:MM:SS" with no zone marker.
+    function agentTime(value) {
+      var d = new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ? value.replace(' ', 'T') + 'Z' : value);
+      return isNaN(d.getTime()) ? value : d.toLocaleString();
+    }
+
     function deleteMemory(id) {
-      fetch('/api/memories/' + encodeURIComponent(id), { method: 'DELETE' }).then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/memories/' + encodeURIComponent(id), { method: 'DELETE' }).then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) { state.memories.items = state.memories.items.filter(function(m) { return m.id !== id; }); render(); }
       }).catch(function() {});
     }
@@ -215,7 +620,7 @@ var currentTab = 'ai';
     function saveEditMemory(id) {
       var content = state.memories.editContent.trim();
       if (!content) return;
-      fetch('/api/memories/' + encodeURIComponent(id), {
+      fetch('/web/memories/' + encodeURIComponent(id), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: content }),
@@ -253,7 +658,7 @@ var currentTab = 'ai';
     function submitNewMemory() {
       var content = state.memories.newContent.trim();
       if (!content) return;
-      fetch('/api/memories', {
+      fetch('/web/memories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: content }),
@@ -290,39 +695,19 @@ var currentTab = 'ai';
       if (!content) return;
       switch (currentTab) {
         case 'overview': state.settingsSection = 'integrations'; currentTab = 'settings'; content.innerHTML = renderSettingsTab(); break;
-        case 'gmail': content.innerHTML = renderGmailTab(); break;
-        case 'github': content.innerHTML = renderGitHubTab(); break;
-        case 'google_calendar': content.innerHTML = renderCalendarTab(); break;
+        // The source pages bring no padding of their own; without this they sit against the sidebar and the window edge.
+        case 'gmail': content.innerHTML = sourcePage(renderGmailTab()); break;
+        case 'github': content.innerHTML = sourcePage(renderGitHubTab()); break;
+        case 'google_calendar': content.innerHTML = sourcePage(renderCalendarTab()); break;
         case 'sms': content.innerHTML = renderSmsTab(); loadContacts(); loadSmsMessages(); break;
         case 'photo': content.innerHTML = renderPhotoTab(); loadPhotos(false); break;
         case 'ai': content.innerHTML = renderAiTab(); var _cm = document.getElementById('chat-messages'); if (_cm) _cm.scrollTop = _cm.scrollHeight; break;
-        case 'skill': content.innerHTML = renderSkillTab(); loadSkills(); break;
+        case 'skill': content.innerHTML = renderSkillPage(); loadSkills(); scrollPageChat(); break;
+        case 'pipe': content.innerHTML = renderPipePage(); scrollPageChat(); break;
         case 'memory': content.innerHTML = renderMemoryTab(); loadMemories(); break;
         case 'settings': content.innerHTML = renderSettingsTab(); loadMemories(); break;
       }
-      // Update sidebar badges and status dots
-      var gmailPendingCount = state.staging.filter(function(a) { return a.source === 'gmail' && a.status === 'pending'; }).length;
-      var gmailBadge = document.getElementById('gmail-badge');
-      if (gmailBadge) {
-        if (gmailPendingCount) { gmailBadge.textContent = gmailPendingCount; gmailBadge.style.display = ''; }
-        else { gmailBadge.style.display = 'none'; }
-      }
-      var bnGmailBadge = document.getElementById('bn-gmail-badge');
-      if (bnGmailBadge) {
-        if (gmailPendingCount) { bnGmailBadge.textContent = gmailPendingCount; bnGmailBadge.style.display = ''; }
-        else { bnGmailBadge.style.display = 'none'; }
-      }
-      var calPendingCount = state.staging.filter(function(a) { return a.source === 'google_calendar' && a.status === 'pending'; }).length;
-      var calBadge = document.getElementById('calendar-badge');
-      if (calBadge) {
-        if (calPendingCount) { calBadge.textContent = calPendingCount; calBadge.style.display = ''; }
-        else { calBadge.style.display = 'none'; }
-      }
-      var bnCalBadge = document.getElementById('bn-cal-badge');
-      if (bnCalBadge) {
-        if (calPendingCount) { bnCalBadge.textContent = calPendingCount; bnCalBadge.style.display = ''; }
-        else { bnCalBadge.style.display = 'none'; }
-      }
+      // Update sidebar status dots
       // Gmail status dot
       var gmailSource = state.sources.find(function(s) { return s.name === 'gmail'; });
       var gmailDot = document.getElementById('gmail-dot');
@@ -440,7 +825,7 @@ var currentTab = 'ai';
       var hasRealPhotos = state.photo && state.photo.photos && state.photo.photos.length > 0 && state.photo.photos[0].id !== 'img-1';
       if (!force && hasRealPhotos) return;
       if (!window.AndroidSms || !window.AndroidSms.getPhotos) {
-        fetch('/api/photos/preview?limit=20&t=' + Date.now())
+        fetch('/web/photos/preview?limit=20&t=' + Date.now())
           .then(function(r) { return r.json(); })
           .then(function(data) {
             if (data && data.photos) {
@@ -466,7 +851,7 @@ var currentTab = 'ai';
           state.photo = state.photo || {};
           state.photo.error = null;
           state.photo.photos = photosList;
-          fetch('/api/photos/sync', {
+          fetch('/web/device/photos', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ photos: photosList })
@@ -537,7 +922,7 @@ var currentTab = 'ai';
           alert('Failed to send SMS: ' + error);
           return;
         }
-        await fetch('/api/staging/' + actionId + '/resolve', {
+        await fetch('/web/staging/' + actionId + '/resolve', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ decision: 'approve' }),
@@ -578,7 +963,7 @@ var currentTab = 'ai';
       state.sms.contextMenu = Object.assign({}, cm, { status: 'thinking' });
       render();
       try {
-        var res = await fetch('/api/sms/manual-reply', {
+        var res = await fetch('/web/device/sms/manual-reply', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ from: cm.address, body: cm.body }),
@@ -615,7 +1000,7 @@ var currentTab = 'ai';
     window.manualAutoReply = manualAutoReply;
 
     async function rejectSmsAction(actionId) {
-      await fetch('/api/staging/' + actionId + '/resolve', {
+      await fetch('/web/staging/' + actionId + '/resolve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision: 'reject' }),
@@ -647,7 +1032,7 @@ var currentTab = 'ai';
       slot.innerHTML = '<div style="padding:6px 10px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px"><span class="spinner" style="display:inline-block;width:10px;height:10px;border-width:1.5px;vertical-align:middle"></span>Running...</div>';
 
       try {
-        var res = await fetch('/api/code/run', {
+        var res = await fetch('/web/code/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code: code }),
@@ -723,7 +1108,7 @@ var currentTab = 'ai';
       }
 
       try {
-        var res = await fetch('/api/chat', {
+        var res = await fetch('/web/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ messages: msgs, sms: sms }),
@@ -743,6 +1128,7 @@ var currentTab = 'ai';
         state.chat.loading = false;
         state.chat.error = err.message || 'Network error';
       }
+      saveChatHistory('chat');
       if (currentTab === 'ai') {
         render();
         var msgs2 = document.getElementById('chat-messages');
@@ -756,21 +1142,71 @@ var currentTab = 'ai';
       state.chat.error = null;
       state.chat.stagedSmsIds = [];
       state.chat.codeBlocks = {};
+      forgetChatHistory('chat');
       if (currentTab === 'ai') render();
     }
     window.clearChat = clearChat;
 
+    // The model dropdown: "Automatic" first (the hub picks a current model and moves on if it
+    // is overloaded), then the models the provider itself lists for the key.
+    function renderAiModelOptions() {
+      var am = state.aiModels;
+      var provider = state.settingsProvider;
+      var list = am.byProvider[provider] || [];
+      var saved = (state.chat.configuredProvider === provider && state.chat.configuredModel) || '';
+      var chosen = am.chosen !== null ? am.chosen : saved;
+      var opts = '<option value=""' + (chosen === '' ? ' selected' : '') + '>Automatic (recommended)</option>';
+      var all = list.slice();
+      if (chosen && all.indexOf(chosen) < 0) all.unshift(chosen);
+      all.forEach(function(m) { opts += '<option value="' + escapeAttr(m) + '"' + (m === chosen ? ' selected' : '') + '>' + escapeHtml(m) + '</option>'; });
+      return opts;
+    }
+
+    function aiModelHint() {
+      var am = state.aiModels;
+      var provider = state.settingsProvider;
+      if (am.loading) return 'Loading models…';
+      if (am.error) return 'Could not load the model list: ' + am.error + ' Automatic still works.';
+      if ((am.byProvider[provider] || []).length) return 'Automatic picks a current model and switches if it is overloaded.';
+      return 'Enter the API key to see this provider\'s models. Automatic works without choosing.';
+    }
+
+    function refreshAiModelSelect() {
+      var sel = document.getElementById('ai-model');
+      if (sel) sel.innerHTML = renderAiModelOptions();
+      var hint = document.getElementById('ai-model-hint');
+      if (hint) hint.textContent = aiModelHint();
+    }
+
+    // Asks the hub for the provider's models: with the key just typed, or the saved key.
+    function loadAiModels(typedKey) {
+      var provider = state.settingsProvider;
+      var am = state.aiModels;
+      am.loading = true; am.error = null;
+      refreshAiModelSelect();
+      fetch('/web/settings/ai-models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: provider, api_key: (typedKey || '').trim() || undefined })
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        am.loading = false;
+        if (d.ok) am.byProvider[provider] = d.models || [];
+        else am.error = d.error || 'unknown error';
+        if (state.settingsProvider === provider) refreshAiModelSelect();
+      }).catch(function() { am.loading = false; am.error = 'network error'; refreshAiModelSelect(); });
+    }
+    window.loadAiModels = loadAiModels;
+
     function selectProvider(val) {
       state.settingsProvider = val;
-      var customUrls = { anthropic: 'https://api.anthropic.com/v1', openai: '', groq: 'https://api.groq.com/openai/v1', google: 'https://generativelanguage.googleapis.com/v1beta/openai/', ollama: 'http://localhost:11434/v1' };
-      var defaultModels = { anthropic: 'claude-sonnet-4-6', openai: 'gpt-4o', groq: 'llama-3.3-70b-versatile', google: 'gemini-2.0-flash', ollama: 'llama3' };
-      var urlEl = document.getElementById('ai-base-url');
-      var modelEl = document.getElementById('ai-model');
-      if (urlEl) urlEl.placeholder = customUrls[val] || 'https://...';
-      if (modelEl && !modelEl.value) modelEl.placeholder = defaultModels[val] || 'model name';
-      // Re-render just the provider pills without clobbering focused inputs
+      state.aiModels.chosen = null;
+      state.aiModels.error = null;
+      // Re-render just the provider pills and the model list without clobbering the key being typed
       var pillsEl = document.getElementById('provider-pills');
       if (pillsEl) pillsEl.innerHTML = renderProviderPills();
+      refreshAiModelSelect();
+      var keyEl = document.getElementById('ai-api-key');
+      if (!state.aiModels.byProvider[val]) loadAiModels(keyEl ? keyEl.value : '');
     }
     window.selectProvider = selectProvider;
 
@@ -781,15 +1217,20 @@ var currentTab = 'ai';
       var key = document.getElementById('ai-api-key').value.trim();
       var model = document.getElementById('ai-model').value.trim();
       var provider = state.settingsProvider;
-      var baseUrl = document.getElementById('ai-base-url').value.trim();
-      if (!key) { alert('API key is required'); return; }
-      fetch('/api/settings/ai-key', {
+      // The saved key is kept when only the model changes for the saved provider.
+      var keepsSavedKey = !key && state.chat.aiAvailable && state.chat.configuredProvider === provider;
+      if (!key && !keepsSavedKey) { alert('API key is required'); return; }
+      fetch('/web/settings/ai-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: key, model: model || undefined, provider: provider || 'anthropic', base_url: baseUrl || undefined }),
+        body: JSON.stringify({ api_key: key || undefined, model: model || undefined, provider: provider || 'anthropic' }),
       }).then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok) {
           state.chat.aiAvailable = true;
+          state.chat.configuredModel = model;
+          state.chat.configuredProvider = provider;
+          state.aiModels.chosen = null;
+          if (!(state.aiModels.byProvider[provider] || []).length) loadAiModels(key);
           var flash = document.getElementById('ai-flash');
           if (flash) { flash.style.opacity = '1'; setTimeout(function() { flash.style.opacity = '0'; }, 2000); }
         } else {
@@ -804,7 +1245,7 @@ var currentTab = 'ai';
       state.autoReply.loading = true;
       render();
       try {
-        var res = await fetch('/api/settings/auto-reply', {
+        var res = await fetch('/web/settings/auto-reply', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ enabled: enabled })
         });
@@ -828,7 +1269,7 @@ var currentTab = 'ai';
       if (isNaN(n) || n < 1 || n > 10) return;
       state.autoReply.maxToolRounds = n;
       try {
-        await fetch('/api/settings/auto-reply', {
+        await fetch('/web/settings/auto-reply', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ enabled: state.autoReply.enabled, maxToolRounds: n })
         });
@@ -843,7 +1284,7 @@ var currentTab = 'ai';
       render();
       try {
         var fakeFrom = '+1555' + Math.floor(1000000 + Math.random() * 9000000);
-        var res = await fetch('/sms/auto-reply', {
+        var res = await fetch('/web/device/sms/auto-reply', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ from: fakeFrom, body: 'Hey, are you free later?' })
         });
@@ -870,8 +1311,10 @@ var currentTab = 'ai';
     function onboardingSaveAiKey() {
       var key = document.getElementById('ob-ai-api-key').value.trim();
       var provider = state.settingsProvider;
-      if (!key) { alert('API key is required'); return; }
-      fetch('/api/settings/ai-key', {
+      // The saved key is kept when only the model changes for the saved provider.
+      var keepsSavedKey = !key && state.chat.aiAvailable && state.chat.configuredProvider === provider;
+      if (!key && !keepsSavedKey) { alert('API key is required'); return; }
+      fetch('/web/settings/ai-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ api_key: key, provider: provider || 'anthropic' }),
@@ -894,7 +1337,7 @@ var currentTab = 'ai';
     }
 
     function checkOnboarding() {
-      fetch('/api/settings/onboarding').then(function(r) { return r.json(); }).then(function(d) {
+      fetch('/web/settings/onboarding').then(function(r) { return r.json(); }).then(function(d) {
         if (d.ok && !d.completed) {
           state.onboarding.active = true;
           state.onboarding.step = 'intro';
@@ -915,7 +1358,7 @@ var currentTab = 'ai';
       state.onboarding.active = false;
       var el = document.getElementById('onboarding-screen');
       if (el) { el.style.display = 'none'; el.innerHTML = ''; }
-      fetch('/api/settings/onboarding', {
+      fetch('/web/settings/onboarding', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ completed: true }),
@@ -1031,7 +1474,7 @@ var currentTab = 'ai';
       try {
         if (currentView === 'LOGICAL') {
           // Flow A: Logical -> Summarized
-          var r = await fetch('/api/skills/translate/logical-to-summarized', {
+          var r = await fetch('/web/skills/translate/logical-to-summarized', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ logicTree: editContent.logic_tree })
@@ -1049,7 +1492,7 @@ var currentTab = 'ai';
           }
         } else {
           // Flow B: Summarized -> Logical
-          var r = await fetch('/api/skills/translate/summarized-to-logical', {
+          var r = await fetch('/web/skills/translate/summarized-to-logical', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nlSummary: editContent.instructions })
@@ -1187,7 +1630,7 @@ var currentTab = 'ai';
       if (sk.editingId !== id) return;
       var c = sk.editContent;
       try {
-        await fetch('/api/skills/' + id, {
+        await fetch('/web/skills/' + id, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1207,6 +1650,8 @@ var currentTab = 'ai';
 
 
     /* INJECT_renderSkillTab */
+
+    /* INJECT_renderWorkbench */
 
 
     function toggleAddSkill() {
@@ -1243,7 +1688,7 @@ var currentTab = 'ai';
         if (current_view === 'LOGICAL') {
           var currentTreeJson = JSON.stringify(logic_tree_arr);
           if (cache.logicTreeJson !== currentTreeJson) {
-            var tr = await fetch('/api/skills/translate/logical-to-summarized', {
+            var tr = await fetch('/web/skills/translate/logical-to-summarized', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ logicTree: logic_tree_arr })
@@ -1261,7 +1706,7 @@ var currentTab = 'ai';
           }
         } else {
           if (cache.instructions !== instructions) {
-            var tr = await fetch('/api/skills/translate/summarized-to-logical', {
+            var tr = await fetch('/web/skills/translate/summarized-to-logical', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ nlSummary: instructions })
@@ -1279,7 +1724,7 @@ var currentTab = 'ai';
           }
         }
 
-        var r = await fetch('/api/skills', {
+        var r = await fetch('/web/skills', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1315,7 +1760,7 @@ var currentTab = 'ai';
     window.submitNewSkill = submitNewSkill;
 
     async function loadSkillsAsync() {
-      var d = await fetch('/api/skills').then(function(r) { return r.json(); });
+      var d = await fetch('/web/skills').then(function(r) { return r.json(); });
       if (d.ok) { state.skills.items = d.skills; state.skills.loaded = true; render(); }
     }
 
@@ -1371,7 +1816,7 @@ var currentTab = 'ai';
           var currentTreeJson = JSON.stringify(logic_tree_arr);
           if (cache.logicTreeJson !== currentTreeJson) {
             // Logic tree has changed! Generate new instructions (nlSummary) via translation
-            var tr = await fetch('/api/skills/translate/logical-to-summarized', {
+            var tr = await fetch('/web/skills/translate/logical-to-summarized', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ logicTree: logic_tree_arr })
@@ -1397,7 +1842,7 @@ var currentTab = 'ai';
           // current_view === 'SUMMARIZED'
           if (cache.instructions !== instructions) {
             // Instructions have changed! Generate new logic tree via translation
-            var tr = await fetch('/api/skills/translate/summarized-to-logical', {
+            var tr = await fetch('/web/skills/translate/summarized-to-logical', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ nlSummary: instructions })
@@ -1422,7 +1867,7 @@ var currentTab = 'ai';
         }
 
         // Now save both to storage
-        var r = await fetch('/api/skills/' + id, {
+        var r = await fetch('/web/skills/' + id, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1453,14 +1898,14 @@ var currentTab = 'ai';
     window.saveEditSkill = saveEditSkill;
 
     async function toggleSkillActive(id, enabled) {
-      await fetch('/api/skills/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enabled }) });
+      await fetch('/web/skills/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: enabled }) });
       await loadSkillsAsync();
     }
     window.toggleSkillActive = toggleSkillActive;
 
 async function deleteSkill(id) {
       if (!confirm('Delete this skill?')) return;
-      await fetch('/api/skills/' + id, { method: 'DELETE' });
+      await fetch('/web/skills/' + id, { method: 'DELETE' });
       await loadSkillsAsync();
     }
     window.deleteSkill = deleteSkill;
@@ -1475,11 +1920,6 @@ async function deleteSkill(id) {
       render();
     }
 
-    function toggleEditAction(actionId) {
-      state.editingAction = state.editingAction === actionId ? null : actionId;
-      render();
-    }
-
     // --- Quick filter functions ---
     /* INJECT_renderFilterCards */
 
@@ -1490,7 +1930,7 @@ async function deleteSkill(id) {
     async function toggleCalendarFilter(type, enabled, existingId) {
       var valEl = document.getElementById('cal-filter-val-' + type);
       var value = valEl ? valEl.value : '';
-      await fetch('/api/filters', {
+      await fetch('/web/filters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: existingId || undefined, source: 'google_calendar', type: type, value: value, enabled: enabled ? 1 : 0 })
@@ -1501,7 +1941,7 @@ async function deleteSkill(id) {
 
     async function updateCalendarFilterValue(type, value, existingId) {
       var filter = (state.filters || []).find(function(f) { return f.type === type && f.source === 'google_calendar'; });
-      await fetch('/api/filters', {
+      await fetch('/web/filters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: existingId || undefined, source: 'google_calendar', type: type, value: value, enabled: filter ? filter.enabled : 0 })
@@ -1510,7 +1950,7 @@ async function deleteSkill(id) {
         state.realEvents = null;
         await fetchData();
       } else {
-        var filtersData = await fetch('/api/filters').then(function(r) { return r.json(); });
+        var filtersData = await fetch('/web/filters').then(function(r) { return r.json(); });
         state.filters = filtersData.filters || [];
       }
     }
@@ -1518,7 +1958,7 @@ async function deleteSkill(id) {
     async function toggleFilter(type, enabled, existingId) {
       var valEl = document.getElementById('filter-val-' + type);
       var value = valEl ? valEl.value : '';
-      await fetch('/api/filters', {
+      await fetch('/web/filters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: existingId || undefined, source: 'gmail', type: type, value: value, enabled: enabled ? 1 : 0 })
@@ -1531,7 +1971,7 @@ async function deleteSkill(id) {
     async function updateFilterValue(type, value, existingId) {
       // Only save if filter is currently enabled
       var filter = (state.filters || []).find(function(f) { return f.type === type && f.source === 'gmail'; });
-      await fetch('/api/filters', {
+      await fetch('/web/filters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: existingId || undefined, source: 'gmail', type: type, value: value, enabled: filter ? filter.enabled : 0 })
@@ -1541,26 +1981,9 @@ async function deleteSkill(id) {
         await fetchData();
       } else {
         // Still update local state so the value is saved
-        var filtersData = await fetch('/api/filters').then(function(r) { return r.json(); });
+        var filtersData = await fetch('/web/filters').then(function(r) { return r.json(); });
         state.filters = filtersData.filters || [];
       }
-    }
-
-    async function sendAction(actionId) {
-      var editTo = document.getElementById('edit-to-' + actionId);
-      if (editTo) {
-        await fetch('/api/staging/' + actionId + '/edit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action_data: {
-            to: document.getElementById('edit-to-' + actionId).value,
-            subject: document.getElementById('edit-subj-' + actionId).value,
-            body: document.getElementById('edit-body-' + actionId).value,
-            send: true
-          }})
-        });
-      }
-      await resolveAction(actionId, 'approve');
     }
 
     // --- Toggle repo expand/collapse ---
@@ -1579,7 +2002,7 @@ async function deleteSkill(id) {
             permissions: typeof r.permissions === 'string' ? JSON.parse(r.permissions) : r.permissions
           };
         });
-        fetch('/api/github/repos', {
+        fetch('/web/github/repos', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ repos: payload })
@@ -1591,7 +2014,7 @@ async function deleteSkill(id) {
       state.github.reposLoading = true;
       render();
       try {
-        var res = await fetch('/api/github/repos');
+        var res = await fetch('/web/github/repos');
         var data = await res.json();
         if (data.ok && data.repos) {
           state.github.repoList = data.repos.map(function(r) {
@@ -1672,13 +2095,21 @@ async function deleteSkill(id) {
     }
 
     // --- OAuth actions ---
-    function startOAuth(source) {
-      window.location.href = '/oauth/' + source + '/start';
+    // The hub builds the provider URL (owner-only); the browser then goes there.
+    async function startOAuth(source) {
+      try {
+        var res = await fetch('/web/oauth/' + source + '/start', { method: 'POST' });
+        var data = await res.json();
+        if (data.ok && data.url) { window.location.href = data.url; return; }
+        alert('Could not start sign-in: ' + (data.error || res.status));
+      } catch (e) {
+        alert('Could not start sign-in: ' + e.message);
+      }
     }
 
     async function disconnectSource(source) {
       if (!confirm('Disconnect ' + source + '? You will need to re-authorize.')) return;
-      await fetch('/oauth/' + source + '/disconnect', { method: 'POST' });
+      await fetch('/web/oauth/' + source + '/disconnect', { method: 'POST' });
       if (source === 'gmail') {
         state.realEmails = null;
         state.emailsLoading = false;
@@ -1808,7 +2239,7 @@ async function deleteSkill(id) {
 
     async function clearAuditLog() {
       if (!confirm('Delete all audit log history? This cannot be undone.')) return;
-      await fetch('/api/audit', { method: 'DELETE' });
+      await fetch('/web/audit', { method: 'DELETE' });
       state.audit = [];
       render();
     }
@@ -1817,7 +2248,7 @@ async function deleteSkill(id) {
     async function approveAction(actionId) {
       var editTo = document.getElementById('edit-to-' + actionId);
       if (editTo && editTo.style.display !== 'none') {
-        await fetch('/api/staging/' + actionId + '/edit', {
+        await fetch('/web/staging/' + actionId + '/edit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action_data: {
@@ -1831,7 +2262,7 @@ async function deleteSkill(id) {
     }
 
     async function resolveAction(actionId, decision) {
-      await fetch('/api/staging/' + actionId + '/resolve', {
+      await fetch('/web/staging/' + actionId + '/resolve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision })
@@ -1840,7 +2271,7 @@ async function deleteSkill(id) {
     }
 
     async function logout() {
-      await fetch('/api/logout', { method: 'POST' });
+      await fetch('/web/auth/logout', { method: 'POST' });
       window.location.reload();
     }
 
@@ -2023,14 +2454,12 @@ async function deleteSkill(id) {
       render(); // Show loading state immediately
       fetchData();
     };
-    window.toggleEditAction = toggleEditAction;
     window.toggleFilter = toggleFilter;
     window.updateFilterValue = updateFilterValue;
     window.renderFilterCards = renderFilterCards;
     window.toggleCalendarFilter = toggleCalendarFilter;
     window.updateCalendarFilterValue = updateCalendarFilterValue;
     window.renderCalendarFilterCards = renderCalendarFilterCards;
-    window.sendAction = sendAction;
 
     // Shared OAuth-completion handler. Reached two ways:
     //  1. Desktop/browser deployments: server redirects the same page to
@@ -2130,7 +2559,7 @@ async function deleteSkill(id) {
       btn.disabled = true;
       btn.textContent = isSignup ? 'Creating account...' : 'Signing in...';
 
-      var endpoint = isSignup ? '/auth/signup' : '/auth/login';
+      var endpoint = isSignup ? '/web/auth/signup' : '/web/auth/login';
       fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2166,14 +2595,14 @@ async function deleteSkill(id) {
     setInterval(async function() {
       if (!state.autoReply.enabled || !window.AndroidSms) return;
       try {
-        var res = await fetch('/api/sms/pending-replies');
+        var res = await fetch('/web/device/sms/pending-replies');
         var d = await res.json();
         if (!d.ok || !d.replies || !d.replies.length) return;
         d.replies.forEach(function(r) {
           var cbId = 'autoreply_' + r.id;
           window._smsSendCbs[cbId] = function(error) {
             if (error) console.warn('[auto-reply] send error:', error);
-            fetch('/api/sms/pending-replies/' + r.id, { method: 'DELETE' }).catch(function() {});
+            fetch('/web/device/sms/pending-replies/' + r.id, { method: 'DELETE' }).catch(function() {});
           };
           window.AndroidSms.sendMessage(cbId, r.to, r.body);
         });
@@ -2181,7 +2610,7 @@ async function deleteSkill(id) {
     }, 3000);
 
     // Primary auto-reply loop: poll inbox every 5s, detect new incoming messages,
-    // call /sms/auto-reply, and send the reply via AndroidSms directly.
+    // call /web/device/sms/auto-reply, and send the reply via AndroidSms directly.
     // This uses the same proven path as manual reply and doesn't depend on SmsReceiver.
     var _autoReplyLastMs = Date.now(); // only process messages that arrive after startup
     setInterval(function() {
@@ -2202,7 +2631,7 @@ async function deleteSkill(id) {
               .filter(function(m) { return m.address === msg.address; })
               .sort(function(a, b) { return a.date - b.date; })
               .slice(-10);
-            var res = await fetch('/sms/auto-reply', {
+            var res = await fetch('/web/device/sms/auto-reply', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ from: msg.address, body: msg.body, history: history }),
@@ -2222,33 +2651,17 @@ async function deleteSkill(id) {
     }, 5000);
 
     // Check auth on load — auto-login for single-device use
-    fetch('/api/auth/status').then(function(r) { return r.json(); }).then(function(data) {
+    fetch('/web/auth/status').then(function(r) { return r.json(); }).then(function(data) {
       if (data.authenticated) {
         document.getElementById('login-screen').style.display = 'none';
         document.getElementById('app').style.display = 'flex';
         fetchData();
         checkOnboarding();
       } else {
-        // Auto-create user + session (device is localhost — no credentials needed)
-        fetch('/auth/device-login', { method: 'POST' })
-          .then(function(r) { return r.json(); })
-          .then(function(d) {
-            if (d.ok) {
-              document.getElementById('login-screen').style.display = 'none';
-              document.getElementById('app').style.display = 'flex';
-              fetchData();
-              checkOnboarding();
-            } else {
-              document.getElementById('login-screen').style.display = 'flex';
-              document.getElementById('app').style.display = 'none';
-              setAuthMode(!data.hasUsers);
-            }
-          })
-          .catch(function() {
-            document.getElementById('login-screen').style.display = 'flex';
-            document.getElementById('app').style.display = 'none';
-            setAuthMode(false);
-          });
+        // No automatic login: the owner signs in (or creates the account on first run).
+        document.getElementById('login-screen').style.display = 'flex';
+        document.getElementById('app').style.display = 'none';
+        setAuthMode(!data.hasUsers);
       }
     }).catch(function() {
       document.getElementById('login-screen').style.display = 'flex';

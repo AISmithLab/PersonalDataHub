@@ -1,10 +1,10 @@
 import React, { useCallback, useState } from 'react';
-import { View, ScrollView, Pressable, Text, Linking, TextInput } from 'react-native';
+import { View, ScrollView, Pressable, Text, Linking, TextInput, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppState } from './hooks/useAppState';
 import { useSmsAutoReply } from './hooks/useSmsAutoReply';
 import { useOAuthDeepLink, alertOAuthError } from './hooks/useOAuthDeepLink';
-import { oauthStartUrl } from './api/client';
+import { startOAuth } from './api/startOAuth';
 import { GmailTab } from './tabs/GmailTab';
 import { CalendarTab } from './tabs/CalendarTab';
 import { GitHubTab } from './tabs/GitHubTab';
@@ -17,11 +17,13 @@ import { AiSettingsForm } from './components/AiSettingsForm';
 import { AutoReplyForm } from './components/AutoReplyForm';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { TabIcon } from './components/TabIcon';
+import { LoginScreen } from './components/LoginScreen';
+import { AgentsForm } from './components/AgentsForm';
 import type { TabIconName } from './components/TabIcon';
 
 type BottomTab = 'ai' | 'skill' | 'memory' | 'settings';
 type ManageSource = 'gmail' | 'google_calendar' | 'github' | 'sms' | 'photo';
-type SettingsSection = 'ai' | 'autoreply' | 'activity' | 'support';
+type SettingsSection = 'ai' | 'autoreply' | 'agents' | 'activity' | 'support';
 type SettingsView = 'root' | 'integrations' | { manage: ManageSource } | { section: SettingsSection };
 
 const PRIMARY_COLOR = '#006b5a';
@@ -45,6 +47,7 @@ const INTEGRATIONS: { name: ManageSource; label: string; subtitle: string; isNat
 const SETTINGS_SECTIONS: { key: SettingsSection; label: string }[] = [
   { key: 'ai', label: 'AI Settings' },
   { key: 'autoreply', label: 'SMS Auto-Reply' },
+  { key: 'agents', label: 'Agents' },
   { key: 'activity', label: 'Activity Log' },
   { key: 'support', label: 'Support' },
 ];
@@ -74,6 +77,17 @@ export function App() {
     setActiveTab('settings');
     setSettingsView('root');
   }, []);
+
+  if (state.auth === 'checking') {
+    return <View className="flex-1 bg-background" />;
+  }
+  if (state.auth === 'signedOut') {
+    return (
+      <View className="flex-1 bg-background" style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
+        <LoginScreen state={state} />
+      </View>
+    );
+  }
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -163,7 +177,7 @@ function SettingsTab({
                     </Pressable>
                   ) : (
                     <Pressable
-                      onPress={() => Linking.openURL(oauthStartUrl(item.name))}
+                      onPress={() => void startOAuth(item.name)}
                       className="bg-primary rounded-lg px-3.5 py-1.5"
                     >
                       <Text className="text-label-sm text-on-primary">Connect</Text>
@@ -182,7 +196,8 @@ function SettingsTab({
     <View>
       <Text className="text-headline-md text-on-surface font-bold mb-4">Settings</Text>
       <View className="gap-2.5">
-        {SETTINGS_SECTIONS.map((s) => (
+        {/* No agent runtime can reach the hub inside the phone app, and registration is switched off there. */}
+        {SETTINGS_SECTIONS.filter((s) => s.key !== 'agents' || Platform.OS === 'web').map((s) => (
           <Pressable
             key={s.key}
             onPress={() => setView({ section: s.key })}
@@ -199,6 +214,14 @@ function SettingsTab({
           <Text className="text-body-md text-on-surface">Integrations</Text>
           <Text className="text-on-surface-variant">→</Text>
         </Pressable>
+        {Platform.OS === 'web' ? (
+          <Pressable
+            onPress={() => void state.signOut()}
+            className="bg-surface border border-outline-variant rounded-lg px-4 py-3.5"
+          >
+            <Text className="text-body-md text-on-surface-variant">Sign out</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -219,6 +242,7 @@ function SettingsSectionScreen({
       <BackHeader title={label} onBack={onBack} />
       {section === 'ai' && <AiSettingsForm state={state} />}
       {section === 'autoreply' && <AutoReplyForm state={state} />}
+      {section === 'agents' && <AgentsForm state={state} />}
       {section === 'activity' && <ActivityLog state={state} />}
       {section === 'support' && <SupportSection state={state} />}
     </View>

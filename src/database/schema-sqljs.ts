@@ -88,6 +88,54 @@ CREATE TABLE IF NOT EXISTS github_repos (
   fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS agents (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  token_hash TEXT NOT NULL UNIQUE,
+  permissions TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_used_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS join_codes (
+  code TEXT PRIMARY KEY,
+  permissions TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pipes (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL,
+  query TEXT NOT NULL DEFAULT '',
+  program TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS pipe_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pipe_id TEXT NOT NULL,
+  at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  caller TEXT NOT NULL,
+  purpose TEXT NOT NULL DEFAULT '',
+  outcome TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '{}',
+  duration_ms INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS pipe_log_by_pipe ON pipe_log (pipe_id, id);
+
+CREATE TABLE IF NOT EXISTS chat_history (
+  scope TEXT PRIMARY KEY,
+  messages TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS ai_memories (
   id TEXT PRIMARY KEY,
   content TEXT NOT NULL,
@@ -114,6 +162,8 @@ CREATE TABLE IF NOT EXISTS agent_skills (
 
 export function createTables(db: ExecDb): void {
   db.exec(TABLES);
+  try { db.exec("ALTER TABLE pipes ADD COLUMN direction TEXT NOT NULL DEFAULT 'incoming'"); } catch (_) { /* already exists */ }
+  try { db.exec("ALTER TABLE pipes ADD COLUMN test_actions TEXT NOT NULL DEFAULT '[]'"); } catch (_) { /* already exists */ }
   // Migrate existing agent_skills tables
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN instructions TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already exists */ }
   try { db.exec("ALTER TABLE agent_skills ADD COLUMN trigger_event TEXT NOT NULL DEFAULT 'sms_received'"); } catch (_) { /* already exists */ }

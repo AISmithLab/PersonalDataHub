@@ -2,7 +2,7 @@
 
 This guide covers installing PersonalDataHub for use with **OpenClaw**. Because OpenClaw agents run with broader system access, this setup uses **OS-level user separation** to isolate OAuth tokens and the database from the agent process.
 
-> For the simpler Claude Code / Cursor / Windsurf setup (no user separation required), see the main [README](../README.md).
+> For the simpler setup with no user separation, see the main [README](../README.md).
 
 ---
 
@@ -46,7 +46,7 @@ sudo -u personaldatahub -i
 cd ~ && git clone https://github.com/AISmithLab/PersonalDataHub.git
 cd PersonalDataHub && pnpm install && pnpm build
 
-# Initialize (save the owner password it prints)
+# Initialize
 npx pdh init
 
 # Start the server
@@ -59,7 +59,7 @@ exit
 
 ## 3. Configure Your Main User
 
-Back as your main user, create the PDH config so the CLI knows where the server lives:
+Back as your main user, create the PDH config so the `pdh` command knows where the server lives. Only `pdh` reads this file; agents do not.
 
 ```bash
 mkdir -p ~/.pdh
@@ -84,17 +84,27 @@ Open `http://localhost:3000` in the `personaldatahub` user's browser session.
 
 ## 5. Connect OpenClaw
 
+Register the agent with the hub first. In the GUI, open **Settings → Agents**, click **Add agent**, choose its permissions, and copy the join link. Then, as your main user:
+
+```bash
+query-hub join <join-link> --name openclaw
+```
+
+See [Setup, Step 5](SETUP.md#step-5-connect-your-agent-main-user) for how to get the `query-hub` command.
+
 Install the PersonalDataHub skill from ClawHub:
 
 ```bash
 clawhub install personaldatahub
 ```
 
+The plugin reads the hub address and token from the file `query-hub join` wrote.
+
 ---
 
 ## Why User Separation?
 
-OpenClaw agents may have broader filesystem access than MCP-based agents like Claude Code. Running PersonalDataHub as a separate OS user ensures:
+OpenClaw agents may have broader filesystem access than sandboxed coding agents like Claude Code. Running PersonalDataHub as a separate OS user ensures:
 
 - **OAuth tokens** are stored in files owned by `personaldatahub` with `0600` permissions — your agent process cannot read them
 - **The SQLite database** (containing the audit log and filter config) is similarly protected

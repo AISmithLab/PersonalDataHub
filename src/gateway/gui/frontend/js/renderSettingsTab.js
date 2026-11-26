@@ -21,6 +21,7 @@ function renderSettingsTab() {
       var sections = [
         { key: 'ai', label: 'AI Settings', icon: 'smart_toy' },
         { key: 'sms', label: 'SMS Auto-Reply', icon: 'sms' },
+        { key: 'agents', label: 'Agents', icon: 'robot_2' },
         { key: 'integrations', label: 'Integrations', icon: 'extension' },
         { key: 'audit', label: 'Activity Log', icon: 'list_alt' },
         { key: 'support', label: 'Support', icon: 'bug_report' }
@@ -42,10 +43,13 @@ function renderSettingsTab() {
       html += '<div class="flex-grow p-margin overflow-y-auto max-w-4xl w-full mx-auto">';
 
       if (activeSection === 'ai') {
+        // With a saved key, fetch that provider's models once so the dropdown is ready.
+        var _am = state.aiModels;
+        if (aiConfigured && state.settingsProvider === state.chat.configuredProvider && !_am.byProvider[state.settingsProvider] && !_am.loading && !_am.error) loadAiModels('');
         html += '<div class="space-y-lg">';
         html += '  <div class="border-b border-outline-variant pb-xs">';
         html += '    <h2 class="font-headline-lg text-headline-lg text-on-surface">AI Assistant</h2>';
-        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Connect any OpenAI-compatible AI provider.</p>';
+        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Choose a provider, paste its API key, and pick a model.</p>';
         html += '  </div>';
 
         html += '  <div class="space-y-md max-w-md">';
@@ -57,18 +61,13 @@ function renderSettingsTab() {
         var aiPlaceholder = aiConfigured ? '•••••••••••• (Configured)' : 'sk-ant-...';
         html += '    <div class="space-y-xs">';
         html += '      <label class="font-label-caps text-label-caps text-on-surface-variant">API Key</label>';
-        html += '      <input type="password" id="ai-api-key" placeholder="' + aiPlaceholder + '" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
-        html += '    </div>';
-
-        var currentModel = state.chat.configuredModel || '';
-        html += '    <div class="space-y-xs">';
-        html += '      <label class="font-label-caps text-label-caps text-on-surface-variant">Model <span class="font-normal font-body-sm text-on-surface-variant/75">(optional — uses provider default if blank)</span></label>';
-        html += '      <input type="text" id="ai-model" value="' + escapeAttr(currentModel) + '" placeholder="claude-sonnet-4-6" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
+        html += '      <input type="password" id="ai-api-key" onchange="loadAiModels(this.value)" placeholder="' + aiPlaceholder + '" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
         html += '    </div>';
 
         html += '    <div class="space-y-xs">';
-        html += '      <label class="font-label-caps text-label-caps text-on-surface-variant">Base URL <span class="font-normal font-body-sm text-on-surface-variant/75">(optional — uses provider default if blank)</span></label>';
-        html += '      <input type="text" id="ai-base-url" placeholder="https://api.anthropic.com/v1" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">';
+        html += '      <label for="ai-model" class="font-label-caps text-label-caps text-on-surface-variant">Model</label>';
+        html += '      <select id="ai-model" onchange="state.aiModels.chosen=this.value" class="w-full bg-white border border-outline-variant rounded-lg px-3 py-2 text-body-md font-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-sm">' + renderAiModelOptions() + '</select>';
+        html += '      <p id="ai-model-hint" class="font-body-sm text-body-sm text-on-surface-variant/80">' + escapeHtml(aiModelHint()) + '</p>';
         html += '    </div>';
 
         html += '    <div class="flex items-center gap-md pt-sm">';
@@ -136,6 +135,114 @@ function renderSettingsTab() {
         html += '</div>';
       }
 
+      else if (activeSection === 'agents') {
+        // Agents register with a one-time join link made here. No secret is ever shown:
+        // the hub hands the token to the agent when it joins.
+        var ag = state.agents;
+        if (ag.items === null && !ag.loading) loadAgents();
+        if (state.pipes.items === null && !state.pipes.loading) loadPipes();
+        var pipeList = state.pipes.items || [];
+        var SRC = { gmail: 'Gmail', google_calendar: 'Calendar', github: 'GitHub', photo: 'Photos' };
+        var grid = function() {
+          var tick = function(perm, label) {
+            return '<label class="flex items-center gap-sm py-1 text-body-sm cursor-pointer"><input type="checkbox" class="w-4 h-4 accent-primary"' + (ag.ticked.indexOf(perm) >= 0 ? ' checked' : '') + ' onchange="agentToggle(\x27' + perm + '\x27)"><span class="text-on-surface">' + label + '</span></label>';
+          };
+          var incoming = pipeList.filter(function(p) { return p.direction !== 'outgoing'; });
+          var outgoing = pipeList.filter(function(p) { return p.direction === 'outgoing'; });
+          var g = '<div class="font-semibold text-on-surface-variant text-xs mb-xs">Incoming pipes: what it can read</div>';
+          if (!incoming.length) g += '<div class="text-xs text-on-surface-variant">None yet. Create one on the Pipes page.</div>';
+          incoming.forEach(function(p) { g += tick('pipe:' + p.id, escapeHtml(p.name)); });
+          g += '<div class="pt-sm mt-sm border-t border-outline-variant/60"><div class="font-semibold text-on-surface-variant text-xs mb-xs">Outgoing pipes: what it can do</div>';
+          if (!outgoing.length) g += '<div class="text-xs text-on-surface-variant">None yet. Create one on the Pipes page.</div>';
+          outgoing.forEach(function(p) { g += tick('pipe:' + p.id, escapeHtml(p.name) + (p.enabled ? '' : ' <span class="text-xs text-on-surface-variant">(off)</span>')); });
+          g += '</div>';
+          // Whole-source access bypasses pipes. Shown folded and never ticked by default.
+          var anyPull = ag.sources.some(function(src) { return ag.ticked.indexOf('pull:' + src) >= 0; });
+          g += '<details class="pt-sm mt-sm border-t border-outline-variant/60"' + (anyPull ? ' open' : '') + '><summary class="text-xs text-on-surface-variant cursor-pointer">Whole-source access (bypasses pipes)</summary><div class="pt-xs">';
+          ag.sources.forEach(function(src) { g += tick('pull:' + src, 'Everything in ' + escapeHtml(SRC[src] || src)); });
+          return g + '</div></details>';
+        };
+        var summary = function(perms) {
+          var parts = [];
+          ag.sources.forEach(function(src) {
+            var can = [];
+            if (perms.indexOf('pull:' + src) >= 0) can.push('read');
+            if (can.length) parts.push((SRC[src] || src) + ' (' + can.join(', ') + ')');
+          });
+          perms.forEach(function(perm) {
+            if (perm.indexOf('pipe:') !== 0) return;
+            var p = pipeList.filter(function(x) { return x.id === perm.slice(5); })[0];
+            parts.push((p && p.direction === 'outgoing' ? 'acts through: ' : 'pipe: ') + (p ? p.name : perm.slice(5) + ' (deleted)'));
+          });
+          return parts.length ? parts.join(' · ') : 'No pipes bound: sees and does nothing';
+        };
+        var btn = 'font-label-caps text-label-caps px-4 py-2 rounded-lg transition-all active:scale-95';
+        var primary = btn + ' bg-primary hover:bg-primary-hover text-on-primary shadow-sm';
+        var ghost = btn + ' border border-outline hover:bg-surface-container-high text-on-surface-variant';
+
+        html += '<div class="space-y-lg">';
+        html += '  <div class="border-b border-outline-variant pb-xs">';
+        html += '    <h2 class="font-headline-lg text-headline-lg text-on-surface">Agents</h2>';
+        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Agents reach your data only through the pipes you bind to them. Register an agent with a join link (it starts with no access), then bind incoming pipes for what it may read and outgoing pipes for what it may do. Each agent can be revoked on its own.';
+        html += '  </div>';
+
+        if (ag.error) html += '<div class="bg-error/10 border border-error/30 rounded-lg p-3 text-error text-body-sm">' + escapeHtml(ag.error) + '</div>';
+        if (ag.joined) {
+          html += '<div class="bg-primary/10 border border-primary/40 rounded-lg p-3 flex items-center justify-between gap-md text-body-sm">';
+          html += '<span><b>' + escapeHtml(ag.joined) + '</b> joined.</span>';
+          html += '<button onclick="state.agents.joined=null; render()" class="text-on-surface-variant text-xs">Dismiss</button></div>';
+        }
+
+        var panel = ag.panel;
+        if (!panel) {
+          html += '<button onclick="agentAddOpen()" class="' + primary + '">Add agent</button>';
+          html += '<div class="text-xs text-on-surface-variant mt-xs">A new agent can see and do nothing. After it joins, bind pipes to it here (Edit) or on the Pipes page.</div>';
+        } else if (panel.kind === 'add' || panel.kind === 'edit') {
+          html += '<div class="bg-white border border-primary/40 rounded-xl shadow-sm p-md space-y-md max-w-xl">';
+          html += '<div class="font-body-md text-body-md font-semibold text-on-surface">Pipes bound to ' + escapeHtml(panel.name || 'this agent') + '</div>';
+          html += grid();
+          html += '<div class="flex gap-sm">';
+          html += panel.kind === 'add'
+            ? '<button onclick="agentCreateLink()" class="' + primary + '">Create join link</button>'
+            : '<button onclick="agentSavePermissions()" class="' + primary + '">Save</button>';
+          html += '<button onclick="agentClosePanel()" class="' + ghost + '">Cancel</button></div></div>';
+        } else if (panel.kind === 'link') {
+          var until = new Date(panel.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          html += '<div class="bg-white border border-primary/40 rounded-xl shadow-sm p-md space-y-sm max-w-2xl">';
+          html += '<div class="font-body-md text-body-md font-semibold text-on-surface">Join link, valid once, until ' + escapeHtml(until) + '</div>';
+          html += '<div id="agent-join-link" class="bg-surface-container rounded-lg p-3 font-mono text-xs break-all select-all">' + escapeHtml(panel.url) + '</div>';
+          html += '<button onclick="agentCopyLink()" class="' + ghost + '">' + (panel.copied ? 'Copied' : 'Copy link') + '</button>';
+          html += '<div class="text-body-sm text-on-surface-variant">On the machine where the agent runs:</div>';
+          html += '<div class="bg-surface-container rounded-lg p-3 font-mono text-xs break-all select-all">smithagent joinhub &lt;agent&gt; ' + escapeHtml(panel.url) + '</div>';
+          html += '<div class="text-body-sm text-on-surface-variant">Waiting for the agent to join… It joins with no access; bind pipes to it afterwards.</div>';
+          html += '<button onclick="agentClosePanel()" class="' + ghost + '">Close</button></div>';
+        }
+
+        if (ag.items === null) {
+          html += '<div class="text-body-sm text-on-surface-variant">Loading…</div>';
+        } else if (!ag.items.length) {
+          html += '<div class="bg-white border border-outline-variant rounded-xl p-lg text-center max-w-2xl">';
+          html += '<div class="font-body-md text-body-md font-bold text-on-surface">No agents yet</div>';
+          html += '<div class="text-body-sm text-on-surface-variant mt-xs">Add one to let an agent use this hub.</div></div>';
+        } else {
+          html += '<div class="bg-white border border-outline-variant rounded-xl shadow-sm overflow-hidden"><div class="overflow-x-auto">';
+          html += '<table class="w-full border-collapse text-left text-body-sm font-body-sm"><thead><tr class="bg-surface-container border-b border-outline-variant">';
+          ['Agent', 'May do', 'Last used', ''].forEach(function(h) { html += '<th class="px-md py-3 font-semibold text-on-surface-variant uppercase text-xs tracking-wider">' + h + '</th>'; });
+          html += '</tr></thead><tbody class="divide-y divide-outline-variant/60">';
+          ag.items.forEach(function(a) {
+            html += '<tr><td class="px-md py-3 font-semibold text-on-surface whitespace-nowrap">' + escapeHtml(a.name) + '</td>';
+            html += '<td class="px-md py-3 text-on-surface-variant">' + escapeHtml(summary(a.permissions)) + '</td>';
+            html += '<td class="px-md py-3 text-on-surface-variant whitespace-nowrap">' + (a.last_used_at ? escapeHtml(agentTime(a.last_used_at)) : 'never') + '</td>';
+            html += '<td class="px-md py-3 text-right whitespace-nowrap">';
+            html += '<button onclick="agentEditOpen(\x27' + escapeAttr(a.id) + '\x27)" class="border border-outline hover:bg-surface-container-high text-on-surface-variant text-xs px-3 py-1.5 rounded-lg mr-2">Edit</button>';
+            html += '<button onclick="agentRevoke(\x27' + escapeAttr(a.id) + '\x27)" class="border border-error/40 hover:bg-error/10 text-error text-xs px-3 py-1.5 rounded-lg">Revoke</button>';
+            html += '</td></tr>';
+          });
+          html += '</tbody></table></div></div>';
+        }
+        html += '</div>';
+      }
+
       else if (activeSection === 'integrations') {
         html += '<div class="space-y-lg">';
         html += '  <div class="border-b border-outline-variant pb-xs">';
@@ -193,7 +300,7 @@ function renderSettingsTab() {
           if (item.connected || item.isNative) {
             html += '    <button onclick="switchTab(\x27' + item.tab + '\x27)" class="border border-outline hover:bg-surface-container-high text-on-surface-variant font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 flex items-center gap-xs"><span>Manage</span><span class="material-symbols-outlined text-sm">arrow_forward</span></button>';
           } else {
-            html += '    <a href="/oauth/' + item.name + '/start" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 text-center shadow-sm">Connect</a>';
+            html += '    <button onclick="startOAuth(\x27' + item.name + '\x27)" class="bg-primary hover:bg-primary-hover text-on-primary font-label-caps text-label-caps px-4 py-1.5 rounded-lg transition-all active:scale-95 text-center shadow-sm">Connect</button>';
           }
           html += '    </div>';
           html += '  </div>';

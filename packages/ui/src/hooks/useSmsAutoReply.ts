@@ -9,7 +9,7 @@ import { deviceBridge } from '../device/deviceBridge';
  * deviceBridge.getSmsMessages/sendSms reject with NOT_ANDROID there.
  *
  * Gating flags come from useAppState (Settings/Chat), which already polls
- * `/api/settings/auto-reply` and `/api/chat/status` on mount.
+ * `/web/settings/auto-reply` and `/web/chat/status` on mount.
  */
 export function useSmsAutoReply(autoReplyEnabled: boolean, aiAvailable: boolean) {
   const lastCheckedMsRef = useRef(Date.now());

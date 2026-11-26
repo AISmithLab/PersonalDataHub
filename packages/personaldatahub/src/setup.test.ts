@@ -85,7 +85,7 @@ describe('Setup Module', () => {
 
     it('exports CONFIG_PATH', () => {
       expect(CONFIG_PATH).toContain('.pdh');
-      expect(CONFIG_PATH).toContain('config.json');
+      expect(CONFIG_PATH).toContain('agent.json');
     });
   });
 });

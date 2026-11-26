@@ -1,5 +1,5 @@
 // In-memory phone -> contact name cache, populated by the mobile app once per sync
-// (see /device/contacts-sync) so prompt-building code can resolve names without any
+// (see POST /web/device/contacts) so prompt-building code can resolve names without any
 // extra API/tool call per SMS or memory.
 
 let contactsByDigits = new Map<string, string>();

@@ -9,7 +9,8 @@
   ],
   "main": "dist/index.js",
   "bin": {
-    "pdh": "dist/cli.js"
+    "pdh": "dist/cli.js",
+    "query-hub": "bin/query-hub.mjs"
   },
   "scripts": {
     "build": "node scripts/build-frontend.mjs && npm run build:frontend-next && tsc && chmod +x dist/cli.js",
@@ -45,16 +46,19 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.143",
+    "@ai-sdk/google": "^3.0.150",
+    "@ai-sdk/openai": "^3.0.145",
+    "@ai-sdk/openai-compatible": "^2.0.94",
     "@aws-sdk/client-dynamodb": "^3.750.0",
     "@aws-sdk/lib-dynamodb": "^3.750.0",
     "@hono/node-server": "^1.19.9",
-    "@modelcontextprotocol/sdk": "^1.27.1",
+    "ai": "^6.0.336",
     "bcryptjs": "^3.0.3",
     "googleapis": "^171.4.0",
     "hono": "^4.12.1",
     "node-fetch": "^3.3.2",
     "octokit": "^5.0.5",
-    "openai": "^6.38.0",
     "react-dom": "19.2.3",
     "react-native": "0.86.0",
     "react-native-safe-area-context": "^5.10.0",

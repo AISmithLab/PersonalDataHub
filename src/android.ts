@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, unlink
 import dns from 'node:dns';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
+import { initDeviceSecret, serveDeviceSecretToShell } from './mobile/device-secret.js';
 import { serve } from '@hono/node-server';
 
 // nodejs-mobile on Android: the OS resolver (getaddrinfo) used by dns.lookup() doesn't
@@ -80,6 +81,10 @@ if (!process.env.SQLJS_WASM_PATH) {
 const dataDir = process.env.PDH_DATA_DIR ?? join(_dir, '..', '..', 'pdh-data');
 if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 process.env.PDH_DATA_DIR = dataDir;
+
+// The app shell and SmsReceiver authenticate with this (see mobile/device-secret.ts).
+const deviceSecret = initDeviceSecret(dataDir);
+serveDeviceSecretToShell(deviceSecret);
 
 process.env.PDH_DB_PATH = join(dataDir, 'pdh.db');
 
@@ -148,9 +153,9 @@ async function drainSmsQueue(dir: string, port: number) {
     const filePath = join(queueDir, file);
     try {
       const body = readFileSync(filePath, 'utf-8');
-      const res = await fetch(`http://127.0.0.1:${port}/sms/auto-reply?drain=true`, {
+      const res = await fetch(`http://127.0.0.1:${port}/web/device/sms/auto-reply?drain=true`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-PDH-Device-Secret': deviceSecret },
         body,
       });
       if (res.ok) {

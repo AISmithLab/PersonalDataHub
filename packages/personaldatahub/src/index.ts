@@ -7,7 +7,7 @@
  * Config resolution order:
  *   1. Plugin config (hubUrl passed directly)
  *   2. Environment variable (PDH_HUB_URL)
- *   3. Config file (~/.pdh/config.json, written by npx pdh init)
+ *   3. The agent's registration file (~/.pdh/agent.json, written by `query-hub join`)
  *   4. Auto-discovery (probe localhost)
  */
 
@@ -18,6 +18,7 @@ import { discoverHub, readConfig } from './setup.js';
 
 export interface PersonalDataHubPluginConfig {
   hubUrl: string;
+  apiKey?: string;
 }
 
 export default {
@@ -47,6 +48,7 @@ export default {
       additionalProperties: false,
       properties: {
         hubUrl: { type: 'string' },
+        apiKey: { type: 'string' },
       },
       required: ['hubUrl'],
     },
@@ -64,17 +66,17 @@ export default {
     if (!config?.hubUrl) {
       const envHubUrl = process.env.PDH_HUB_URL;
       if (envHubUrl) {
-        config = { hubUrl: envHubUrl };
+        config = { hubUrl: envHubUrl, apiKey: process.env.PDH_API_KEY };
         api.logger.info(`PersonalDataHub: Configured from environment variables (hub: ${envHubUrl})`);
       }
     }
 
-    // Step 3: Check config file (~/.pdh/config.json)
+    // Step 3: Check the agent's registration (written by `query-hub join`)
     if (!config?.hubUrl) {
       const cfg = readConfig();
       if (cfg) {
-        config = { hubUrl: cfg.hubUrl };
-        api.logger.info(`PersonalDataHub: Configured from config file (hub: ${cfg.hubUrl})`);
+        config = { hubUrl: cfg.hubUrl, apiKey: cfg.apiKey };
+        api.logger.info(`PersonalDataHub: Configured from the agent's registration (hub: ${cfg.hubUrl})`);
       }
     }
 
@@ -97,18 +99,26 @@ export default {
 
     if (!config?.hubUrl) {
       api.logger.warn(
-        'PersonalDataHub: Missing hubUrl. Could not find a running hub.\n' +
-        '  To set up PersonalDataHub:\n' +
-        '  1. Run: npx pdh init\n' +
-        '  2. Run: npx pdh start\n' +
-        '  3. Restart the agent — it will auto-connect.\n' +
-        '  Or configure manually: { "hubUrl": "http://localhost:3000" }',
+        'PersonalDataHub: This agent is not registered with a hub.\n' +
+        '  Ask the hub\'s owner for a join link (Settings → Agents), then run:\n' +
+        '    query-hub join <link> --name <name>\n' +
+        '  and restart the agent. Or configure manually: { "hubUrl": "http://localhost:3000", "apiKey": "<token>" }',
       );
       return;
     }
 
+    // The token may be in the registration file even when hubUrl came from elsewhere.
+    const apiKey = config.apiKey ?? process.env.PDH_API_KEY ?? readConfig()?.apiKey;
+    if (!apiKey) {
+      api.logger.warn(
+        'PersonalDataHub: This agent is not registered with the hub. Calls will be rejected with 401.\n' +
+        '  Ask the owner for a join link (Settings → Agents), then run: query-hub join <link> --name <name>',
+      );
+    }
+
     const client = new HubClient({
       hubUrl: config.hubUrl,
+      apiKey,
     });
 
     api.logger.info(`PersonalDataHub: Registering tools (hub: ${config.hubUrl})`);

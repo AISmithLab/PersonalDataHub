@@ -7,7 +7,6 @@
  *   npx pdh start              Start the server in the background
  *   npx pdh stop               Stop the background server
  *   npx pdh status             Check if the server is running
- *   npx pdh mcp                Start a stdio MCP server for agent access
  *   npx pdh install-service    Install a systemd/launchd service for auto-start
  *   npx pdh uninstall-service  Remove the auto-start service
  *   npx pdh reset              Remove all generated files and start fresh
@@ -25,7 +24,8 @@ import { osUserExists, createOsUser, lockdownFiles, checkProcessOwner, PDH_USER,
 
 // --- Config file path ---
 
-export const CONFIG_DIR = join(homedir(), '.pdh');
+// PDH_CONFIG_DIR lets tests (and unusual setups) keep this out of the real home directory.
+export const CONFIG_DIR = process.env.PDH_CONFIG_DIR ?? join(homedir(), '.pdh');
 export const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 const PID_PATH = join(CONFIG_DIR, 'server.pid');
 
@@ -96,8 +96,7 @@ export interface InitOptions {
  * Bootstrap a new PersonalDataHub installation.
  *
  * Generates a master secret, writes .env and hub-config.yaml,
- * initializes the database, creates the first API key,
- * and writes config to ~/.pdh/config.json.
+ * initializes the database, and writes config to ~/.pdh/config.json.
  */
 export async function init(targetDir?: string, options?: InitOptions): Promise<InitResult> {
   const dir = targetDir ?? process.cwd();
@@ -179,7 +178,8 @@ export async function init(targetDir?: string, options?: InitOptions): Promise<I
   const db = getDb(dbPath);
   db.close();
 
-  // Write config file for auto-discovery by agents
+  // Remember where the hub lives, so start/stop/reset work from any directory.
+  // Agents do not read this file; they register through a join link.
   const hubUrl = `http://localhost:${port}`;
   writeConfig({ hubUrl, hubDir: dir });
 
@@ -495,14 +495,6 @@ if (isDirectRun) {
     } else {
       console.log('\n  PersonalDataHub server is not running.\n');
     }
-  } else if (command === 'mcp') {
-    try {
-      const { startMcpServer } = await import('./ai/mcp/server.js');
-      await startMcpServer();
-    } catch (err) {
-      console.error(`Error: ${(err as Error).message}`);
-      process.exit(1);
-    }
   } else if (command === 'install-service') {
     try {
       const result = installService();
@@ -562,7 +554,6 @@ if (isDirectRun) {
     console.log('  npx pdh start             Start the server in the background');
     console.log('  npx pdh stop              Stop the background server');
     console.log('  npx pdh status            Check if the server is running');
-    console.log('  npx pdh mcp               Start a stdio MCP server for agent access');
     console.log('  npx pdh install-service   Install a systemd/launchd service for auto-start');
     console.log('  npx pdh uninstall-service Remove the auto-start service');
     console.log('  npx pdh reset             Remove all generated files and start fresh');

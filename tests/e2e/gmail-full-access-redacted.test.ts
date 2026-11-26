@@ -16,7 +16,7 @@ describe('E2E: Gmail Full Access (no filters)', () => {
   afterEach(() => cleanup(db, tmpDir));
 
   it('returns all fields when no filters are set', async () => {
-    const res = await request(app, 'POST', '/app/v1/pull', {
+    const res = await request(app, 'POST', '/agent/pull', {
       source: 'gmail',
       purpose: 'Full access check',
     });
@@ -36,7 +36,7 @@ describe('E2E: Gmail Full Access (no filters)', () => {
       "INSERT INTO filters (id, source, type, value, enabled) VALUES (?, ?, ?, ?, 1)",
     ).run('f1', 'gmail', 'hide_field', 'body');
 
-    const res = await request(app, 'POST', '/app/v1/pull', {
+    const res = await request(app, 'POST', '/agent/pull', {
       source: 'gmail',
       purpose: 'Hide field check',
     });

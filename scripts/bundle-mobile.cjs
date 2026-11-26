@@ -32,7 +32,7 @@ const define = [
 
 mkdirSync(outDir, { recursive: true });
 
-const common = `--bundle --platform=node --target=node18 --format=cjs --minify --external:@aws-sdk/* --external:better-sqlite3 --external:sql.js ${define}`;
+const common = `--bundle --platform=node --target=node18 --format=cjs --minify --external:@aws-sdk/* --external:better-sqlite3 --external:sql.js --external:rn-bridge ${define}`;
 
 console.log('[bundle-mobile] Bundling android.ts…');
 execSync(

@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 // @hono/node-server (which incidentally defines one) is imported.
 import { randomUUID } from 'node:crypto';
 import { installJitlessFetch } from './mobile/jitless-fetch.js';
+import { initDeviceSecret, serveDeviceSecretToShell } from './mobile/device-secret.js';
 
 // Injected at compile time by scripts/bundle-mobile.cjs via esbuild --define
 declare const __GMAIL_CLIENT_ID__: string;
@@ -39,6 +40,10 @@ if (!process.env.SQLJS_ASM_PATH) {
 const dataDir = process.env.PDH_DATA_DIR ?? join(_dir, '..', 'pdh-data');
 if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 process.env.PDH_DATA_DIR = dataDir;
+
+// The app shell and SmsReceiver authenticate with this (see mobile/device-secret.ts).
+const deviceSecret = initDeviceSecret(dataDir);
+serveDeviceSecretToShell(deviceSecret);
 process.env.PDH_DB_PATH = join(dataDir, 'pdh.db');
 
 const configPath = process.env.PDH_CONFIG_PATH ?? join(dataDir, 'hub-config.yaml');
