@@ -150,8 +150,7 @@ Grant ticks are grouped: "Can read" (pull per source, incoming pipes) and "Can a
 ## Open points
 
 
-1. **The email-assistant skill and `~/.claude/skills/personaldatahub.md`** call the old `/app/v1/propose`; they break today already and will need an outgoing pipe. They are outside this repo and are not part of this build; updating them is a follow-up.
-2. **A cap per pipe** (for example 20 sends a day) would limit damage from a runaway agent. Not asked for; proposed as a later addition.
+1. **A cap per pipe** (for example 20 sends a day) would limit damage from a runaway agent. Not asked for; proposed as a later addition.
 
 ## Left to the builder
 
