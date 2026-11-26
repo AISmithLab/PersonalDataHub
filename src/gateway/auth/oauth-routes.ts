@@ -18,11 +18,13 @@ interface OAuthDeps {
   tokenManager: TokenManager;
 }
 
+// Only what the hub does with Gmail: read messages, create drafts, send. `compose` covers
+// both drafts and sending. Asking for `send` and `modify` as well showed the owner four
+// overlapping checkboxes at Google's consent screen, and `modify` (change and trash mail)
+// is more than the hub ever uses.
 const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.compose',
-  'https://www.googleapis.com/auth/gmail.send',
-  'https://www.googleapis.com/auth/gmail.modify',
 ];
 
 const CALENDAR_SCOPES = [
