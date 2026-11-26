@@ -768,6 +768,15 @@ describe('pipe routes', () => {
       expect(systemOf(aiRequests[0])).toContain('outgoing');
     });
 
+    it('the hub\'s chat cannot send: no draft_email, send_email or create_calendar_event tools', async () => {
+      aiScript.push(() => ({ role: 'assistant', content: 'ok' }));
+      aiRequests.length = 0;
+      await chat({ messages: [{ role: 'user', content: 'email alice' }] });
+      const names = JSON.stringify(aiRequests[0].tools ?? []);
+      expect(names).toContain('read_emails');
+      for (const gone of ['"draft_email"', '"send_email"', '"create_calendar_event"']) expect(names).not.toContain(gone);
+    });
+
     it('the AI edits the selected pipe in place, and can list and delete', async () => {
       const id = await makePipe();
       aiScript.push(() => call('save_pipe', { id, program: KEYWORD }), () => ({ role: 'assistant', content: 'Updated.' }));

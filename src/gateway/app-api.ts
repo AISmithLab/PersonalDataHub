@@ -1,5 +1,4 @@
 import { Hono, type Context } from 'hono';
-import { randomUUID } from 'node:crypto';
 import type { DataStore } from '../database/datastore.js';
 import type { ConnectorRegistry } from './connectors/types.js';
 import type { HubConfigParsed } from '../config/schema.js';
@@ -125,48 +124,6 @@ export function createAppApi(deps: AppApiDeps): Hono<AccessEnv> {
       meta: { itemsFetched: rows.length, itemsReturned: filtered.length },
     });
     await auditLog.logPull(source, purpose, filtered.length, c.get('caller') ?? 'agent', responseSummary);
-
-    return c.json(responsePayload);
-  });
-
-  // POST /propose
-  app.post('/propose', async (c) => {
-    const body = await readBody(c);
-    if (!body) return c.json(badBody, 400);
-    const { source, action_type, action_data, params, purpose } = body as { source?: unknown; action_type?: unknown; action_data?: unknown; params?: unknown; purpose?: unknown };
-    const actionPayload = action_data ?? params;
-
-    if (!purpose) {
-      return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required field: purpose' } }, 400);
-    }
-
-    if (typeof source !== 'string' || !source || typeof action_type !== 'string' || !action_type || typeof purpose !== 'string') {
-      return c.json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Missing required fields: source, action_type, purpose (all strings)' } }, 400);
-    }
-
-    if (!allows(c, `propose:${source}`)) return c.json(forbidden(`propose:${source}`), 403);
-
-    // Insert into staging
-    const actionId = `act_${randomUUID().slice(0, 12)}`;
-    await deps.store.insertStagingAction({
-      actionId,
-      manifestId: '',
-      source,
-      actionType: action_type,
-      actionData: JSON.stringify(actionPayload ?? {}),
-      purpose,
-    });
-
-    // Build response
-    const responsePayload = {
-      ok: true,
-      actionId,
-      status: 'pending_review',
-    };
-
-    // Log to audit with a summary of what the agent received
-    const responseSummary = JSON.stringify(responsePayload);
-    await auditLog.logActionProposed(actionId, source, action_type, purpose, c.get('caller') ?? 'agent', responseSummary);
 
     return c.json(responsePayload);
   });

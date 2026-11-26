@@ -84,12 +84,13 @@ describe('access control', () => {
 
     it('records the agent name in the audit log', async () => {
       await addTestAgent(store, 'claude-code');
-      await app.request('/agent/propose', {
+      await new TokenManager(store, 'secret').storeToken('gmail', { access_token: 'a', refresh_token: 'r' });
+      await app.request('/agent/pull', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...TEST_AGENT_AUTH },
-        body: JSON.stringify({ source: 'gmail', action_type: 'draft_email', action_data: {}, purpose: 'p' }),
+        body: JSON.stringify({ source: 'gmail', purpose: 'p' }),
       });
-      const entry = store.queryAuditEntries({ event: 'action_proposed' })[0];
+      const entry = store.queryAuditEntries({ event: 'data_pull' })[0];
       expect(JSON.parse(entry.details).initiatedBy).toBe('claude-code');
     });
   });

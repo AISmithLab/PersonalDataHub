@@ -218,40 +218,6 @@ async function buildTools(deps: ServerDeps): Promise<LlmTool[]> {
         },
       },
     });
-    tools.push({
-      type: 'function',
-      function: {
-        name: 'draft_email',
-        description: 'Propose creating an email draft. Staged for owner review before saving.',
-        parameters: {
-          type: 'object',
-          properties: {
-            to: { type: 'string', description: 'Recipient email address' },
-            subject: { type: 'string', description: 'Email subject' },
-            body: { type: 'string', description: 'Email body' },
-            in_reply_to: { type: 'string', description: 'Message ID for threading (optional)' },
-          },
-          required: ['to', 'subject', 'body'],
-        },
-      },
-    });
-    tools.push({
-      type: 'function',
-      function: {
-        name: 'send_email',
-        description: 'Propose sending an email. Staged for owner review before sending.',
-        parameters: {
-          type: 'object',
-          properties: {
-            to: { type: 'string', description: 'Recipient email address' },
-            subject: { type: 'string', description: 'Email subject' },
-            body: { type: 'string', description: 'Email body' },
-            in_reply_to: { type: 'string', description: 'Message ID for threading (optional)' },
-          },
-          required: ['to', 'subject', 'body'],
-        },
-      },
-    });
   }
 
   if (await deps.tokenManager.hasToken('google_calendar')) {
@@ -266,24 +232,6 @@ async function buildTools(deps: ServerDeps): Promise<LlmTool[]> {
             after: { type: 'string', description: 'ISO timestamp — only events after this time' },
             limit: { type: 'number', description: 'Max results (default 20)' },
           },
-        },
-      },
-    });
-    tools.push({
-      type: 'function',
-      function: {
-        name: 'create_calendar_event',
-        description: 'Propose creating a Google Calendar event. Staged for owner review.',
-        parameters: {
-          type: 'object',
-          properties: {
-            title: { type: 'string', description: 'Event title' },
-            start: { type: 'string', description: 'ISO start time' },
-            end: { type: 'string', description: 'ISO end time' },
-            body: { type: 'string', description: 'Event description (optional)' },
-            location: { type: 'string', description: 'Event location (optional)' },
-          },
-          required: ['title', 'start', 'end'],
         },
       },
     });
@@ -535,8 +483,7 @@ function buildSystemPrompt(deps: ServerDeps, sms: SmsMessage[] | null, memories:
   const lines = [
     `You are a personal AI assistant inside PersonalDataHub on the user's Android phone. Today is ${today}.`,
     '',
-    'You help the user understand and act on their personal data. Read tools fetch live data. Write tools (send_sms, send_email, etc.) create staged proposals that the user must review and explicitly approve before anything is sent or saved — always make clear you are proposing, not executing.',
-    'By default, proactively access and edit data sources (calendar, email, sms, etc.) in response to a trigger or implicit request. For example, if someone asks to meet, absolutely propose adding that to the calendar. Do not be passive; use your tools to take concrete action.',
+    'You help the user understand their personal data and author the pipes and skills that decide what agents may read and do. Read tools fetch live data. You cannot send email or change the calendar yourself: say so if asked, and offer to build an outgoing pipe that lets an agent do it within rules the user sets.',
     '',
     `Connected sources: ${Object.keys(deps.config.sources).join(', ') || 'none'}`,
     // A model does not know its own name unless told; without this it guesses or declines.
@@ -717,35 +664,8 @@ async function executeToolInner(
       return JSON.stringify({ ok: true, actionId, status: 'pending_review', note: 'Staged for owner approval before sending' });
     }
 
-    case 'draft_email': {
-      const actionId = `act_${randomUUID().slice(0, 12)}`;
-      await deps.store.insertStagingAction({
-        actionId, manifestId: '', source: 'gmail', actionType: 'draft_email',
-        actionData: JSON.stringify(input), purpose: `AI: draft email to ${input.to}`,
-      });
-      stagedActionIds.push(actionId);
-      return JSON.stringify({ ok: true, actionId, status: 'pending_review' });
-    }
 
-    case 'send_email': {
-      const actionId = `act_${randomUUID().slice(0, 12)}`;
-      await deps.store.insertStagingAction({
-        actionId, manifestId: '', source: 'gmail', actionType: 'send_email',
-        actionData: JSON.stringify(input), purpose: `AI: send email to ${input.to}`,
-      });
-      stagedActionIds.push(actionId);
-      return JSON.stringify({ ok: true, actionId, status: 'pending_review' });
-    }
 
-    case 'create_calendar_event': {
-      const actionId = `act_${randomUUID().slice(0, 12)}`;
-      await deps.store.insertStagingAction({
-        actionId, manifestId: '', source: 'google_calendar', actionType: 'create_event',
-        actionData: JSON.stringify(input), purpose: `AI: create event "${input.title}"`,
-      });
-      stagedActionIds.push(actionId);
-      return JSON.stringify({ ok: true, actionId, status: 'pending_review' });
-    }
 
     case 'save_memory': {
       const content = String(input.content ?? '').trim();
@@ -1015,24 +935,6 @@ async function buildAutoReplyTools(deps: ServerDeps): Promise<LlmTool[]> {
         },
       },
     });
-    tools.push({
-      type: 'function',
-      function: {
-        name: 'create_calendar_event',
-        description: 'Create a Google Calendar event immediately — no approval required.',
-        parameters: {
-          type: 'object',
-          properties: {
-            title: { type: 'string', description: 'Event title' },
-            start: { type: 'string', description: 'ISO start time' },
-            end: { type: 'string', description: 'ISO end time' },
-            body: { type: 'string', description: 'Event description (optional)' },
-            location: { type: 'string', description: 'Event location (optional)' },
-          },
-          required: ['title', 'start', 'end'],
-        },
-      },
-    });
   }
 
   tools.push({
@@ -1134,20 +1036,6 @@ async function executeAutoReplyToolInner(
       }));
     }
 
-    case 'create_calendar_event': {
-      const connector = deps.connectorRegistry.get('google_calendar');
-      if (!connector) return JSON.stringify({ error: 'Google Calendar not connected' });
-      const result = await connector.executeAction('create_event', input);
-      if (result.success) {
-        await deps.store.insertAuditEntry({
-          timestamp: new Date().toISOString(),
-          event: 'calendar_event_created',
-          source: 'google_calendar',
-          details: JSON.stringify({ title: input.title, start: input.start, end: input.end, createdBy: 'auto_reply' }),
-        });
-      }
-      return JSON.stringify(result);
-    }
 
     case 'save_memory': {
       const content = String(input.content ?? '').trim();
@@ -1276,12 +1164,11 @@ async function runAutoReplyLoop(
     `You are an AI SMS auto-reply assistant on the user's Android phone. Today is ${today}.`,
     '',
     'Reply with just the message text — no quotes, no labels, no preamble.',
-    'By default, proactively access and edit data sources (calendar, email, sms, etc.) in response to triggers in the SMS. For example, if the sender asks to meet, absolutely use create_calendar_event to add that to the calendar. Do not be passive; take concrete action.',
+    'Use the read tools for context. You cannot change the calendar or send email.',
     '',
     '--- Tools available ---',
     '- read_calendar_events: check upcoming events and availability',
     '- read_emails: scan recent email threads for context',
-    '- create_calendar_event: create a new event (requires explicit time from sender)',
     '- read_sms_thread: review conversation history with this contact',
     '- save_memory / update_memory / delete_memory: persist facts about contacts (use the contact\'s name, not their phone number, when one is known)',
   ];

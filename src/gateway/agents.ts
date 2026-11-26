@@ -32,15 +32,16 @@ export function isValidAgentName(name: unknown): name is string {
 const PIPE_PERMISSION = /^pipe:[a-z2-7]{8}$/;
 
 /**
- * Validates a permission list. Returns it deduplicated in a fixed order (pull,
- * then propose, sources in AGENT_SOURCES order, then pipes), or null if anything
- * in it is not a known `pull:<source>`, `propose:<source>` or `pipe:<id>`.
- * A `pipe:<id>` lets the agent run that one pipe; it does not need `pull` for the
- * pipe's source, which is the point of a pipe.
+ * Validates a permission list. Returns it deduplicated in a fixed order (pull, sources
+ * in AGENT_SOURCES order, then pipes), or null if anything in it is not a known
+ * `pull:<source>` or `pipe:<id>`. A `pipe:<id>` lets the agent run that one pipe (read
+ * through an incoming one, act through an outgoing one); it does not need `pull` for the
+ * pipe's source, which is the point of a pipe. Agents act only through outgoing pipes:
+ * the old `propose:<source>` permission is gone.
  */
 export function normalizePermissions(input: unknown): string[] | null {
   if (!Array.isArray(input)) return null;
-  const fixed = [...AGENT_SOURCES.map((s) => `pull:${s}`), ...AGENT_SOURCES.map((s) => `propose:${s}`)];
+  const fixed = AGENT_SOURCES.map((s) => `pull:${s}`);
   for (const p of input) {
     if (typeof p !== 'string' || !(fixed.includes(p) || PIPE_PERMISSION.test(p))) return null;
   }
@@ -48,12 +49,48 @@ export function normalizePermissions(input: unknown): string[] | null {
   return [...fixed.filter((p) => input.includes(p)), ...pipes];
 }
 
+const RETIRED = /^propose:/;
+
 export function parsePermissions(raw: string): string[] {
   try {
-    return normalizePermissions(JSON.parse(raw)) ?? [];
+    const list = JSON.parse(raw) as unknown;
+    // A stored grant from before proposals were retired must not void the agent's other grants.
+    return normalizePermissions(Array.isArray(list) ? list.filter((p) => !(typeof p === 'string' && RETIRED.test(p))) : list) ?? [];
   } catch {
     return [];
   }
+}
+
+/**
+ * Agents act only through outgoing pipes. Removes the retired `propose:` grants from every
+ * agent and rejects pending actions agents proposed before, so none can still go out without
+ * a pipe passing it. Actions the hub staged itself (the phone's SMS replies) have no
+ * `action_proposed` audit entry and are left alone. Safe to run at every start.
+ */
+export async function retireProposals(store: DataStore): Promise<{ agentsChanged: number; proposalsRejected: number }> {
+  const audit = new AuditLog(store);
+  let agentsChanged = 0;
+  for (const agent of await store.listAgents()) {
+    let list: unknown;
+    try { list = JSON.parse(agent.permissions); } catch { continue; }
+    if (!Array.isArray(list) || !list.some((p) => typeof p === 'string' && RETIRED.test(p))) continue;
+    const kept = list.filter((p) => !(typeof p === 'string' && RETIRED.test(p)));
+    await store.updateAgentPermissions(agent.id, JSON.stringify(kept));
+    await audit.insert('agent_updated', null, { id: agent.id, name: agent.name, reason: 'propose permissions retired', permissions: kept });
+    agentsChanged++;
+  }
+  const proposed = new Set<string>();
+  for (const e of await store.queryAuditEntries({ event: 'action_proposed', limit: 100_000 })) {
+    try { const id = (JSON.parse(e.details) as { actionId?: unknown }).actionId; if (typeof id === 'string') proposed.add(id); } catch { /* skip */ }
+  }
+  let proposalsRejected = 0;
+  for (const action of await store.getAllStagingActions()) {
+    if (action.status !== 'pending' || !proposed.has(action.action_id)) continue;
+    await store.updateStagingStatus(action.action_id, 'rejected');
+    await audit.logActionRejected(action.action_id, 'migration', action.source);
+    proposalsRejected++;
+  }
+  return { agentsChanged, proposalsRejected };
 }
 
 function describeAgent(a: AgentRow) {

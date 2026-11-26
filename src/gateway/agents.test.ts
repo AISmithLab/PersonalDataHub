@@ -77,8 +77,6 @@ describe('agent registration', () => {
   const as = (token: string) => ({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' });
   const pull = (token: string, source: string) =>
     app.request('/agent/pull', { method: 'POST', headers: as(token), body: JSON.stringify({ source, purpose: 'test' }) });
-  const propose = (token: string, source: string) =>
-    app.request('/agent/propose', { method: 'POST', headers: as(token), body: JSON.stringify({ source, action_type: 'draft_email', action_data: {}, purpose: 'test' }) });
 
   describe('join links', () => {
     it('only the owner can make one, and it points at this hub', async () => {
@@ -97,12 +95,12 @@ describe('agent registration', () => {
     });
 
     it('opening the link in a browser shows what it grants and does not use it up', async () => {
-      const { code } = await makeLink(['pull:gmail', 'propose:gmail']);
+      const { code } = await makeLink(['pull:gmail', 'pull:github']);
       for (let i = 0; i < 2; i++) {
         const page = await app.request(`/agent/join/${code}`);
         expect(page.status).toBe(200);
         const html = await page.text();
-        expect(html).toContain('pull:gmail, propose:gmail');
+        expect(html).toContain('pull:gmail, pull:github');
         expect(html).toContain(`smithagent joinhub &lt;agent&gt; http://localhost/agent/join/${code}`);
       }
       expect((await joinWith(code, 'a1')).status).toBe(201);
@@ -211,24 +209,19 @@ describe('agent registration', () => {
   });
 
   describe('permissions', () => {
-    it('an agent can pull and propose only for its ticked sources', async () => {
-      const { token } = await register('gh-only', ['pull:github', 'propose:github']);
+    it('an agent can pull only its ticked sources', async () => {
+      const { token } = await register('gh-only', ['pull:github']);
       expect((await pull(token, 'github')).status).toBe(200);
-      expect((await propose(token, 'github')).status).toBe(200);
-
       const denied = await pull(token, 'gmail');
       expect(denied.status).toBe(403);
       expect((await denied.json() as { error: { code: string; permission: string } }).error).toMatchObject({ code: 'FORBIDDEN', permission: 'pull:gmail' });
-      const deniedPropose = await propose(token, 'gmail');
-      expect(deniedPropose.status).toBe(403);
-      expect((await deniedPropose.json() as { error: { permission: string } }).error.permission).toBe('propose:gmail');
-      expect(store.getAllStagingActions().map((a) => a.source)).toEqual(['github']);
     });
 
-    it('read without propose', async () => {
+    it('proposals are gone: the route is 404 and propose permissions are refused', async () => {
       const { token } = await register('reader', ['pull:gmail']);
-      expect((await pull(token, 'gmail')).status).toBe(200);
-      expect((await propose(token, 'gmail')).status).toBe(403);
+      expect((await app.request('/agent/propose', { method: 'POST', headers: as(token), body: JSON.stringify({ source: 'gmail', action_type: 'draft_email', action_data: {}, purpose: 'x' }) })).status).toBe(404);
+      expect((await app.request('/web/agents/join-links', { method: 'POST', headers: owner, body: JSON.stringify({ permissions: ['propose:gmail'] }) })).status).toBe(400);
+      expect(store.getAllStagingActions()).toEqual([]);
     });
 
     it('sources lists only what the agent may pull', async () => {
@@ -252,22 +245,17 @@ describe('agent registration', () => {
     });
 
     it('a source that is not a plain string is a bad request, never a way around the check', async () => {
-      const { token } = await register('gm', ['pull:gmail', 'propose:gmail']);
-      const before = store.getAllStagingActions().length;
+      const { token } = await register('gm', ['pull:gmail']);
       for (const source of [['gmail'], [['gmail']], { name: 'gmail' }, 42, null, '']) {
         const p = await app.request('/agent/pull', { method: 'POST', headers: as(token), body: JSON.stringify({ source, purpose: 'p' }) });
         expect(p.status, `pull ${JSON.stringify(source)}`).toBe(400);
-        const q = await app.request('/agent/propose', { method: 'POST', headers: as(token), body: JSON.stringify({ source, action_type: 'draft_email', action_data: {}, purpose: 'p' }) });
-        expect(q.status, `propose ${JSON.stringify(source)}`).toBe(400);
       }
       for (const body of ['null', '[]', '{not json', '"gmail"']) {
         expect((await app.request('/agent/pull', { method: 'POST', headers: as(token), body })).status, body).toBe(400);
-        expect((await app.request('/agent/propose', { method: 'POST', headers: as(token), body })).status, body).toBe(400);
       }
       for (const source of ['GMAIL', ' gmail', '__proto__', 'constructor', 'github']) {
         expect((await pull(token, source)).status, source).toBe(403);
       }
-      expect(store.getAllStagingActions()).toHaveLength(before);
     });
 
     it('the owner passes every check', async () => {
@@ -293,7 +281,7 @@ describe('agent registration', () => {
       const { token, id } = await register('sneaky', ['pull:gmail']);
       const calls: [string, string, string?][] = [
         ['GET', '/web/agents'],
-        ['POST', '/web/agents/join-links', JSON.stringify({ permissions: ['pull:gmail', 'pull:github', 'propose:gmail'] })],
+        ['POST', '/web/agents/join-links', JSON.stringify({ permissions: ['pull:gmail', 'pull:github'] })],
         ['PUT', `/web/agents/${id}`, JSON.stringify({ permissions: ['pull:gmail', 'pull:github'] })],
         ['DELETE', `/web/agents/${id}`],
       ];
@@ -328,7 +316,8 @@ describe('agent registration', () => {
 
   describe('helpers', () => {
     it('normalizePermissions orders, dedupes and validates', () => {
-      expect(normalizePermissions(['propose:gmail', 'pull:github', 'pull:gmail', 'pull:gmail'])).toEqual(['pull:gmail', 'pull:github', 'propose:gmail']);
+      expect(normalizePermissions(['pull:github', 'pull:gmail', 'pull:gmail'])).toEqual(['pull:gmail', 'pull:github']);
+      expect(normalizePermissions(['propose:gmail'])).toBeNull();
       expect(normalizePermissions([])).toEqual([]);
       expect(normalizePermissions(['pull:nope'])).toBeNull();
       expect(normalizePermissions('pull:gmail')).toBeNull();

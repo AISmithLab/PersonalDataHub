@@ -160,30 +160,10 @@ describe('HTTP Server', () => {
     expect(json.error.message).toContain('purpose');
   });
 
-  it('POST /agent/propose with purpose → creates staging row, audit entry', async () => {
-    const res = await request(app, 'POST', '/agent/propose', {
-      source: 'gmail',
-      action_type: 'draft_email',
-      action_data: { to: 'alice@co.com', subject: 'Re: Q4', body: 'Looks good.' },
-      purpose: 'Draft reply to Alice about Q4 report',
-    });
-
-    expect(res.status).toBe(200);
-    const json = await res.json() as { ok: boolean; actionId: string; status: string };
-    expect(json.ok).toBe(true);
-    expect(json.actionId).toMatch(/^act_/);
-    expect(json.status).toBe('pending_review');
-
-    // Check staging table
-    const staging = db.prepare('SELECT * FROM staging').all() as Array<Record<string, unknown>>;
-    expect(staging).toHaveLength(1);
-    expect(staging[0].status).toBe('pending');
-
-    // Check audit log
-    const audit = new AuditLog(store);
-    const entries = await audit.getEntries({ event: 'action_proposed' });
-    expect(entries).toHaveLength(1);
-    expect(entries[0].details.purpose).toBe('Draft reply to Alice about Q4 report');
+  it('POST /agent/propose is gone: agents act through outgoing pipes', async () => {
+    const res = await request(app, 'POST', '/agent/propose', { source: 'gmail', action_type: 'draft_email', action_data: {}, purpose: 'p' });
+    expect(res.status).toBe(404);
+    expect(db.prepare('SELECT * FROM staging').all()).toHaveLength(0);
   });
 
   it('GET /health → 200', async () => {
