@@ -173,6 +173,5 @@ function renderGmailTab() {
             ${actionHtml}
           </div>
         </div>
-        </div>
       `;
     }

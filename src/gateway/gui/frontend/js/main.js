@@ -213,6 +213,8 @@ var currentTab = 'ai';
       el.onscroll = function() { _pageChatSeen[scope + ':top'] = el.scrollTop; };
     }
 
+    function sourcePage(html) { return '<div class="source-page">' + html + '</div>'; }
+
     function pageTab(scope) { return scope === 'pipes' ? 'pipe' : 'skill'; }
 
     // Conversations are kept by the hub, so a reload (or another browser) shows them again.
@@ -616,9 +618,10 @@ var currentTab = 'ai';
       if (!content) return;
       switch (currentTab) {
         case 'overview': state.settingsSection = 'integrations'; currentTab = 'settings'; content.innerHTML = renderSettingsTab(); break;
-        case 'gmail': content.innerHTML = renderGmailTab(); break;
-        case 'github': content.innerHTML = renderGitHubTab(); break;
-        case 'google_calendar': content.innerHTML = renderCalendarTab(); break;
+        // The source pages bring no padding of their own; without this they sit against the sidebar and the window edge.
+        case 'gmail': content.innerHTML = sourcePage(renderGmailTab()); break;
+        case 'github': content.innerHTML = sourcePage(renderGitHubTab()); break;
+        case 'google_calendar': content.innerHTML = sourcePage(renderCalendarTab()); break;
         case 'sms': content.innerHTML = renderSmsTab(); loadContacts(); loadSmsMessages(); break;
         case 'photo': content.innerHTML = renderPhotoTab(); loadPhotos(false); break;
         case 'ai': content.innerHTML = renderAiTab(); var _cm = document.getElementById('chat-messages'); if (_cm) _cm.scrollTop = _cm.scrollHeight; break;
