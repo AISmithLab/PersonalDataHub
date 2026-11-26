@@ -2,7 +2,7 @@
 // query-hub — the agent's client for a PersonalDataHub.
 //
 // An agent registers once with a join link the hub's owner makes in
-// Settings → Agents, and from then on reads data and proposes actions through
+// Settings → Agents, and from then on reads data and acts, through pipes, with
 // this command. The agent's token lives in a file only this command reads; it is
 // never printed, so it stays out of the agent's conversation and logs.
 //
@@ -15,22 +15,24 @@ import { homedir } from 'node:os';
 
 const VERSION = '2';
 
-const USAGE = `query-hub — read from and propose actions to a PersonalDataHub
+const USAGE = `query-hub — read from and act through a PersonalDataHub
 
   query-hub join <join-link> --name <agent-name>   register with a hub (the owner makes the link in Settings → Agents)
   query-hub me                                     this agent's name and what it may do
   query-hub sources                                the sources it may read, and whether each is connected
   query-hub pull <source> --purpose <why> [--query <search>] [--limit <n>]
-  query-hub propose <source> <action-type> --purpose <why> --data '<json>'
-  query-hub pipes                                  the pipes it may run: id, name and what each returns
-  query-hub pipe <id> [--purpose <why>] [--limit <n>]   run a pipe now and print its rows
+  query-hub pipes                                  the pipes it may use: id, name, direction and what each does
+  query-hub pipe <id> [--purpose <why>] [--limit <n>]   read through an incoming pipe and print its rows
+  query-hub pipe <id> --purpose <why> --action '<json>'   act through an outgoing pipe
   query-hub leave                                  remove this agent from the hub and delete its token
 
 Sources: gmail, google_calendar, github, photo.
-Every pull and propose needs --purpose; the hub records it in the owner's audit log.
-Proposed actions are not carried out until the owner approves them in the hub.
-A pipe is a filtered view of one source that the owner prepared ("emails asking for a recommendation
-letter"). Prefer a pipe over pull when one fits: it returns only what the task needs.
+Every pull and every action needs --purpose; the hub records it in the owner's log.
+An incoming pipe is a filtered view of one source the owner prepared ("emails asking for a
+recommendation letter"). Prefer one over pull when it fits: it returns only what the task needs.
+An outgoing pipe is how this agent acts: --action is {"type": ..., "data": {...}}, for example
+{"type":"send_email","data":{"to":"a@b.c","subject":"Hi","body":"..."}}. The owner's program
+decides; what passes is carried out at once, and a blocked action says why.
 
 The token file is $QUERY_HUB_CONFIG, or ~/.pdh/agent.json. Output is JSON on stdout.`;
 
@@ -103,6 +105,8 @@ async function request(hub, path, { method = 'GET', token, body } = {}) {
 }
 
 function describe(json, status) {
+  // An outgoing pipe that blocked or could not carry out the action says why.
+  if (json && typeof json.reason === 'string' && json.outcome) return `${json.outcome === 'blocked' ? 'Blocked by the pipe' : 'Not carried out'}: ${json.reason}`;
   const e = json && json.error;
   if (e && typeof e === 'object' && e.message) return e.message;
   if (typeof e === 'string') return e;
@@ -206,31 +210,33 @@ const commands = {
     print(await call('/agent/pull', { method: 'POST', body }));
   },
 
-  async propose(argv) {
-    const { positional, flags } = parseArgs(argv, ['purpose', 'data']);
-    const [source, actionType] = positional;
-    if (!source || !actionType || !flags.purpose) throw new Fail("Usage: query-hub propose <source> <action-type> --purpose <why> --data '<json>'");
-    let data = {};
-    if (flags.data !== undefined) {
-      try {
-        data = JSON.parse(flags.data);
-      } catch {
-        throw new Fail('--data must be valid JSON, for example \'{"to":"a@b.c","subject":"Hi","body":"..."}\'.');
-      }
-    }
-    print(await call('/agent/propose', { method: 'POST', body: { source, action_type: actionType, action_data: data, purpose: flags.purpose } }));
+  async propose() {
+    throw new Fail('propose was removed: act through an outgoing pipe (query-hub pipes).');
   },
 
   async pipes() {
     const { pipes } = await call('/agent/pipes');
-    print({ ok: true, pipes: pipes.map(({ id, name, description, source, enabled }) => ({ id, name, description, source, enabled })) });
+    print({ ok: true, pipes: pipes.map(({ id, name, description, source, direction, enabled }) => ({ id, name, description, source, direction, enabled })) });
   },
 
   async pipe(argv) {
-    const { positional, flags } = parseArgs(argv, ['purpose', 'limit']);
+    const { positional, flags } = parseArgs(argv, ['purpose', 'limit', 'action']);
     const id = positional[0];
-    if (!id) throw new Fail('Usage: query-hub pipe <id> [--purpose <why>] [--limit <n>]   (ids: query-hub pipes)');
+    if (!id) throw new Fail('Usage: query-hub pipe <id> [--purpose <why>] [--limit <n>]   or   query-hub pipe <id> --purpose <why> --action \'<json>\'   (ids: query-hub pipes)');
     if (!/^[a-z2-7]{8}$/.test(id)) throw new Fail(`"${id}" is not a pipe id. Run "query-hub pipes" to see the ids.`);
+    if (flags.action !== undefined) {
+      let action;
+      try {
+        action = JSON.parse(flags.action);
+      } catch {
+        throw new Fail('--action must be valid JSON, for example \'{"type":"send_email","data":{"to":"a@b.c","subject":"Hi","body":"..."}}\'.');
+      }
+      if (!action || typeof action !== 'object' || typeof action.type !== 'string') throw new Fail('--action needs a string "type", for example "send_email".');
+      if (!action.data || typeof action.data !== 'object' || Array.isArray(action.data)) throw new Fail('--action needs an object "data".');
+      if (!flags.purpose) throw new Fail('Usage: query-hub pipe <id> --purpose <why> --action \'<json>\'');
+      print(await call(`/agent/pipes/${id}`, { method: 'POST', body: { action, purpose: flags.purpose } }));
+      return;
+    }
     const params = new URLSearchParams();
     if (flags.purpose !== undefined) params.set('purpose', flags.purpose);
     if (flags.limit !== undefined) {

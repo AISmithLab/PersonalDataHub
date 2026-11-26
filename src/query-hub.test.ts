@@ -87,11 +87,11 @@ describe('query-hub', () => {
   const token = () => JSON.parse(readFileSync(tokenFile, 'utf8')).token as string;
 
   it('join registers the agent, writes a private token file, and never prints the token', async () => {
-    const url = await link(['pull:gmail', 'propose:gmail']);
+    const url = await link(['pull:gmail', 'pull:github']);
     expect(url.startsWith(`${hub}/agent/join/`)).toBe(true);
     const r = await run(['join', url, '--name', 'haojian-agent7']);
     expect(r.code).toBe(0);
-    expect(r.json).toMatchObject({ ok: true, joined: 'haojian-agent7', hub, permissions: ['pull:gmail', 'propose:gmail'], token_file: tokenFile });
+    expect(r.json).toMatchObject({ ok: true, joined: 'haojian-agent7', hub, permissions: ['pull:gmail', 'pull:github'], token_file: tokenFile });
 
     const saved = JSON.parse(readFileSync(tokenFile, 'utf8'));
     expect(saved).toMatchObject({ hub, agent_name: 'haojian-agent7' });
@@ -101,12 +101,12 @@ describe('query-hub', () => {
     expect(store.listAgents().map((a) => a.name)).toEqual(['haojian-agent7']);
   });
 
-  it('me, sources, pull and propose work and keep the token out of the output', async () => {
-    await run(['join', await link(['pull:gmail', 'propose:gmail']), '--name', 'worker']);
+  it('me, sources and pull work and keep the token out of the output', async () => {
+    await run(['join', await link(['pull:gmail']), '--name', 'worker']);
     const t = token();
 
     const me = await run(['me']);
-    expect(me.json).toEqual({ ok: true, name: 'worker', owner: false, permissions: ['pull:gmail', 'propose:gmail'] });
+    expect(me.json).toEqual({ ok: true, name: 'worker', owner: false, permissions: ['pull:gmail'] });
 
     const sources = await run(['sources']);
     expect(sources.json.sources).toEqual({ gmail: { connected: true } });
@@ -117,12 +117,7 @@ describe('query-hub', () => {
     const audit = store.queryAuditEntries({ event: 'data_pull' })[0];
     expect(JSON.parse(audit.details)).toMatchObject({ purpose: 'find the proposal thread', initiatedBy: 'worker' });
 
-    const propose = await run(['propose', 'gmail', 'draft_email', '--purpose', 'reply to Diego', '--data', '{"to":"d@x.org","subject":"Re","body":"Hi"}']);
-    expect(propose.json).toMatchObject({ ok: true, status: 'pending_review' });
-    const staged = store.getStagingAction(propose.json.actionId)!;
-    expect(JSON.parse(staged.action_data)).toEqual({ to: 'd@x.org', subject: 'Re', body: 'Hi' });
-
-    for (const r of [me, sources, pull, propose]) expect(r.stdout + r.stderr).not.toContain(t);
+    for (const r of [me, sources, pull]) expect(r.stdout + r.stderr).not.toContain(t);
   });
 
   it('a pull the agent is not allowed names the missing permission', async () => {
@@ -202,11 +197,10 @@ describe('query-hub', () => {
   });
 
   it('rejects bad arguments before calling the hub', async () => {
-    await run(['join', await link(['pull:gmail', 'propose:gmail']), '--name', 'worker']);
+    await run(['join', await link(['pull:gmail']), '--name', 'worker']);
     const stagedBefore = store.getAllStagingActions().length;
     expect((await run(['pull', 'gmail'])).stderr).toContain('Usage: query-hub pull');
     expect((await run(['pull', 'gmail', '--purpose', 'x', '--limit', 'many'])).stderr).toContain('--limit must be');
-    expect((await run(['propose', 'gmail', 'draft_email', '--purpose', 'x', '--data', '{not json'])).stderr).toContain('--data must be valid JSON');
     expect((await run(['pull', 'gmail', '--purpose'])).stderr).toContain('--purpose needs a value');
     expect((await run(['pull', 'gmail', '--purpos', 'x'])).stderr).toContain('Unknown option --purpos');
     expect((await run(['frobnicate'])).stderr).toContain('Unknown command "frobnicate"');
@@ -295,7 +289,7 @@ describe('query-hub', () => {
       [['pull', 'gmail', '--purpose', 'x', '--limit', ''], '--limit needs a value'],
       [['pull', 'gmail', '--purpose', 'x', '--query', ''], '--query needs a value'],
       [['pull', 'gmail', '--purpose', 'x', '--query', '--limit', '5'], '--query needs a value'],
-      [['propose', 'gmail', 'draft_email', '--purpose', 'x', '--data', ''], '--data needs a value'],
+      [['pipe', 'outaaaa2', '--purpose', 'x', '--action', ''], '--action needs a value'],
     ];
     for (const [args, message] of cases) {
       const r = await run(args);
@@ -314,7 +308,7 @@ describe('query-hub', () => {
     await run(['join', await link([`pipe:${mine}`]), '--name', 'piper']);
 
     const list = await run(['pipes']);
-    expect(list.json).toEqual({ ok: true, pipes: [{ id: mine, name: 'Gmail items', description: 'Every gmail item, title only.', source: 'gmail', enabled: true }] });
+    expect(list.json).toEqual({ ok: true, pipes: [{ id: mine, name: 'Gmail items', description: 'Every gmail item, title only.', source: 'gmail', direction: 'incoming', enabled: true }] });
     expect(list.stdout).not.toContain('return rows');
 
     const out = await run(['pipe', mine, '--purpose', 'weekly triage', '--limit', '5']);
@@ -333,6 +327,36 @@ describe('query-hub', () => {
     expect((await run(['pipe', 'NOT-AN-ID'])).stderr).toContain('is not a pipe id');
     await fetch(`${hub}/web/pipes/${mine}`, { method: 'PUT', headers: owner, body: JSON.stringify({ enabled: false }) });
     expect((await run(['pipe', mine])).stderr).toContain('is switched off');
+  });
+
+  it('acts through an outgoing pipe: sent, blocked, bad JSON, and the token stays out of the output', async () => {
+    store.insertPipe({ id: 'outaaaa2', name: 'Students only', description: 'Emails to alice.', source: 'gmail', query: '', enabled: 1, direction: 'outgoing',
+      program: 'return String(action.data.to).toLowerCase() === "alice@ucsd.edu" ? pass() : block("Only alice.");' });
+    await run(['join', await link(['pipe:outaaaa2']), '--name', 'mailer']);
+    const t = token();
+
+    const ok = await run(['pipe', 'outaaaa2', '--purpose', 'tell alice', '--action', '{"type":"send_email","data":{"to":"alice@ucsd.edu","subject":"Hi","body":"."}}']);
+    expect(ok.code).toBe(0);
+    expect(ok.json).toMatchObject({ ok: true, outcome: 'sent' });
+
+    const blocked = await run(['pipe', 'outaaaa2', '--purpose', 'x', '--action', '{"type":"send_email","data":{"to":"dean@ucsd.edu","subject":"Hi","body":"."}}']);
+    expect(blocked.code).toBe(1);
+    expect(blocked.stderr).toContain('Only alice.');
+
+    const before = store.listPipeLog('outaaaa2', { limit: 50 }).length;
+    expect((await run(['pipe', 'outaaaa2', '--purpose', 'x', '--action', '{not json'])).stderr).toContain('--action must be valid JSON');
+    expect((await run(['pipe', 'outaaaa2', '--purpose', 'x', '--action', '{"data":{}}'])).stderr).toContain('--action needs a string "type"');
+    expect(store.listPipeLog('outaaaa2', { limit: 50 })).toHaveLength(before);
+
+    const list = await run(['pipes']);
+    expect(list.json.pipes[0]).toMatchObject({ id: 'outaaaa2', direction: 'outgoing' });
+    for (const r of [ok, blocked, list]) expect(r.stdout + r.stderr).not.toContain(t);
+  });
+
+  it('propose explains it was removed', async () => {
+    const r = await run(['propose', 'gmail', 'draft_email', '--purpose', 'x', '--data', '{}']);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('propose was removed: act through an outgoing pipe (query-hub pipes).');
   });
 
   it('prints help with no arguments', async () => {
