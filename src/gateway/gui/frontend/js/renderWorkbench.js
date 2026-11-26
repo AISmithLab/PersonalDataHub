@@ -169,6 +169,25 @@
       return html + '</div>';
     }
 
+    // Which registered agents this pipe is bound to. Binding is how an agent gets any access.
+    function renderPipeAgents(p, pp) {
+      var ag = state.agents;
+      if (ag.items === null && !ag.loading && typeof loadAgents === 'function') loadAgents();
+      var perm = 'pipe:' + p.id;
+      var html = '<div><div class="font-label-caps text-label-caps text-on-surface-variant mb-xs">Agents bound to this pipe</div>';
+      if (pp.bindError) html += '<div class="p-sm bg-error-container text-on-error-container rounded-xl text-body-sm mb-xs">' + escapeHtml(pp.bindError) + '</div>';
+      if (ag.items === null) return html + '<div class="text-body-sm text-on-surface-variant">Loading…</div></div>';
+      if (!ag.items.length) return html + '<div class="text-body-sm text-on-surface-variant">No agents registered yet. Add one in Settings → Agents, then bind it here.</div></div>';
+      html += '<div class="flex flex-wrap gap-x-lg gap-y-xs">';
+      ag.items.forEach(function(a) {
+        var on = a.permissions.indexOf(perm) >= 0;
+        html += '<label class="flex items-center gap-xs text-body-sm cursor-pointer"><input type="checkbox" class="w-4 h-4 accent-primary"' + (on ? ' checked' : '') + ' onchange="pipeBindAgent(\x27' + escapeAttr(a.id) + '\x27, \x27' + p.id + '\x27, this.checked)"><span class="text-on-surface">' + escapeHtml(a.name) + '</span></label>';
+      });
+      html += '</div>';
+      html += '<div class="text-xs text-on-surface-variant mt-xs">' + (p.direction === 'outgoing' ? 'A bound agent can act through this pipe while it is switched on.' : 'A bound agent can read what this pipe releases, and nothing else of the source.') + '</div>';
+      return html + '</div>';
+    }
+
     function renderOutgoingPipe(p, pp, SRC) {
       var tests = pp.tests && pp.tests.id === p.id ? pp.tests : null;
       var html = '<div class="bg-white border border-outline-variant rounded-xl shadow-sm p-md space-y-md">';
@@ -210,10 +229,12 @@
         html += '</div>';
       }
 
+      html += renderPipeAgents(p, pp);
+
       html += '<div><div class="font-label-caps text-label-caps text-on-surface-variant mb-xs">API for agents</div>';
       html += '<div class="flex items-center gap-sm"><code class="flex-grow min-w-0 bg-surface-container rounded-lg p-2 font-mono text-xs break-all select-all">POST ' + escapeHtml(p.url) + '</code>';
       html += '<button onclick="copyPipeUrl()" class="border border-outline hover:bg-surface-container-high text-on-surface-variant text-xs px-3 py-1.5 rounded-lg shrink-0">' + (pp.copied ? 'Copied' : 'Copy') + '</button></div>';
-      html += '<div class="text-xs text-on-surface-variant mt-xs">Body: <code class="font-mono">{ "action": { "type": ..., "data": {...} }, "purpose": ... }</code>. Allow an agent to act through it in Settings → Agents.</div></div>';
+      html += '<div class="text-xs text-on-surface-variant mt-xs">Body: <code class="font-mono">{ "action": { "type": ..., "data": {...} }, "purpose": ... }</code>.</div></div>';
 
       if (pp.showProgram) {
         html += '<div><div class="font-label-caps text-label-caps text-on-surface-variant mb-xs">Program</div>';
@@ -332,10 +353,12 @@
           html += '</div>';
           }
 
+          html += renderPipeAgents(p, pp);
+
           html += '<div><div class="font-label-caps text-label-caps text-on-surface-variant mb-xs">API for agents</div>';
           html += '<div class="flex items-center gap-sm"><code id="pipe-url" class="flex-grow min-w-0 bg-surface-container rounded-lg p-2 font-mono text-xs break-all select-all">GET ' + escapeHtml(p.url) + '</code>';
           html += '<button onclick="copyPipeUrl()" class="border border-outline hover:bg-surface-container-high text-on-surface-variant text-xs px-3 py-1.5 rounded-lg shrink-0">' + (pp.copied ? 'Copied' : 'Copy') + '</button></div>';
-          html += '<div class="text-xs text-on-surface-variant mt-xs">Allow an agent to call it in Settings → Agents.</div></div>';
+          html += '</div>';
 
           if (pp.showProgram) {
             html += '<div><div class="font-label-caps text-label-caps text-on-surface-variant mb-xs">Program</div>';

@@ -68,8 +68,8 @@ export function AgentsForm({ state }: { state: AppState }) {
 
   const openAdd = () => {
     // Start with everything ticked for the sources that are connected.
-    const connected = sources.filter((s) => s === 'photo' || state.sources.some((x) => x.name === s && x.connected));
-    setTicked(connected.map((s) => `pull:${s}`));
+    // A new agent starts with no access; pipes are bound to it afterwards.
+    setTicked([]);
     setError(null);
     setJustJoined(null);
     setPanel({ kind: 'add' });

@@ -217,6 +217,16 @@ describe('agent registration', () => {
       expect((await denied.json() as { error: { code: string; permission: string } }).error).toMatchObject({ code: 'FORBIDDEN', permission: 'pull:gmail' });
     });
 
+    it('an agent registered with no permissions can read nothing until a pipe is bound to it', async () => {
+      const { token, id } = await register('fresh', []);
+      expect((await pull(token, 'gmail')).status).toBe(403);
+      const me = await (await app.request('/agent/me', { headers: as(token) })).json() as { permissions: string[] };
+      expect(me.permissions).toEqual([]);
+      const res = await app.request(`/web/agents/${id}`, { method: 'PUT', headers: owner, body: JSON.stringify({ permissions: ['pipe:abcdefg2'] }) });
+      expect(res.status).toBe(200);
+      expect((await pull(token, 'gmail')).status).toBe(403);
+    });
+
     it('proposals are gone: the route is 404 and propose permissions are refused', async () => {
       const { token } = await register('reader', ['pull:gmail']);
       expect((await app.request('/agent/propose', { method: 'POST', headers: as(token), body: JSON.stringify({ source: 'gmail', action_type: 'draft_email', action_data: {}, purpose: 'x' }) })).status).toBe(404);

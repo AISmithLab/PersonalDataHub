@@ -495,19 +495,30 @@ var currentTab = 'ai';
     }
     window.agentClosePanel = agentClosePanel;
 
+    // Registering an agent grants nothing: the link is made with no permissions, and
+    // the owner binds pipes to the agent afterwards (on the Pipes page, or with Edit here).
     function agentAddOpen() {
-      // Start with everything ticked for the sources that are connected.
-      var connected = state.agents.sources.filter(function(s) {
-        return (state.sources || []).some(function(x) { return x.name === s && x.connected; });
-      });
       state.agents.ticked = [];
-      connected.forEach(function(s) { state.agents.ticked.push('pull:' + s); });
       state.agents.error = null;
       state.agents.joined = null;
-      state.agents.panel = { kind: 'add' };
-      render();
+      agentCreateLink();
     }
     window.agentAddOpen = agentAddOpen;
+
+    // Binds a pipe to an agent, or unbinds it, from the pipe's panel.
+    function pipeBindAgent(agentId, pipeId, bound) {
+      var a = (state.agents.items || []).filter(function(x) { return x.id === agentId; })[0];
+      if (!a) return;
+      var perm = 'pipe:' + pipeId;
+      var next = a.permissions.filter(function(p) { return p !== perm; });
+      if (bound) next.push(perm);
+      agentRequest('/web/agents/' + encodeURIComponent(agentId), 'PUT', { permissions: next }).then(function(d) {
+        if (d.ok) { a.permissions = (d.agent && d.agent.permissions) || next; state.pipes.bindError = null; }
+        else state.pipes.bindError = d.error || 'Could not change the agent.';
+        render();
+      });
+    }
+    window.pipeBindAgent = pipeBindAgent;
 
     function agentEditOpen(id) {
       var a = (state.agents.items || []).filter(function(x) { return x.id === id; })[0];

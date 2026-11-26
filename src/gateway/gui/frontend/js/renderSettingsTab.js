@@ -149,13 +149,18 @@ function renderSettingsTab() {
           };
           var incoming = pipeList.filter(function(p) { return p.direction !== 'outgoing'; });
           var outgoing = pipeList.filter(function(p) { return p.direction === 'outgoing'; });
-          var g = '<div class="font-semibold text-on-surface-variant text-xs mb-xs">Can read</div>';
-          ag.sources.forEach(function(src) { g += tick('pull:' + src, 'All of ' + escapeHtml(SRC[src] || src)); });
-          incoming.forEach(function(p) { g += tick('pipe:' + p.id, escapeHtml(p.name) + ' <span class="text-xs text-on-surface-variant">(incoming pipe)</span>'); });
-          g += '<div class="pt-sm mt-sm border-t border-outline-variant/60"><div class="font-semibold text-on-surface-variant text-xs mb-xs">Can act through</div>';
-          if (!outgoing.length) g += '<div class="text-xs text-on-surface-variant">No outgoing pipes yet. Create one on the Pipes page to let an agent send or create anything.</div>';
-          outgoing.forEach(function(p) { g += tick('pipe:' + p.id, escapeHtml(p.name) + ' <span class="text-xs text-on-surface-variant">(outgoing pipe' + (p.enabled ? '' : ', off') + ')</span>'); });
-          return g + '</div>';
+          var g = '<div class="font-semibold text-on-surface-variant text-xs mb-xs">Incoming pipes: what it can read</div>';
+          if (!incoming.length) g += '<div class="text-xs text-on-surface-variant">None yet. Create one on the Pipes page.</div>';
+          incoming.forEach(function(p) { g += tick('pipe:' + p.id, escapeHtml(p.name)); });
+          g += '<div class="pt-sm mt-sm border-t border-outline-variant/60"><div class="font-semibold text-on-surface-variant text-xs mb-xs">Outgoing pipes: what it can do</div>';
+          if (!outgoing.length) g += '<div class="text-xs text-on-surface-variant">None yet. Create one on the Pipes page.</div>';
+          outgoing.forEach(function(p) { g += tick('pipe:' + p.id, escapeHtml(p.name) + (p.enabled ? '' : ' <span class="text-xs text-on-surface-variant">(off)</span>')); });
+          g += '</div>';
+          // Whole-source access bypasses pipes. Shown folded and never ticked by default.
+          var anyPull = ag.sources.some(function(src) { return ag.ticked.indexOf('pull:' + src) >= 0; });
+          g += '<details class="pt-sm mt-sm border-t border-outline-variant/60"' + (anyPull ? ' open' : '') + '><summary class="text-xs text-on-surface-variant cursor-pointer">Whole-source access (bypasses pipes)</summary><div class="pt-xs">';
+          ag.sources.forEach(function(src) { g += tick('pull:' + src, 'Everything in ' + escapeHtml(SRC[src] || src)); });
+          return g + '</div></details>';
         };
         var summary = function(perms) {
           var parts = [];
@@ -169,7 +174,7 @@ function renderSettingsTab() {
             var p = pipeList.filter(function(x) { return x.id === perm.slice(5); })[0];
             parts.push((p && p.direction === 'outgoing' ? 'acts through: ' : 'pipe: ') + (p ? p.name : perm.slice(5) + ' (deleted)'));
           });
-          return parts.length ? parts.join(' · ') : 'No permissions';
+          return parts.length ? parts.join(' · ') : 'No pipes bound: sees and does nothing';
         };
         var btn = 'font-label-caps text-label-caps px-4 py-2 rounded-lg transition-all active:scale-95';
         var primary = btn + ' bg-primary hover:bg-primary-hover text-on-primary shadow-sm';
@@ -178,7 +183,7 @@ function renderSettingsTab() {
         html += '<div class="space-y-lg">';
         html += '  <div class="border-b border-outline-variant pb-xs">';
         html += '    <h2 class="font-headline-lg text-headline-lg text-on-surface">Agents</h2>';
-        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Agents read your data and act through this hub. Each one registers with a join link and can be revoked on its own. An agent sends or creates nothing except through an outgoing pipe you ticked for it.';
+        html += '    <p class="font-body-sm text-body-sm text-on-surface-variant mt-xs">Agents reach your data only through the pipes you bind to them. Register an agent with a join link (it starts with no access), then bind incoming pipes for what it may read and outgoing pipes for what it may do. Each agent can be revoked on its own.';
         html += '  </div>';
 
         if (ag.error) html += '<div class="bg-error/10 border border-error/30 rounded-lg p-3 text-error text-body-sm">' + escapeHtml(ag.error) + '</div>';
@@ -191,9 +196,10 @@ function renderSettingsTab() {
         var panel = ag.panel;
         if (!panel) {
           html += '<button onclick="agentAddOpen()" class="' + primary + '">Add agent</button>';
+          html += '<div class="text-xs text-on-surface-variant mt-xs">A new agent can see and do nothing. After it joins, bind pipes to it here (Edit) or on the Pipes page.</div>';
         } else if (panel.kind === 'add' || panel.kind === 'edit') {
           html += '<div class="bg-white border border-primary/40 rounded-xl shadow-sm p-md space-y-md max-w-xl">';
-          html += '<div class="font-body-md text-body-md font-semibold text-on-surface">' + (panel.kind === 'add' ? 'What may this agent do?' : 'What may ' + escapeHtml(panel.name) + ' do?') + '</div>';
+          html += '<div class="font-body-md text-body-md font-semibold text-on-surface">Pipes bound to ' + escapeHtml(panel.name || 'this agent') + '</div>';
           html += grid();
           html += '<div class="flex gap-sm">';
           html += panel.kind === 'add'
@@ -208,7 +214,7 @@ function renderSettingsTab() {
           html += '<button onclick="agentCopyLink()" class="' + ghost + '">' + (panel.copied ? 'Copied' : 'Copy link') + '</button>';
           html += '<div class="text-body-sm text-on-surface-variant">On the machine where the agent runs:</div>';
           html += '<div class="bg-surface-container rounded-lg p-3 font-mono text-xs break-all select-all">smithagent joinhub &lt;agent&gt; ' + escapeHtml(panel.url) + '</div>';
-          html += '<div class="text-body-sm text-on-surface-variant">Waiting for the agent to join…</div>';
+          html += '<div class="text-body-sm text-on-surface-variant">Waiting for the agent to join… It joins with no access; bind pipes to it afterwards.</div>';
           html += '<button onclick="agentClosePanel()" class="' + ghost + '">Close</button></div>';
         }
 
