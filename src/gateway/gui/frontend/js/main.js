@@ -21,7 +21,6 @@ var currentTab = 'ai';
       github: { repoList: [], reposLoading: false, reposLoaded: false, filterOwner: '', search: '' },
       expandedRepos: {},
       expandedEmail: null,
-      editingAction: null,
       realEmails: null,
       emailsLoading: false,
       emailsError: null,
@@ -630,29 +629,7 @@ var currentTab = 'ai';
         case 'memory': content.innerHTML = renderMemoryTab(); loadMemories(); break;
         case 'settings': content.innerHTML = renderSettingsTab(); loadMemories(); break;
       }
-      // Update sidebar badges and status dots
-      var gmailPendingCount = state.staging.filter(function(a) { return a.source === 'gmail' && a.status === 'pending'; }).length;
-      var gmailBadge = document.getElementById('gmail-badge');
-      if (gmailBadge) {
-        if (gmailPendingCount) { gmailBadge.textContent = gmailPendingCount; gmailBadge.style.display = ''; }
-        else { gmailBadge.style.display = 'none'; }
-      }
-      var bnGmailBadge = document.getElementById('bn-gmail-badge');
-      if (bnGmailBadge) {
-        if (gmailPendingCount) { bnGmailBadge.textContent = gmailPendingCount; bnGmailBadge.style.display = ''; }
-        else { bnGmailBadge.style.display = 'none'; }
-      }
-      var calPendingCount = state.staging.filter(function(a) { return a.source === 'google_calendar' && a.status === 'pending'; }).length;
-      var calBadge = document.getElementById('calendar-badge');
-      if (calBadge) {
-        if (calPendingCount) { calBadge.textContent = calPendingCount; calBadge.style.display = ''; }
-        else { calBadge.style.display = 'none'; }
-      }
-      var bnCalBadge = document.getElementById('bn-cal-badge');
-      if (bnCalBadge) {
-        if (calPendingCount) { bnCalBadge.textContent = calPendingCount; bnCalBadge.style.display = ''; }
-        else { bnCalBadge.style.display = 'none'; }
-      }
+      // Update sidebar status dots
       // Gmail status dot
       var gmailSource = state.sources.find(function(s) { return s.name === 'gmail'; });
       var gmailDot = document.getElementById('gmail-dot');
@@ -1865,11 +1842,6 @@ async function deleteSkill(id) {
       render();
     }
 
-    function toggleEditAction(actionId) {
-      state.editingAction = state.editingAction === actionId ? null : actionId;
-      render();
-    }
-
     // --- Quick filter functions ---
     /* INJECT_renderFilterCards */
 
@@ -1934,23 +1906,6 @@ async function deleteSkill(id) {
         var filtersData = await fetch('/web/filters').then(function(r) { return r.json(); });
         state.filters = filtersData.filters || [];
       }
-    }
-
-    async function sendAction(actionId) {
-      var editTo = document.getElementById('edit-to-' + actionId);
-      if (editTo) {
-        await fetch('/web/staging/' + actionId + '/edit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action_data: {
-            to: document.getElementById('edit-to-' + actionId).value,
-            subject: document.getElementById('edit-subj-' + actionId).value,
-            body: document.getElementById('edit-body-' + actionId).value,
-            send: true
-          }})
-        });
-      }
-      await resolveAction(actionId, 'approve');
     }
 
     // --- Toggle repo expand/collapse ---
@@ -2421,14 +2376,12 @@ async function deleteSkill(id) {
       render(); // Show loading state immediately
       fetchData();
     };
-    window.toggleEditAction = toggleEditAction;
     window.toggleFilter = toggleFilter;
     window.updateFilterValue = updateFilterValue;
     window.renderFilterCards = renderFilterCards;
     window.toggleCalendarFilter = toggleCalendarFilter;
     window.updateCalendarFilterValue = updateCalendarFilterValue;
     window.renderCalendarFilterCards = renderCalendarFilterCards;
-    window.sendAction = sendAction;
 
     // Shared OAuth-completion handler. Reached two ways:
     //  1. Desktop/browser deployments: server redirects the same page to

@@ -42,9 +42,6 @@
       #bottom-nav {
         padding-bottom: env(safe-area-inset-bottom, 0px);
       }
-      .gmail-grid {
-        grid-template-columns: 1fr;
-      }
       .email-list {
         max-height: 360px;
       }
@@ -171,11 +168,7 @@
     .email-card-actions { display: flex; gap: 8px; padding: 0 18px 14px; justify-content: flex-end; }
     .resolved-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; font-size: 14px; border-bottom: 1px solid var(--border); }
     .source-page { padding: 24px 32px 96px; }
-    /* minmax(0, 1fr): a long subject line must not widen the left column and push the right one off the page. */
-    .gmail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 24px; }
-    .gmail-grid-left, .gmail-grid-right { min-width: 0; }
-    /* One column when there is no room for two (this rule has to come after the one above to win). */
-    @media (max-width: 1100px) { .gmail-grid { grid-template-columns: minmax(0, 1fr); } .source-page { padding: 16px 16px 96px; } }
+    @media (max-width: 1100px) { .source-page { padding: 16px 16px 96px; } }
     .summary-bar { display: flex; align-items: center; gap: 20px; padding: 10px 16px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; }
     .summary-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
     .summary-stat-value { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--fg); }
